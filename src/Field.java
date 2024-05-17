@@ -1,4 +1,4 @@
-abstract class Field<T extends Field<T>> extends Ring<T> {
-    abstract T divide(T other);
-    abstract T inverse();
+public abstract class Field extends Ring {
+    public abstract Field additiveInverse();
+    public abstract Field multiplicativeInverse();
 }
