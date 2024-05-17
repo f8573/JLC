@@ -6,9 +6,11 @@ public class Integer extends Ring {
     }
 
     @Override
-    public Integer add(Ring ring) {
+    public Ring add(Ring ring) {
         if (ring instanceof Integer) {
             return new Integer(value + ((Integer)ring).value);
+        } else if (ring instanceof Rational) {
+            return ring.add(this);
         }
         throw new UnsupportedOperationException();
     }
@@ -18,10 +20,19 @@ public class Integer extends Ring {
     }
 
     @Override
-    public Integer multiply(Ring ring) {
+    public Ring multiply(Ring ring) {
         if (ring instanceof Integer) {
             return new Integer(value * ((Integer)ring).value);
         }
         throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public String toString() {
+        return "" + value;
+    }
+
+    public Rational toRational() {
+        return new Rational(this);
     }
 }
