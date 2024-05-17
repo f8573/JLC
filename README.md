@@ -3,11 +3,14 @@ Welcome to the Java Linear Calculator! This Java project provides exact numerica
 
 ## Features
 
-- [x] number.Ring and field structure to allow types of number systems (e.g. matrices with noncommutative multiplication)
+- [x] Ring and field structure to allow types of number systems (e.g. matrices with noncommutative multiplication)
 - [ ] Numbers
   - [x] Integers
-  - [x] number.Rational Numbers
-  - [ ] number.Irrational Numbers
+  - [x] Rational Numbers
+  - [ ] Irrational Numbers
+    - [ ] Square root
+      - [ ] Addition
+      - [x] Multiplication
   - [ ] Complex Numbers
 - [ ] Linear Algebra
   - [ ] Vectors
