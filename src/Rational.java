@@ -1,3 +1,5 @@
+import java.util.InvalidPropertiesFormatException;
+
 public class Rational extends Field {
     Integer numerator;
     Integer denominator;
@@ -8,6 +10,9 @@ public class Rational extends Field {
     }
 
     public Rational(Integer numerator, Integer denominator) {
+        if (denominator.value == 0) {
+            throw new RuntimeException("a/0 is undefined");
+        }
         this.numerator = numerator;
         this.denominator = denominator;
     }
@@ -26,6 +31,13 @@ public class Rational extends Field {
 
     public Integer toInteger() {
         return denominator.value == 1 ? numerator : null;
+    }
+
+    public Ring power(Ring ring) {
+        if (ring instanceof Integer) {
+            return new Rational((Integer) numerator.power(ring), (Integer) denominator.power(ring));
+        }
+        throw new UnsupportedOperationException();
     }
 
     @Override
