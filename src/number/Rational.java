@@ -1,4 +1,4 @@
-import java.util.InvalidPropertiesFormatException;
+package number;
 
 public class Rational extends Field {
     Integer numerator;
