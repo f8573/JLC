@@ -1,3 +1,5 @@
+package number;
+
 public class Integer extends Ring {
     int value;
 

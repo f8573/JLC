@@ -1,3 +1,5 @@
+package number;
+
 public class Main {
     public static void main(String[] args) {
         Integer integer = new Integer(2);
