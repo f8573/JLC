@@ -1,28 +1,27 @@
-class Integer extends Rational {
-    int value;
+public class Integer extends Ring {
+    private int value;
 
-    Integer(int value) {
-        super(value, 1);
-        this.value = value;
+    public Integer(int val) {
+        value = val;
     }
 
     @Override
-    Integer add(Rational other) {
-        return new Integer(value + other.numerator);
+    public Integer add(Ring ring) {
+        if (ring instanceof Integer) {
+            return new Integer(value + ((Integer)ring).value);
+        }
+        throw new UnsupportedOperationException();
     }
 
-    @Override
-    Integer multiply(Rational other) {
-        return new Integer(value * other.numerator);
-    }
-
-    @Override
-    Integer negate() {
+    public Integer additiveInverse() {
         return new Integer(-value);
     }
 
     @Override
-    public String toString() {
-        return "" + value;
+    public Integer multiply(Ring ring) {
+        if (ring instanceof Integer) {
+            return new Integer(value * ((Integer)ring).value);
+        }
+        throw new UnsupportedOperationException();
     }
 }
