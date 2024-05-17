@@ -1,5 +1,5 @@
 public class Integer extends Ring {
-    private int value;
+    int value;
 
     public Integer(int val) {
         value = val;

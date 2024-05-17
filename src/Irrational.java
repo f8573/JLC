@@ -3,6 +3,10 @@ import java.util.List;
 public class Irrational extends Field {
     List<Irrational> terms;
 
+    public Irrational() {
+
+    }
+
 
     @Override
     public Field additiveInverse() {
