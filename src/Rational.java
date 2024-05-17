@@ -20,6 +20,14 @@ public class Rational extends Field {
         this(new Integer(numerator),new Integer(denominator));
     }
 
+    public boolean isInteger() {
+        return denominator.value == 1;
+    }
+
+    public Integer toInteger() {
+        return denominator.value == 1 ? numerator : null;
+    }
+
     @Override
     public Field additiveInverse() {
         return new Rational(numerator, denominator);
@@ -57,5 +65,10 @@ public class Rational extends Field {
             return new Rational(((Rational) ring).numerator.value * numerator.value, ((Rational) ring).denominator.value * denominator.value);
         }
         throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public String toString() {
+        return numerator.toString() + "/" + denominator.toString();
     }
 }
