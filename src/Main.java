@@ -3,6 +3,7 @@ public class Main {
         Integer integer = new Integer(2);
         Rational rational = new Rational(2,3);
         Ring sum = rational.add(integer);
-        System.out.println(sum);
+        System.out.println(integer.power(integer));
+        System.out.println(rational.power(integer));
     }
 }

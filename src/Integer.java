@@ -19,6 +19,17 @@ public class Integer extends Ring {
         return new Integer(-value);
     }
 
+    public Ring power(Ring exponent) {
+        if (exponent instanceof Integer) {
+            Integer result = new Integer(1);
+            for (int i = 0; i < ((Integer) exponent).value; i++) {
+                result = (Integer) result.multiply(this);
+            }
+            return result;
+        }
+        throw new UnsupportedOperationException();
+    }
+
     @Override
     public Ring multiply(Ring ring) {
         if (ring instanceof Integer) {
