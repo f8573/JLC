@@ -72,11 +72,17 @@ public class Rational extends Field {
     @Override
     public Ring multiply(Ring ring) {
         if (ring instanceof Integer) {
-            return new Rational(((Integer) ring).value);
+            return new Rational(((Integer) ring).value * numerator.value, denominator.value);
         } else if (ring instanceof Rational) {
             return new Rational(((Rational) ring).numerator.value * numerator.value, ((Rational) ring).denominator.value * denominator.value);
+        } else if (ring instanceof SquareRoot) {
+            return ring.multiply(this);
         }
         throw new UnsupportedOperationException();
+    }
+
+    public double eval() {
+        return numerator.eval()/denominator.eval();
     }
 
     @Override
