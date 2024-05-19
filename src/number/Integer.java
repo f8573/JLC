@@ -45,6 +45,10 @@ public class Integer extends Ring {
         return "" + value;
     }
 
+    public double eval() {
+        return value;
+    }
+
     public Rational toRational() {
         return new Rational(this);
     }
