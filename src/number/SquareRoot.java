@@ -47,6 +47,11 @@ public class SquareRoot extends Field {
     }
 
     @Override
+    public boolean isZero() {
+        return base.isZero();
+    }
+
+    @Override
     public String toString() {
         return "sqrt("+base.toString()+")";
     }

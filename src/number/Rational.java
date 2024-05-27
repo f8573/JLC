@@ -42,7 +42,7 @@ public class Rational extends Field {
 
     @Override
     public Field additiveInverse() {
-        return new Rational(numerator, denominator);
+        return new Rational((Integer) numerator.multiply(new Integer(-1)), denominator);
     }
 
     @Override
@@ -81,12 +81,36 @@ public class Rational extends Field {
         throw new UnsupportedOperationException();
     }
 
+    @Override
+    public boolean isZero() {
+        return numerator.isZero();
+    }
+
+    public int gcf(int a, int b) {
+        while (b != 0) {
+            int temp = b;
+            b = a % b;
+            a = temp;
+        }
+        return a;
+    }
+
     public double eval() {
         return numerator.eval()/denominator.eval();
     }
 
     @Override
     public String toString() {
+        if (numerator.eval() / denominator.eval() == Math.round(numerator.eval() / denominator.eval())) {
+            return "" + (int) (numerator.eval() / denominator.eval());
+        }
+
+        if (gcf(numerator.value,denominator.value) != 0) {
+            int val = gcf(numerator.value,denominator.value);
+            denominator.value /= val;
+            numerator.value /= val;
+        }
+
         return numerator.toString() + "/" + denominator.toString();
     }
 }

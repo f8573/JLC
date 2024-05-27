@@ -7,17 +7,70 @@ import java.util.Arrays;
 
 public class Vector {
     Field[] numbers;
+    int length;
 
     public Vector(Field... numbers) {
         this.numbers = numbers;
+        length = numbers.length;
+    }
+
+    public Vector(Integer... numbers) {
+        Field[] data = new Field[numbers.length];
+        for (int i = 0; i < numbers.length; i++) {
+            data[i] = numbers[i].toRational();
+        }
+        this.numbers = data;
+        length = this.numbers.length;
+    }
+
+    public Vector(int i) {
+        Field[] data = new Field[i];
+        for (int j = 0; j < i; j++) {
+            data[j] = new Integer(0).toRational();
+        }
+        this.length = i;
+        this.numbers = data;
+    }
+
+    public boolean isZero() {
+        for (int i = 0; i < length; i++) {
+            if (!numbers[i].isZero()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public Vector copy() {
-        return new Vector(numbers);
+        Field[] newNumbers = new Field[numbers.length];
+        for (int i = 0; i < numbers.length; i++) {
+            newNumbers[i] = numbers[i]; // Assuming Field is immutable, otherwise use a deep copy method for Field
+        }
+        return new Vector(newNumbers);
     }
+
 
     public Vector add(Vector vector) {
         Vector v = copy();
+        if (vector.length > v.length) {
+            Field[] resized = new Field[vector.length];
+            for (int i = 0; i < resized.length; i++) {
+                resized[i] = new Integer(0).toRational();
+            }
+            for (int i = 0; i < v.length; i++) {
+                resized[i] = v.numbers[i];
+            }
+            v.numbers = resized;
+        } else if (vector.length < v.length) {
+            Field[] resized = new Field[v.length];
+            for (int i = 0; i < resized.length; i++) {
+                resized[i] = new Integer(0).toRational();
+            }
+            for (int i = 0; i < vector.length; i++) {
+                resized[i] = vector.numbers[i];
+            }
+            vector.numbers = resized;
+        }
         for (int i = 0; i < v.numbers.length; i++) {
             v.numbers[i] = (Field) v.numbers[i].add(vector.numbers[i]);
         }
@@ -26,19 +79,38 @@ public class Vector {
 
     public Vector subtract(Vector vector) {
         Vector v = copy();
+        if (vector.length > v.length) {
+            Field[] resized = new Field[vector.length];
+            for (int i = 0; i < resized.length; i++) {
+                resized[i] = new Integer(0).toRational();
+            }
+            for (int i = 0; i < v.length; i++) {
+                resized[i] = v.numbers[i];
+            }
+            v.numbers = resized;
+        } else if (vector.length < v.length) {
+            Field[] resized = new Field[v.length];
+            for (int i = 0; i < resized.length; i++) {
+                resized[i] = new Integer(0).toRational();
+            }
+            for (int i = 0; i < vector.length; i++) {
+                resized[i] = vector.numbers[i];
+            }
+            vector.numbers = resized;
+        }
         for (int i = 0; i < v.numbers.length; i++) {
-            v.numbers[i] = (Field) v.numbers[i].subtract(vector.numbers[i]);
+            v.numbers[i] = v.numbers[i].subtract(vector.numbers[i]);
         }
         return v;
     }
 
-    public Vector dot(Vector vector) {
+    public Field dot(Vector vector) {
         Rational result = new Rational(0,1);
         Vector v = copy();
-        for (int i = 0; i < v.numbers.length; i++) {
+        for (int i = 0; i < Math.min(v.numbers.length, vector.numbers.length); i++) {
             result = (Rational) result.add(v.numbers[i].multiply(vector.numbers[i]));
         }
-        return v;
+        return result;
     }
 
     public SquareRoot length() {
@@ -65,6 +137,10 @@ public class Vector {
             v.numbers[i] = (Field) length.multiplicativeInverse().multiply(v.numbers[i]);
         }
         return v;
+    }
+
+    public void print() {
+        System.out.println(this);
     }
 
     @Override

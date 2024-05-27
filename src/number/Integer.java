@@ -41,6 +41,11 @@ public class Integer extends Ring {
     }
 
     @Override
+    public boolean isZero() {
+        return value == 0;
+    }
+
+    @Override
     public String toString() {
         return "" + value;
     }
