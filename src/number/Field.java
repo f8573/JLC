@@ -9,6 +9,6 @@ public abstract class Field extends Ring {
     }
 
     public Field divide(Field field) {
-        return (Field) add(field.multiplicativeInverse());
+        return (Field) multiply(field.multiplicativeInverse());
     }
 }
