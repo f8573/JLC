@@ -1,11 +1,10 @@
 package linear;
 
-import number.*;
 import number.Integer;
+import number.*;
 
-import java.lang.Integer;
-import java.security.InvalidParameterException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 
 public class Matrix {
     Vector[] set;
