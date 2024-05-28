@@ -139,6 +139,36 @@ public class Vector {
         return v;
     }
 
+    public Vector projection(Set set) {
+        Vector vector = new Vector(set.length);
+        for (int i = 0; i < length; i++) {
+            vector = vector.add(projection(set.set[i]));
+        }
+        return vector;
+    }
+
+    public Vector projection(Vector vector) {
+        //projecting this onto a vector (proj_a (b), b=this, a=vector)
+        Vector a = vector.copy();
+        Vector b = copy();
+        Rational coefficient = (Rational) b.dot(a).divide(a.dot(a));
+        return a.multiply(coefficient);
+    }
+
+    public Vector bestApproximation(Set set) {
+        return projection(set);
+    }
+
+    public SquareRoot distance(Set set) {
+        return copy().subtract(projection(set)).length();
+    }
+
+    public Vector[] orthogonalDecomposition(Set set) {
+        Vector yHat = projection(set);
+        Vector z = copy().subtract(yHat);
+        return new Vector[]{yHat,z};
+    }
+
     public void print() {
         System.out.println(this);
     }
