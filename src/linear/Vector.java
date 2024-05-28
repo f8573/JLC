@@ -8,10 +8,12 @@ import java.util.Arrays;
 public class Vector {
     Field[] numbers;
     int length;
+    Set basis;
 
     public Vector(Field... numbers) {
         this.numbers = numbers;
         length = numbers.length;
+        basis = new Set(Matrix.identity(length).set);
     }
 
     public Vector(Integer... numbers) {
@@ -21,6 +23,7 @@ public class Vector {
         }
         this.numbers = data;
         length = this.numbers.length;
+        basis = new Set(Matrix.identity(length).set);
     }
 
     public Vector(int... numbers) {
@@ -30,6 +33,7 @@ public class Vector {
         }
         this.numbers = data;
         length = this.numbers.length;
+        basis = new Set(Matrix.identity(length).set);
     }
 
     public Vector(int i) {
@@ -39,6 +43,7 @@ public class Vector {
         }
         this.length = i;
         this.numbers = data;
+        basis = new Set(Matrix.identity(length).set);
     }
 
     public boolean isZero() {
@@ -199,9 +204,10 @@ public class Vector {
         return newVec;
     }
 
-    //TODO: implement
-    public Vector changeBasis(Set b, Set c) {
-        return null;
+    public Vector changeBasis(Set newBasis) {
+        //assume newBasis is square
+        Matrix P = new Matrix(newBasis.set).inverse();
+        return P.multiply(new Matrix(copy())).set[0];
     }
 
     @Override
