@@ -1,7 +1,7 @@
 package number;
 
 public class Integer extends Ring {
-    int value;
+    public int value;
 
     public Integer(int val) {
         value = val;

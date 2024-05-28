@@ -27,17 +27,13 @@ public class Rational extends Field {
         this(new Integer(numerator), new Integer(denominator));
     }
 
-    private void reduce() {
+    public void reduce() {
         int gcd = gcf(numerator.value, denominator.value);
-        if (numerator.value > 0 && denominator.value > 0) {
-            numerator = new Integer(numerator.value / gcd);
-            denominator = new Integer(denominator.value / gcd);
-        } else if (numerator.value > 0 && denominator.value < 0) {
-            numerator = new Integer(-numerator.value / gcd);
-            denominator = new Integer(-denominator.value / gcd);
-        } else if (numerator.value < 0 && denominator.value < 0) {
-            numerator = new Integer(-numerator.value / gcd);
-            denominator = new Integer(-denominator.value / gcd);
+        numerator = new Integer(numerator.value / gcd);
+        denominator = new Integer(denominator.value / gcd);
+        if (denominator.value < 0) {
+            numerator.value *= -1;
+            denominator.value *= -1;
         }
     }
 

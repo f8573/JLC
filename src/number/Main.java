@@ -37,5 +37,12 @@ public class Main {
         //System.out.println(set.set[0].dot(set.set[0]));
         set.orthogonalize().print();
         set.orthonormalize().print();
+        matrix1.solve(new Vector(5,6,7))[0].print();
+        matrix.solve(new Vector(5,6,7))[0].print();
+        Matrix leastSquares = new Matrix(new Vector(0,1,2),new Vector(1,1,1));
+        Vector b = new Vector(6,0,0);
+        leastSquares.leastSquaresSolution(b).print();
+        matrix.nullSpaceBasis().print();
+        matrix.columnSpaceBasis().print();
     }
 }

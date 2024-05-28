@@ -6,10 +6,7 @@ import number.Integer;
 import number.Rational;
 
 import java.security.InvalidParameterException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
+import java.util.*;
 
 public class Matrix {
     Vector[] set;
@@ -25,12 +22,128 @@ public class Matrix {
     public Matrix(int i, int j) {
         //i rows j columns
         Vector[] data = new Vector[j];
-        for (int k = 0; k < i; k++) {
+        for (int k = 0; k < j; k++) {
             data[k] = new Vector(i);
         }
         set = data;
         rows = i;
         columns = j;
+    }
+
+    public Set nullSpaceBasis() {
+        Matrix ns = solve(new Vector(rows))[2];
+        if (ns.columns == 1 && ns.set[0].isZero()) {
+            return new Set(ns.set);
+        }
+        for (int i = ns.columns-1; i >= 0; i--) {
+            if (ns.getColumn(i).isZero()) {
+                ns = ns.removeColumn(i);
+            }
+        }
+        return new Set(ns.set);
+    }
+
+    public Set columnSpaceBasis() {
+        Matrix cs = solve(new Vector(rows))[1];
+        for (int i = cs.columns-1; i >= 0; i--) {
+            if (cs.getColumn(i).isZero()) {
+                cs = cs.removeColumn(i);
+            }
+        }
+        return new Set(cs.set);
+    }
+
+    //TODO: implement
+    public Matrix[] diagonalize() {
+        return null;
+    }
+
+    public Matrix[] solve(Vector b) {
+        //also gives the basis for the column space and null space
+        Matrix matrix = copy();
+        ArrayList<Vector> newset = new ArrayList<>(List.of(matrix.set));
+        newset.add(b);
+        Matrix augment = new Matrix(newset.toArray(new Vector[0]));
+        if (matrix.triangularDeterminant().isZero()) {
+            //for each zero row in the reduced matrix, there should be a zero row in the augmented matrix
+            //if not, no solution
+            int matrixZeros = 0;
+            int augmentZeros = 0;
+            for (int i = 0; i < matrix.rows; i++) {
+                if (matrix.getRow(i).isZero()) {
+                    matrixZeros++;
+                }
+                if (augment.getRow(i).isZero()) {
+                    augmentZeros++;
+                }
+            }
+            if (matrixZeros != augmentZeros) {
+                System.out.println("No solution");
+                //throw new UnsupportedOperationException("Unsolvable matrix");
+                return null;
+            } else {
+                //System.out.println("onto");
+                //identify columns with leading 1s
+                Matrix reduced = augment.rref();
+                ArrayList<java.lang.Integer> pivotColumns = new ArrayList<>();
+                for (int i = 0; i < reduced.rows; i++) {
+                    for (int j = 0; j < reduced.columns; j++) {
+                        if (reduced.getValue(i,j).toInteger().value == 1) {
+                            pivotColumns.add(j);
+                            break;
+                        }
+                    }
+                }
+                //now, create an empty matrix with non pivot columns
+                Matrix solution = new Matrix(augment.rows,augment.columns);
+                for (int i = 0; i < augment.columns; i++) {
+                    if (!pivotColumns.contains(i)) {
+                        solution = solution.setColumn(i,reduced.getColumn(i));
+                    }
+                }
+                for (int i = 0; i < solution.columns; i++) {
+                    solution.set[i] = solution.set[i].resize(matrix.rows);
+                }
+                //dont include the augmented column
+                for (int i = 0; i < solution.columns-1; i++) {
+                    for (int j = 0; j < solution.rows; j++) {
+                        solution = solution.setValue(j,i, (Rational) solution.getValue(j,i).multiply(new Integer(-1)));
+                    }
+                }
+                for (int i = 0; i < solution.set.length-1; i++) {
+                    if (!solution.getColumn(i).isZero()) {
+                        solution = solution.setValue(i,i,new Rational(1));
+                    }
+                }
+                Matrix columnSpaceBasis = new Matrix(matrix.rows,pivotColumns.size());
+                Matrix nullSpaceBasis = solution.removeColumn(solution.columns-1);
+                for (int i = 0; i < nullSpaceBasis.columns; i++) {
+                    if (nullSpaceBasis.getColumn(i).isZero()) {
+                        columnSpaceBasis.set[i] = matrix.set[i];
+                    }
+                }
+                return new Matrix[]{solution,columnSpaceBasis,nullSpaceBasis};
+            }
+        } else {
+            //System.out.println("one-to-one");
+            //augment.ref().print();
+            //augment.rref().print();
+            Matrix columnSpaceBasis = matrix;
+            Matrix nullSpaceBasis = new Matrix(new Vector(matrix.rows));
+            return new Matrix[]{new Matrix(augment.rref().set[augment.columns-1]),columnSpaceBasis,nullSpaceBasis};
+        }
+    }
+
+    public Vector leastSquaresSolution(Vector vector) {
+        Matrix left = copy().transpose().multiply(copy());
+        Matrix right = copy().transpose().multiply(new Matrix(vector));
+        Vector b = right.set[0];
+        return left.solve(b)[0].set[0];
+    }
+
+    public Matrix leastSquaresError(Vector vector) {
+        Vector xHat = copy().leastSquaresSolution(vector);
+        return null;
     }
 
     public Matrix copy() {
@@ -180,6 +293,9 @@ public class Matrix {
         int px = 0;
         int py = 0;
         for (int i = 0; i < matrix.columns; i++) {
+            if (py >= rows || px >= columns) {
+                return new Matrix[]{matrix,inverted};
+            }
             if (matrix.zeroRow(py)) {
                 break;
             } else {
