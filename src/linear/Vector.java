@@ -23,6 +23,15 @@ public class Vector {
         length = this.numbers.length;
     }
 
+    public Vector(int... numbers) {
+        Field[] data = new Field[numbers.length];
+        for (int i = 0; i < numbers.length; i++) {
+            data[i] = new Integer(numbers[i]).toRational();
+        }
+        this.numbers = data;
+        length = this.numbers.length;
+    }
+
     public Vector(int i) {
         Field[] data = new Field[i];
         for (int j = 0; j < i; j++) {
@@ -169,8 +178,30 @@ public class Vector {
         return new Vector[]{yHat,z};
     }
 
+    public void reduce() {
+        for(Field field : numbers) {
+            if (field instanceof Rational) {
+                ((Rational) field).reduce();
+            }
+        }
+    }
+
     public void print() {
         System.out.println(this);
+    }
+
+    public Vector resize(int newSize) {
+        Vector newVec = new Vector(newSize);
+        Vector vector = copy();
+        for (int i = 0; i < vector.length; i++) {
+            newVec.numbers[i] = vector.numbers[i];
+        }
+        return newVec;
+    }
+
+    //TODO: implement
+    public Vector changeBasis(Set b, Set c) {
+        return null;
     }
 
     @Override
