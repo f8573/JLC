@@ -55,7 +55,7 @@ public class Matrix {
     public Matrix[] diagonalize() {
         return null;
     }
-
+    //returns the basis for the null space column space. Returns vector x if cosistent otherwise representation of the answer in matrix format.
     public Matrix[] solve(Vector b) {
         //also gives the basis for the column space and null space
         Matrix matrix = copy();
@@ -462,5 +462,16 @@ public class Matrix {
             }
             System.out.println();
         }
+    }
+
+    public Rational[] charPoly(){
+        Matrix matrix = this.copy();
+        Rational[] coef = new Rational[matrix.rows];
+        coef[matrix.rows-1] = new Integer(1).toRational();
+        coef[0] = (Rational) new Integer(-1).power(new Integer(matrix.rows));
+        coef[0] = (Rational) coef[0].multiply(matrix.triangularDeterminant());
+
+        return coef;
+
     }
 }
