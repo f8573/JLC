@@ -114,11 +114,69 @@ public class Matrix {
         return matrix.transpose();
     }
 
+    //TODO: actually make this return the right answer
+    public Rational cofactorDeterminant() {
+        requireSquare();
+        Matrix matrix = copy();
+        if (rows == 1) {
+            return matrix.getValue(0,0);
+        } else if (rows == 2) {
+            return (Rational) ((Rational) matrix.getValue(0,0).multiply(matrix.getValue(1,1))).subtract((Field) matrix.getValue(0,1).multiply(matrix.getValue(1,0)));
+        } else {
+            Rational determinant = new Integer(0).toRational();
+            for (int i = 0; i < columns; i++) {
+                Integer sign = (Integer) new Integer(1).power(new Integer(i));
+                Rational coefficient = matrix.getValue(0,i);
+                Rational cofactor = matrix.minor(0,i).cofactorDeterminant();
+                Rational fin = (Rational) coefficient.multiply(sign);
+                fin = (Rational) fin.multiply(cofactor);
+                determinant = (Rational) determinant.add(fin);
+            }
+            return determinant;
+        }
+    }
+
+    public Rational triangularDeterminant() {
+        requireSquare();
+        Matrix matrix = copy().ref();
+        Rational one = Constants.ONE;
+        for (int i = 0; i < matrix.columns; i++) {
+            one = (Rational) one.multiply(matrix.getValue(i,i));
+        }
+        return one;
+    }
+
+    public Vector cramer(Vector vector) {
+        Vector result = new Vector(vector.length);
+        Matrix matrix = copy();
+        for (int i = 0; i < vector.length; i++) {
+            Matrix replaced = copy();
+            replaced.set[i] = vector;
+            result.numbers[i] = replaced.triangularDeterminant().divide(matrix.triangularDeterminant());
+        }
+        return result;
+    }
+
+    public Matrix minor(int i, int j) {
+        return copy().removeRow(i).removeColumn(j);
+    }
+
+    public Matrix removeColumn(int i) {
+        Matrix matrix = copy();
+        ArrayList<Vector> vectors = new ArrayList<>(List.of(matrix.set));
+        vectors.remove(i);
+        return new Matrix(vectors.toArray(new Vector[0]));
+    }
+
+    public Matrix removeRow(int i) {
+        return copy().transpose().removeColumn(i).transpose();
+    }
+
     public Matrix[] reduced() {
         Matrix[] matrices = copy().LU();
         Matrix matrix = matrices[1];
         Matrix inverted = matrices[2];
-        inverted.print();
+        //inverted.print();
         int px = 0;
         int py = 0;
         for (int i = 0; i < matrix.columns; i++) {
@@ -138,7 +196,7 @@ public class Matrix {
                     }
                     px++;
                     py++;
-                    inverted.print();
+                    //inverted.print();
                     //matrix.print();
                 }
             }

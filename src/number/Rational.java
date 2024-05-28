@@ -7,6 +7,7 @@ public class Rational extends Field {
     public Rational(Integer numerator) {
         this.numerator = numerator;
         this.denominator = new Integer(1);
+        reduce();
     }
 
     public Rational(Integer numerator, Integer denominator) {
@@ -15,6 +16,7 @@ public class Rational extends Field {
         }
         this.numerator = numerator;
         this.denominator = denominator;
+        reduce();
     }
 
     public Rational(int numerator) {
@@ -22,7 +24,21 @@ public class Rational extends Field {
     }
 
     public Rational(int numerator, int denominator) {
-        this(new Integer(numerator),new Integer(denominator));
+        this(new Integer(numerator), new Integer(denominator));
+    }
+
+    private void reduce() {
+        int gcd = gcf(numerator.value, denominator.value);
+        if (numerator.value > 0 && denominator.value > 0) {
+            numerator = new Integer(numerator.value / gcd);
+            denominator = new Integer(denominator.value / gcd);
+        } else if (numerator.value > 0 && denominator.value < 0) {
+            numerator = new Integer(-numerator.value / gcd);
+            denominator = new Integer(-denominator.value / gcd);
+        } else if (numerator.value < 0 && denominator.value < 0) {
+            numerator = new Integer(-numerator.value / gcd);
+            denominator = new Integer(-denominator.value / gcd);
+        }
     }
 
     public boolean isInteger() {
@@ -53,18 +69,18 @@ public class Rational extends Field {
     @Override
     public Ring add(Ring ring) {
         if (ring instanceof Integer) {
-            //a/b+c=(cb+a)/b
+            // a/b + c = (a + bc) / b
             int a = numerator.value;
             int b = denominator.value;
             int c = ((Integer) ring).value;
-            return new Rational(a+b*c,b);
+            return new Rational(a + b * c, b);
         } else if (ring instanceof Rational) {
-            //a/b+c/d=(ad+cb)/bd
+            // a/b + c/d = (ad + bc) / bd
             int a = numerator.value;
             int b = denominator.value;
             int c = ((Rational) ring).numerator.value;
             int d = ((Rational) ring).denominator.value;
-            return new Rational(a*d+b*c,b*d);
+            return new Rational(a * d + b * c, b * d);
         }
         throw new UnsupportedOperationException();
     }
@@ -72,9 +88,9 @@ public class Rational extends Field {
     @Override
     public Ring multiply(Ring ring) {
         if (ring instanceof Integer) {
-            return new Rational(((Integer) ring).value * numerator.value, denominator.value);
+            return new Rational(numerator.value * ((Integer) ring).value, denominator.value);
         } else if (ring instanceof Rational) {
-            return new Rational(((Rational) ring).numerator.value * numerator.value, ((Rational) ring).denominator.value * denominator.value);
+            return new Rational(numerator.value * ((Rational) ring).numerator.value, denominator.value * ((Rational) ring).denominator.value);
         } else if (ring instanceof SquareRoot) {
             return ring.multiply(this);
         }
@@ -96,7 +112,11 @@ public class Rational extends Field {
     }
 
     public double eval() {
-        return numerator.eval()/denominator.eval();
+        return numerator.eval() / denominator.eval();
+    }
+
+    public boolean isPositive() {
+        return numerator.value >= 0;
     }
 
     @Override
@@ -104,13 +124,6 @@ public class Rational extends Field {
         if (numerator.eval() / denominator.eval() == Math.round(numerator.eval() / denominator.eval())) {
             return "" + (int) (numerator.eval() / denominator.eval());
         }
-
-        if (gcf(numerator.value,denominator.value) != 0) {
-            int val = gcf(numerator.value,denominator.value);
-            denominator.value /= val;
-            numerator.value /= val;
-        }
-
         return numerator.toString() + "/" + denominator.toString();
     }
 }
