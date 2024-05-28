@@ -1,10 +1,9 @@
 package linear;
 
-import number.Constants;
-import number.Field;
+import number.*;
 import number.Integer;
-import number.Rational;
 
+import java.lang.Integer;
 import java.security.InvalidParameterException;
 import java.util.*;
 
@@ -141,9 +140,10 @@ public class Matrix {
         return left.solve(b)[0].set[0];
     }
 
-    public Matrix leastSquaresError(Vector vector) {
+    public SquareRoot leastSquaresError(Vector vector) {
         Vector xHat = copy().leastSquaresSolution(vector);
-        return null;
+        Vector b = vector.copy();
+        return b.subtract(xHat).length();
     }
 
     public Matrix copy() {
