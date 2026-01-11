@@ -1,5 +1,6 @@
 package net.faulj.test;
 
+import net.faulj.matrix.Matrix;
 import net.faulj.vector.Vector;
 
 public class Test {
@@ -17,5 +18,17 @@ public class Test {
         v4.add(v2);
         System.out.println(v4);
         System.out.println(v);
+        Matrix m = new Matrix(new Vector[]{new Vector(new double[]{1,2}), new Vector(new double[]{7,8})});
+        Matrix m2 = m.copy();
+        Matrix m3 = m.copy();
+        m.toRowEchelonForm();
+        m2.toReducedRowEchelonForm();
+        System.out.println(m);
+        System.out.println(m2);
+        System.out.println(m3);
+        System.out.println(m3.determinant());
+        System.out.println(m3.isInvertible());
+        System.out.println(m3.copy().inverse());
+        System.out.println(m3.copy().multiply(m3.copy().inverse()));
     }
 }
