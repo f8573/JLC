@@ -28,12 +28,12 @@ public class Vector {
         return data;
     }
 
-    public void set(int index, double value) {
-        data[index] = value;
-    }
-
     public void setData(double[] data) {
         this.data = data;
+    }
+
+    public void set(int index, double value) {
+        data[index] = value;
     }
 
     public void add(Vector vector) {
