@@ -1,15 +1,20 @@
 package net.faulj.matrix;
 
 import net.faulj.vector.Vector;
+import net.faulj.vector.VectorUtils;
+
+import java.util.*;
 
 public class Matrix {
     private Vector[] data;
     private final int columns;
     private int exchanges;
+    private ArrayList<Vector> pivotColumns;
 
     public Matrix(Vector[] data) {
         this.data = data;
         this.columns = data.length;
+        pivotColumns = new ArrayList<>();
     }
 
     public Vector[] getData() {
@@ -149,6 +154,7 @@ public class Matrix {
     public void toReducedRowEchelonForm() {
         int pivotRow = 0;
         int pivotCol = 0;
+        pivotColumns.clear();
 
         // We'll process columns from left to right
         while (pivotCol < getColumnCount() && pivotRow < getRowCount()) {
@@ -174,6 +180,7 @@ public class Matrix {
 
             // Make pivot element 1
             double pivotValue = get(pivotRow, pivotCol);
+            pivotColumns.add(data[pivotCol]);
             if (Math.abs(pivotValue) > 1e-10) {
                 multiplyRow(pivotRow, 1.0 / pivotValue);
             }
@@ -484,4 +491,106 @@ public class Matrix {
         return new Matrix(resultCols);
     }
 
+    //rref nonzero rows
+    public Set<Vector> rowSpaceBasis() {
+        Matrix m = this.copy();
+        m.toReducedRowEchelonForm();
+        m = m.transpose();
+        Set<Vector> vectors = new HashSet<>();
+        for(Vector v : m.getData()) {
+            if (!v.isZero()) {
+                vectors.add(v);
+            }
+        }
+        return vectors;
+    }
+
+    //columns with pivots
+    public Set<Vector> columnSpaceBasis() {
+        Matrix m = this.copy();
+        m.toReducedRowEchelonForm();
+
+        return new HashSet<>(pivotColumns);
+    }
+
+    public Set<Vector> nullSpaceBasis() {
+        Set<Vector> set = new HashSet<>();
+
+        Matrix m = this.copy();
+        m.toReducedRowEchelonForm();
+
+        System.out.println(m);
+
+        //reorder so the pivots are grouped together and so are the es
+        //need two arraylists for permutations
+
+        ArrayList<Integer> e = new ArrayList<>();
+        ArrayList<Integer> free = new ArrayList<>();
+
+        Matrix I = Matrix.Identity(m.getData()[0].dimension());
+        Vector[] mData = m.getData();
+        Vector[] iData = I.getData();
+
+        for (int i = 0; i < m.columns; i++) {
+            if (mData[i].isUnitVector()) {
+                e.add(i);
+            } else {
+                free.add(i);
+            }
+        }
+
+        //block identification
+        //the block will always be to the right of the permuted rows, and be of size
+        //free.size by e.size (cols by rows)
+
+        //permute first, identify block after
+
+        ArrayList<Vector> permuted = new ArrayList<>();
+        ArrayList<Vector> fList = new ArrayList<>();
+
+        for(int i : e) {
+            permuted.add(mData[i]);
+        }
+
+        for(int i : free) {
+            permuted.add(mData[i]);
+            fList.add(mData[i]);
+        }
+
+        System.out.println(permuted);
+
+        //we literally need almost nothing from the previous section, that was just for debugging
+        //crop the block
+        Matrix temp = new Matrix(fList.toArray(new Vector[0]));
+        temp = temp.transpose();
+        //remove the zero columns
+        Vector[] tempData = temp.getData();
+        tempData = Arrays.copyOf(temp.getData(),e.size());
+        //F identified
+        Matrix F = new Matrix(tempData);
+        //negate F
+        Vector[] fData = F.getData();
+        for (Vector v : fData) {
+            v.negate();
+        }
+        F = F.transpose();
+        System.out.println(F);
+        //append a free-sized identity matrix under F (create the basis matrix)
+        Matrix B = F.AppendMatrix(Matrix.Identity(free.size()),"DOWN");
+        System.out.println(B);
+        //Build the permutation list
+        ArrayList<Integer> permutation = new ArrayList<>();
+        permutation.addAll(e);
+        permutation.addAll(free);
+        System.out.println(permutation);
+        //Permute the items properly
+        for(Vector v : B.getData()) {
+            Vector vec = VectorUtils.zero(permutation.size());
+            for(int i = 0; i < permutation.size(); i++) {
+                vec.set(permutation.get(i),v.get(i));
+            }
+            set.add(vec);
+        }
+        return set;
+    }
 }
