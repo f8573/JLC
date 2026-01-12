@@ -74,6 +74,36 @@ public class Vector {
         }
     }
 
+    public boolean isZero() {
+        return this.equals(new Vector(new double[size]));
+    }
+
+    public boolean equals(Vector other) {
+        for(int i = 0; i < size; i++) {
+            if (data[i] != other.getData()[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    public boolean isUnitVector() {
+        double sum = 0;
+        for(double d : data) {
+            if (d != 0 && d != 1) {
+                return false;
+            }
+            sum += d;
+        }
+        return sum == 1;
+    }
+
+    public void negate() {
+        for (int i = 0; i < size; i++) {
+            data[i] *= -1;
+        }
+    }
+
     public String toString() {
         return Arrays.toString(data);
     }
