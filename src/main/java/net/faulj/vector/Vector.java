@@ -1,5 +1,7 @@
 package net.faulj.vector;
 
+import net.faulj.matrix.Matrix;
+
 import java.util.Arrays;
 import java.util.List;
 
@@ -36,18 +38,22 @@ public class Vector {
         data[index] = value;
     }
 
-    public void add(Vector vector) {
-        equalize(vector);
-        for (int i = 0; i < size; i++) {
-            data[i] += vector.get(i);
+    public Vector add(Vector vector) {
+        Vector[] vectors = equalize(vector);
+        double[] data = vectors[0].getData();
+        for (int i = 0; i < vectors[0].size; i++) {
+            data[i] += vectors[1].get(i);
         }
+        return vectors[0];
     }
 
-    public void subtract(Vector vector) {
-        equalize(vector);
-        for (int i = 0; i < size; i++) {
-            data[i] -= vector.get(i);
+    public Vector subtract(Vector vector) {
+        Vector[] vectors = equalize(vector);
+        double[] data = vectors[0].getData();
+        for (int i = 0; i < vectors[0].size; i++) {
+            data[i] -= vectors[1].get(i);
         }
+        return vectors[0];
     }
 
     public double dot(Vector vector) {
@@ -66,12 +72,15 @@ public class Vector {
         return new Vector(Arrays.stream(data).map(d -> d / magnitude()).toArray());
     }
 
-    public void equalize(Vector other) {
-        if (other.dimension() > this.dimension()) {
-            data = Arrays.copyOf(data, other.dimension());
+    public Vector[] equalize(Vector other) {
+        Vector v = this.copy();
+        other = other.copy();
+        if (other.dimension() > v.dimension()) {
+            data = Arrays.copyOf(v.getData(), other.dimension());
         } else {
-            other.setData(Arrays.copyOf(other.getData(), this.dimension()));
+            other.setData(Arrays.copyOf(other.getData(), v.dimension()));
         }
+        return new Vector[]{v, other};
     }
 
     public boolean isZero() {
@@ -106,5 +115,26 @@ public class Vector {
 
     public String toString() {
         return Arrays.toString(data);
+    }
+
+    public Vector multiplyScalar(double scalar) {
+        Vector v = this.copy();
+        double[] vData = v.getData();
+        for (int i = 0; i < v.dimension(); i++) {
+            vData[i] *= scalar;
+        }
+        return v;
+    }
+
+    public Matrix transpose() {
+        return new Matrix(new Vector[]{this}).transpose();
+    }
+
+    public Matrix multiply(Matrix matrix) {
+        if (1 != matrix.getRowCount()) {
+            throw new ArithmeticException("Vector dimension must match matrix row count for multiplication");
+        }
+        Matrix m = new Matrix(new Vector[]{this});
+        return m.multiply(matrix);
     }
 }

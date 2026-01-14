@@ -10,6 +10,14 @@ public class VectorUtils {
         return v;
     }
 
+    public static double sum(Vector v) {
+        double sum = 0;
+        for(double d : v.getData()) {
+            sum += d;
+        }
+        return sum;
+    }
+
     public static Vector zero (int size) {
         return new Vector(new double[size]);
     }
