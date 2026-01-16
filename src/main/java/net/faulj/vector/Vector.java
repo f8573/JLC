@@ -64,12 +64,20 @@ public class Vector {
         return sum;
     }
 
-    public double magnitude() {
-        return Math.sqrt(dot(this));
+    public double norm1() {
+        return VectorNorms.norm1(this);
+    }
+
+    public double norm2() {
+        return VectorNorms.norm2(this);
+    }
+
+    public double normInf() {
+        return VectorNorms.normInf(this);
     }
 
     public Vector normalize() {
-        return new Vector(Arrays.stream(data).map(d -> d / magnitude()).toArray());
+        return VectorNorms.normalize(this);
     }
 
     public Vector[] equalize(Vector other) {
@@ -107,10 +115,21 @@ public class Vector {
         return sum == 1;
     }
 
-    public void negate() {
-        for (int i = 0; i < size; i++) {
-            data[i] *= -1;
+    public Vector negate() {
+        Vector v = this.copy();
+        double[] vData = v.getData();
+        for (int i = 0; i < v.dimension(); i++) {
+            vData[i] *= -1;
         }
+        return v;
+    }
+
+    public Vector resize(int n) {
+        double[] d = new double[n];
+        Vector v = this.copy();
+        double[] vData = v.getData();
+        if (Math.min(v.dimension(), n) >= 0) System.arraycopy(vData, 0, d, 0, Math.min(v.dimension(), n));
+        return new Vector(d);
     }
 
     public String toString() {
@@ -136,5 +155,9 @@ public class Vector {
         }
         Matrix m = new Matrix(new Vector[]{this});
         return m.multiply(matrix);
+    }
+
+    public Matrix toMatrix() {
+        return new Matrix(new Vector[]{this});
     }
 }

@@ -1,0 +1,4 @@
+package net.faulj.condition;
+
+public class ReciprocalCondition {
+}

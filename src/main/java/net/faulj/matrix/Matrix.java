@@ -1,9 +1,14 @@
 package net.faulj.matrix;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
 import net.faulj.vector.Vector;
 import net.faulj.vector.VectorUtils;
-
-import java.util.*;
+import net.faulj.spaces.SubspaceBasis;
 
 public class Matrix {
     private Vector[] data;
@@ -40,6 +45,10 @@ public class Matrix {
 
     public int getColumnCount() {
         return columns;
+    }
+
+    public ArrayList<Vector> getPivotColumns() {
+        return pivotColumns;
     }
 
     public void exchangeRows(int row1, int row2) {
@@ -425,6 +434,18 @@ public class Matrix {
         return result;
     }
 
+    public double trace() {
+        if (getRowCount() != getColumnCount()) {
+            throw new ArithmeticException("Row-column count mismatch");
+        }
+        double result = 0;
+        for (int i = 0; i < columns; i++) {
+            result += get(i,i);
+        }
+
+        return result;
+    }
+
     /**
      * Returns the inverse of this matrix.
      * Terminates early using isInvertible(); if not invertible, throws an ArithmeticException.
@@ -473,9 +494,46 @@ public class Matrix {
         if (getRowCount() != getColumnCount()) {
             throw new ArithmeticException("Row-column count mismatch");
         }
+        // Use partial-pivot Gaussian elimination on a copy for numerical stability
         Matrix m = this.copy();
-        m.toRowEchelonForm();
-        return m.diagonalProduct() * Math.pow(-1,m.exchanges);
+        int n = m.getRowCount();
+        int exchanges = 0;
+
+        for (int col = 0; col < n; col++) {
+            // find pivot with maximum absolute value in this column (partial pivoting)
+            int maxRow = col;
+            double maxAbs = Math.abs(m.get(col, col));
+            for (int r = col + 1; r < n; r++) {
+                double a = Math.abs(m.get(r, col));
+                if (a > maxAbs) {
+                    maxAbs = a;
+                    maxRow = r;
+                }
+            }
+
+            if (maxAbs <= tol) {
+                return 0.0; // singular (within tolerance)
+            }
+
+            if (maxRow != col) {
+                m.exchangeRows(col, maxRow);
+                exchanges++;
+            }
+
+            // eliminate below
+            double pivot = m.get(col, col);
+            for (int r = col + 1; r < n; r++) {
+                double factor = m.get(r, col) / pivot;
+                for (int c = col; c < n; c++) {
+                    m.set(r, c, m.get(r, c) - factor * m.get(col, c));
+                }
+            }
+        }
+
+        double det = 1.0;
+        for (int i = 0; i < n; i++) det *= m.get(i, i);
+        if ((exchanges & 1) == 1) det = -det;
+        return det;
     }
 
     public boolean isInvertible() {
@@ -522,198 +580,31 @@ public class Matrix {
 
     //rref nonzero rows
     public Set<Vector> rowSpaceBasis() {
-        Matrix m = this.copy();
-        m.toReducedRowEchelonForm();
-        m = m.transpose();
-        Set<Vector> vectors = new HashSet<>();
-        for(Vector v : m.getData()) {
-            if (!v.isZero()) {
-                vectors.add(v);
-            }
-        }
-        return vectors;
+        return SubspaceBasis.rowSpaceBasis(this);
     }
 
     //columns with pivots
     public Set<Vector> columnSpaceBasis() {
-        Matrix m = this.copy();
-        m.toReducedRowEchelonForm();
-
-        return new HashSet<>(pivotColumns);
+        return SubspaceBasis.columnSpaceBasis(this);
     }
 
     public Set<Vector> nullSpaceBasis() {
-        Set<Vector> set = new HashSet<>();
-
-        Matrix m = this.copy();
-        m.toReducedRowEchelonForm();
-
-        //reorder so the pivots are grouped together and so are the es
-        //need two arraylists for permutations
-
-        ArrayList<Integer> e = new ArrayList<>();
-        ArrayList<Integer> free = new ArrayList<>();
-
-        Matrix I = Matrix.Identity(m.getData()[0].dimension());
-        Vector[] mData = m.getData();
-        Vector[] iData = I.getData();
-
-        for (int i = 0; i < m.columns; i++) {
-            if (mData[i].isUnitVector()) {
-                e.add(i);
-            } else {
-                free.add(i);
-            }
-        }
-
-        //block identification
-        //the block will always be to the right of the permuted rows, and be of size
-        //free.size by e.size (cols by rows)
-
-        //permute first, identify block after
-
-        ArrayList<Vector> permuted = new ArrayList<>();
-        ArrayList<Vector> fList = new ArrayList<>();
-
-        for(int i : e) {
-            permuted.add(mData[i]);
-        }
-
-        for(int i : free) {
-            permuted.add(mData[i]);
-            fList.add(mData[i]);
-        }
-
-        //we literally need almost nothing from the previous section, that was just for debugging
-        //crop the block
-        Matrix temp = new Matrix(fList.toArray(new Vector[0]));
-        temp = temp.transpose();
-        //remove the zero columns
-        Vector[] tempData = temp.getData();
-        tempData = Arrays.copyOf(temp.getData(),e.size());
-        //F identified
-        Matrix F = new Matrix(tempData);
-        //negate F
-        Vector[] fData = F.getData();
-        for (Vector v : fData) {
-            v.negate();
-        }
-        F = F.transpose();
-        //append a free-sized identity matrix under F (create the basis matrix)
-        Matrix B = F.AppendMatrix(Matrix.Identity(free.size()),"DOWN");
-        //Build the permutation list
-        ArrayList<Integer> permutation = new ArrayList<>();
-        permutation.addAll(e);
-        permutation.addAll(free);
-        //Permute the items properly
-        for(Vector v : B.getData()) {
-            Vector vec = VectorUtils.zero(permutation.size());
-            for(int i = 0; i < permutation.size(); i++) {
-                vec.set(permutation.get(i),v.get(i));
-            }
-            set.add(vec);
-        }
-        return set;
+        return SubspaceBasis.nullSpaceBasis(this);
     }
 
     public Matrix[] QR() {
-        if (!isSquare()) {
-            throw new ArithmeticException("Matrix must be square to compute QR");
-        }
-        int n = getRowCount();
-        Matrix R = this.copy();
-        Matrix Q = Matrix.Identity(n);
-
-        for (int k = 0; k < n - 1; k++) {
-            int len = n - k;
-            double[] x = new double[len];
-            for (int i = 0; i < len; i++) {
-                x[i] = R.get(k + i, k);
-            }
-
-            // compute norm of x
-            double normX = 0.0;
-            for (double xi : x) normX += xi * xi;
-            normX = Math.sqrt(normX);
-
-            if (normX <= tol) {
-                continue; // already zero column below diagonal
-            }
-
-            // choose sign to avoid cancellation
-            double sign = x[0] >= 0 ? 1.0 : -1.0;
-
-            // construct u = x + sign * ||x|| * e1
-            double[] u = new double[len];
-            u[0] = x[0] + sign * normX;
-            for (int i = 1; i < len; i++) u[i] = x[i];
-
-            // normalize u to get v
-            double uNorm = 0.0;
-            for (double ui : u) uNorm += ui * ui;
-            uNorm = Math.sqrt(uNorm);
-            if (uNorm <= tol) {
-                continue;
-            }
-            for (int i = 0; i < len; i++) u[i] /= uNorm;
-            Vector v = new Vector(u); // normalized reflector vector
-
-            // Build full-size Householder H = I - 2 * (embed v v^T at block k..n-1)
-            Matrix H = Matrix.Identity(n);
-            for (int i = 0; i < len; i++) {
-                for (int j = 0; j < len; j++) {
-                    double val = (i == j ? 1.0 : 0.0) - 2.0 * v.get(i) * v.get(j);
-                    H.set(k + i, k + j, val);
-                }
-            }
-
-            // Apply reflector: R <- H * R, Q <- Q * H
-            R = H.multiply(R);
-            Q = Q.multiply(H);
-        }
-
-        // Ensure R is upper-triangular within tolerance (optional: zero tiny values)
-        return new Matrix[]{Q, R};
+        net.faulj.decomposition.result.QRResult res = net.faulj.decomposition.qr.HouseholderQR.decompose(this);
+        return new Matrix[]{res.getQ(), res.getR()};
     }
 
+    public Matrix[] implicitQR() {
+        return net.faulj.decomposition.qr.ImplicitQR.decompose(this);
+    }
 
+    
 
     public Matrix[] Hessenberg() {
-        if (!isSquare()) {
-            throw new ArithmeticException("Matrix must be square to compute Hessenberg form");
-        }
-        Matrix A = this.copy();
-
-        //zeros under the first subdiagonal
-        ArrayList<Vector> vVectors = new ArrayList<>();
-        for(int i = 0; i < getRowCount() - 2; i++) {
-            Vector a = A.getData()[i];
-            //the general process is as follows:
-            //zero the subdiagonal in the current column of A:
-            //construct the subvector x, find u, then find v
-            //store v in vVectors for later use because
-            //it's far more efficient than storing a full matrix each time
-            //or even storing the P matrices
-            //then construct P
-            //apply similarity transform A=P*A*P
-            //repeat
-            int j = i+2;
-            Vector temp = new Vector(Arrays.copyOfRange(a.getData(),j,a.dimension()));
-            if (VectorUtils.sum(temp) > tol) {
-                Vector x = new Vector(Arrays.copyOfRange(a.getData(),j-1,a.dimension()));
-                double mag = x.magnitude();
-                Vector e = VectorUtils.unitVector(x.dimension(),0);
-                Vector u = x.add(e.multiplyScalar(mag));
-                Vector v = u.normalize();
-                vVectors.add(v);
-                Matrix P = Matrix.Identity(x.dimension()).subtract(v.multiply(v.transpose()).multiplyScalar(2));
-                Matrix PHat = Matrix.diag(A.getColumnCount()-P.getColumnCount(), P);
-                A = PHat.multiply(A.multiply(PHat));
-            }
-        }
-        Matrix H = A;
-        Vector[] V = vVectors.toArray(new Vector[0]);
-        return new Matrix[]{H, new Matrix(V)};
+        return net.faulj.decomposition.hessenberg.HessenbergReduction.decompose(this);
     }
 
     public boolean isSquare() {
@@ -757,7 +648,28 @@ public class Matrix {
         }
         return m;
     }
-    
+
+    /**
+     * Computes the Frobenius norm: sqrt(sum of squares of all entries).
+     */
+    public double frobeniusNorm() {
+        return MatrixNorms.frobeniusNorm(this);
+    }
+
+    /**
+     * Computes the 1-norm (maximum absolute column sum).
+     */
+    public double norm1() {
+        return MatrixNorms.norm1(this);
+    }
+
+    /**
+     * Computes the infinity norm (maximum absolute row sum).
+     */
+    public double normInf() {
+        return MatrixNorms.normInf(this);
+    }
+
     public Matrix round(double tolerance) {
         Matrix m = this.copy();
         Vector[] mData = m.getData();
@@ -773,6 +685,27 @@ public class Matrix {
         return m;
     }
 
+    public Matrix crop(int fromRow, int toRow, int fromCol, int toCol) {
+        if (fromRow < 0 || toRow >= getRowCount() || fromCol < 0 || toCol >= getColumnCount()
+                || fromRow > toRow || fromCol > toCol) {
+            throw new IllegalArgumentException("Invalid crop dimensions");
+        }
+
+        int newRows = toRow - fromRow + 1;
+        int newCols = toCol - fromCol + 1;
+        Vector[] newData = new Vector[newCols];
+
+        for (int col = 0; col < newCols; col++) {
+            double[] colData = new double[newRows];
+            for (int row = 0; row < newRows; row++) {
+                colData[row] = get(fromRow + row, fromCol + col);
+            }
+            newData[col] = new Vector(colData);
+        }
+
+        return new Matrix(newData);
+    }
+
     public Matrix minor(int i, int j) {
         //basically, add all the columns to the arraylist, then transpose, then add rows to the other arraylist, then return
         Matrix m = this.copy();
@@ -784,4 +717,14 @@ public class Matrix {
         rows.remove(i);
         return new Matrix(rows.toArray(new Vector[0])).transpose();
     }
+
+    public static Matrix randomMatrix(int rows, int cols) {
+        Vector[] data = new Vector[cols];
+        for (int i = 0; i < cols; i++) {
+            data[i] = VectorUtils.random(rows);
+        }
+        return new Matrix(data);
+    }
+    
+    
 }
