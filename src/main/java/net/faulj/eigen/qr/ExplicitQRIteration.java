@@ -193,9 +193,9 @@ public class ExplicitQRIteration {
             // So we multiply R by G_0, then G_1... from the right.
             // rot.applyRight applies the rotation G.
 
-            // Range: rows can be from 0 to min(colIdx + 2, q).
-            // Since H is Hessenberg (now triangular R), we need to update rows 0..colIdx+1
-            rot.applyRight(H, colIdx, colIdx + 1, 0, Math.min(colIdx + 2, q - 1));
+            // Apply the rotation to the full row range so the similarity transform
+            // R * Q_step is performed correctly across the whole matrix.
+            rot.applyRight(H, colIdx, colIdx + 1, 0, n - 1);
         }
 
         // Restore shift
