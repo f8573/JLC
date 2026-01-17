@@ -1,11 +1,6 @@
 package net.faulj.eigen.qr;
 
 import net.faulj.matrix.Matrix;
-import net.faulj.vector.Vector;
-import net.faulj.vector.VectorUtils; // Assuming existence based on Matrix imports
-
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * Implements the Multi-Shift QR algorithm for computing the Real Schur Form
