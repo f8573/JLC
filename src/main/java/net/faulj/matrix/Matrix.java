@@ -23,6 +23,13 @@ public class Matrix {
         pivotColumns = new ArrayList<>();
     }
 
+    public Matrix(int i, int j) {
+        Matrix m = Matrix.zero(i,j);
+        this.data = m.data;
+        this.columns = m.columns;
+        this.pivotColumns = m.pivotColumns;
+    }
+
     public Vector[] getData() {
         return data;
     }
