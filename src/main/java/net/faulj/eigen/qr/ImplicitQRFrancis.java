@@ -4,6 +4,43 @@ import net.faulj.core.Tolerance;
 import net.faulj.matrix.Matrix;
 import net.faulj.decomposition.result.SchurResult;
 
+/**
+ * Implements the Implicit QR algorithm with Francis double-shifts.
+ * <p>
+ * This is the standard algorithm for computing the Real Schur decomposition of a non-symmetric
+ * real matrix. It performs the QR iteration without explicit complex arithmetic,
+ * even when the eigenvalues are complex.
+ * </p>
+ *
+ * <h2>Algorithm Description:</h2>
+ * <p>
+ * The algorithm uses the "Francis double-step" to process conjugate pairs of complex eigenvalues
+ * using only real arithmetic.
+ * </p>
+ * <ol>
+ * <li><b>Double Shift:</b> Two shifts μ₁ and μ₂ are chosen as the eigenvalues of the
+ * bottom-right 2x2 block.</li>
+ * <li><b>Implicit Bulge:</b> Instead of forming (H-μ₁I)(H-μ₂I) explicitly, we compute
+ * only the first column of this product.</li>
+ * <li><b>Bulge Chasing:</b> A Householder reflection P₀ is constructed to map this column
+ * to a multiple of e₁. Applying P₀ creates a "bulge" in the Hessenberg form.
+ * Subsequent reflections chase this bulge down the matrix to restore the Hessenberg form.</li>
+ * <li><b>Equivalence:</b> This process is mathematically equivalent to two explicit QR steps
+ * (H - μ₁I)(H - μ₂I) = QR, but is far more efficient and numerically stable.</li>
+ * </ol>
+ *
+ * <h2>Properties:</h2>
+ * <ul>
+ * <li><b>Convergence:</b> Typically quadratic convergence (cubic for symmetric matrices).</li>
+ * <li><b>Real Arithmetic:</b> Maintains real matrices throughout the process.</li>
+ * <li><b>Output:</b> Produces the Real Schur Form (quasi-upper triangular).</li>
+ * </ul>
+ *
+ * @author JLC Development Team
+ * @version 1.0
+ * @since 1.0
+ * @see SchurResult
+ */
 public class ImplicitQRFrancis {
 
     private static final int MAX_ITERATIONS_PER_EIGENVALUE = 30;
@@ -13,7 +50,7 @@ public class ImplicitQRFrancis {
      *
      * @param H The upper Hessenberg matrix (will be modified to T).
      * @param U The transformation matrix (will be updated U = U * Z).
-     * @return SchurResult containing final T, U, and eigenvalues.
+     * @return SchurResult containing final T, U, and extracted eigenvalues.
      */
     public static SchurResult process(Matrix H, Matrix U) {
         int n = H.getRowCount();
@@ -72,7 +109,6 @@ public class ImplicitQRFrancis {
             // Check for excessive iterations
             if (iter > MAX_ITERATIONS_PER_EIGENVALUE * (m - l + 1)) {
                 throw new ArithmeticException("Implicit QR failed to converge after too many iterations.");
-                // Alternatively: use a fallback shift or random shift here.
             }
             iter++;
 
@@ -87,14 +123,11 @@ public class ImplicitQRFrancis {
             double t = h_m1m1 * h_mm - h_mm1 * h_m1m;
 
             // 3. Bulge Introduction (Double shift: x^2 - sx + t)
-            // We compute the first column of (H^2 - sH + tI) e_1
-            // Only need the first 3 elements (because H is Hessenberg)
             double h_ll = T.get(l, l);
             double h_l1l = T.get(l + 1, l);
             double h_l1l1 = T.get(l + 1, l + 1);
 
             // x1 = h_ll^2 + h_l1l * h_ll1 - s * h_ll + t
-            // Note: T.get(l, l+1) is h_ll1
             double x = h_ll * h_ll + T.get(l, l + 1) * h_l1l - s * h_ll + t;
             double y = h_l1l * (h_ll + h_l1l1 - s);
             double z = h_l1l * T.get(l + 2, l + 1);
@@ -102,18 +135,12 @@ public class ImplicitQRFrancis {
             // 4. Bulge Chasing
             for (int k = l; k <= m - 2; k++) {
                 // Compute Householder reflector P to annihilate y and z (using x as pivot)
-                // v = [x, y, z]^T -> P maps v to [alpha, 0, 0]^T
-
-                // Simple Householder construction
                 double norm = Math.sqrt(x * x + y * y + z * z);
-                if (norm == 0) break; // Should not happen if Hessenberg is unreduced
+                if (norm == 0) break;
 
-                // Sign choice to avoid cancellation
                 double alpha = (x > 0) ? -norm : norm;
                 double div = 1.0 / (x - alpha);
 
-                // Householder vector v (normalized implicitly during application usually,
-                // but let's be explicit for clarity or use a helper)
                 double v1 = x - alpha;
                 double v2 = y;
                 double v3 = z;
@@ -123,9 +150,7 @@ public class ImplicitQRFrancis {
                 double beta = 2.0 / vTv;
 
                 // Apply P to T from left (rows k..k+2)
-                // P = I - beta * v * v^T
-                // T = T - beta * v * (v^T * T)
-                int maxCol = n; // Apply to all columns to right
+                int maxCol = n;
                 for (int col = k; col < maxCol; col++) {
                     double dot = v1 * T.get(k, col) + v2 * T.get(k + 1, col) + v3 * T.get(k + 2, col);
                     dot *= beta;
@@ -135,12 +160,6 @@ public class ImplicitQRFrancis {
                 }
 
                 // Apply P to T from right (cols k..min(k+3, n))
-                // Note: Hessenberg structure limits non-zeros, but we act on full block typically in standard formulation
-                // or just relevant columns. For full similarity, apply to all rows.
-                int minRow = 0;
-                int maxRow = Math.min(k + 4, n); // Optimization: only need to go down slightly below diagonal?
-                // Actually for T to maintain form, we apply to rows 0..n
-
                 for (int row = 0; row < n; row++) {
                     double dot = v1 * T.get(row, k) + v2 * T.get(row, k + 1) + v3 * T.get(row, k + 2);
                     dot *= beta;
@@ -150,7 +169,6 @@ public class ImplicitQRFrancis {
                 }
 
                 // Accumulate Z: Z = Z * P
-                // Apply P to Z from right
                 for (int row = 0; row < n; row++) {
                     double dot = v1 * Z.get(row, k) + v2 * Z.get(row, k + 1) + v3 * Z.get(row, k + 2);
                     dot *= beta;
@@ -160,7 +178,6 @@ public class ImplicitQRFrancis {
                 }
 
                 // Setup x, y, z for next step (chasing)
-                // Next pivot vector is column k of transformed T, specifically elements k+1, k+2, k+3
                 x = T.get(k + 1, k);
                 y = T.get(k + 2, k);
                 if (k < m - 2) {
@@ -169,11 +186,6 @@ public class ImplicitQRFrancis {
                     z = 0.0;
                 }
             }
-
-            // Handle the last step (size 2 Householder) for the bottom corner if needed?
-            // The loop goes to m-2, handling the 3x3 block ending at m.
-            // Standard Francis implementation usually handles the "falling off the edge"
-            // naturally or with a specific 2x2 handler at the end.
 
             // Re-clean subdiagonal zeros created by chase (optional but good for stability)
             if (l > 0) T.set(l, l-1, 0.0);

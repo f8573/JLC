@@ -7,14 +7,76 @@ import net.faulj.decomposition.result.SchurResult;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Implements Aggressive Early Deflation (AED) for the Hessenberg QR algorithm.
+ * <p>
+ * AED is a convergence acceleration technique that identifies and deflates eigenvalues
+ * effectively before they manifest as negligible subdiagonal elements in the main
+ * QR iteration. It works by analyzing a "window" at the bottom-right of the
+ * active Hessenberg matrix.
+ * </p>
+ *
+ * <h2>Algorithm Overview:</h2>
+ * <ol>
+ * <li><b>Window Selection:</b> A window of size <i>w</i> is chosen at the bottom-right of the active block.</li>
+ * <li><b>Local Schur Decomposition:</b> The window is reduced to Real Schur form (T<sub>w</sub>)
+ * using a standard QR iteration (like {@link ImplicitQRFrancis}).</li>
+ * <li><b>Spike Computation:</b> The coupling vector (spike) connecting the window to the
+ * rest of the matrix is transformed into the Schur basis.</li>
+ * <li><b>Deflation Check:</b> The algorithm scans the spike from the bottom up. If the
+ * spike component corresponding to a diagonal block in T<sub>w</sub> is negligible,
+ * that block is considered deflated.</li>
+ * <li><b>Similarity Update:</b> The global matrix is updated with the orthogonal
+ * transformations derived from the window, and deflated eigenvalues are removed
+ * from the active computational domain.</li>
+ * </ol>
+ *
+ * <h2>Advantages:</h2>
+ * <ul>
+ * <li>Significantly reduces the total number of QR sweeps required.</li>
+ * <li>Detects converged eigenvalues earlier than standard deflation.</li>
+ * <li>Provides high-quality shifts for subsequent QR sweeps if deflation fails.</li>
+ * </ul>
+ *
+ * <h2>Mathematical Context:</h2>
+ * <p>
+ * Given an active Hessenberg matrix H partitioned as:
+ * </p>
+ * <pre>
+ * ┌ H₁₁  H₁₂ ┐
+ * H = │            │
+ * └ H₂₁  H₂₂ ┘
+ * </pre>
+ * <p>
+ * Where H₂₂ is the window. We compute H₂₂ = UTU<sup>T</sup>. The updated matrix becomes:
+ * </p>
+ * <pre>
+ * ┌ H₁₁   H₁₂U ┐
+ * H' = │             │
+ * └ U<sup>T</sup>H₂₁  T   ┘
+ * </pre>
+ * <p>
+ * The term U<sup>T</sup>H₂₁ is the "spike". Since H is Hessenberg, H₂₁ has only one
+ * non-zero element (top-right), making the spike calculation efficient.
+ * </p>
+ *
+ * @author JLC Development Team
+ * @version 1.0
+ * @since 1.0
+ * @see ImplicitQRFrancis
+ * @see BlockedHessenbergQR
+ */
 public class AggressiveEarlyDeflation {
 
     /**
-     * Result structure containing deflation statistics and shifts for the next sweep.
+     * Encapsulates the result of an AED step, including deflation statistics and shift suggestions.
      */
     public static class AEDResult {
+        /** The number of eigenvalues successfully deflated (removed from active submatrix). */
         public final int deflatedCount;
+        /** Real parts of eigenvalues from the undeflated portion of the window (used as shifts). */
         public final double[] shiftsReal;
+        /** Imaginary parts of eigenvalues from the undeflated portion of the window. */
         public final double[] shiftsImag;
 
         public AEDResult(int deflatedCount, double[] shiftsReal, double[] shiftsImag) {
@@ -27,12 +89,22 @@ public class AggressiveEarlyDeflation {
     /**
      * Performs Aggressive Early Deflation on the active Hessenberg block.
      *
-     * @param H The full Hessenberg matrix.
+     * <h2>Process:</h2>
+     * <ol>
+     * <li>Define window W within H[activeStart...activeEnd].</li>
+     * <li>Compute Schur decomposition of W: W = STS<sup>T</sup>.</li>
+     * <li>Calculate spike v = S<sup>T</sup> * e₁ * beta.</li>
+     * <li>Identify deflatable eigenvalues by checking spike magnitude against tolerance.</li>
+     * <li>Update H globally: H = diag(I, S, I)<sup>T</sup> * H * diag(I, S, I).</li>
+     * <li>Return deflated count and shifts (remaining eigenvalues in window).</li>
+     * </ol>
+     *
+     * @param H The full Hessenberg matrix (modified in-place).
      * @param U The global Schur vector accumulator (can be null).
-     * @param activeStart Start index (inclusive) of the active submatrix.
-     * @param activeEnd End index (inclusive) of the active submatrix.
-     * @param windowSize Target size of the deflation window.
-     * @return Result containing number of deflated eigenvalues and shifts.
+     * @param activeStart Start index (inclusive) of the active submatrix (top-left).
+     * @param activeEnd End index (inclusive) of the active submatrix (bottom-right).
+     * @param windowSize The target size of the deflation window (w).
+     * @return Result containing number of deflated eigenvalues and shifts for the next sweep.
      */
     public static AEDResult process(Matrix H, Matrix U, int activeStart, int activeEnd, int windowSize) {
         int n = H.getRowCount();
@@ -66,12 +138,6 @@ public class AggressiveEarlyDeflation {
         double[] spike = new double[w];
         for (int i = 0; i < w; i++) {
             // S.get(0, i) is the first element of the i-th column, which is S^T(i, 0).
-            // Actually, ImplicitQRFrancis returns U where U columns are eigenvectors.
-            // S^T * e_1 corresponds to the first row of S if S is the matrix applied as U^T A U.
-            // In ImplicitQRFrancis: T = Z^T H Z. So S (returned as U) is Z.
-            // We need the first component of the transformed basis vectors.
-            // v_hat = Z^T * e_1 * beta.
-            // The i-th component is (column i of Z) dot e_1 * beta = Z(0, i) * beta.
             spike[i] = S.get(0, i) * beta;
         }
 
@@ -118,27 +184,9 @@ public class AggressiveEarlyDeflation {
         }
 
         // 6. Apply Transformation S to Global Matrix H and U
-        // H(k:activeEnd, k:activeEnd) is replaced by Tw (if we simply paste it),
-        // BUT we must also update off-diagonal blocks H(0:k-1, k:activeEnd) and H(k:activeEnd, activeEnd+1:n)
-        // using S.
-
         // Update H:
         // Rows k..activeEnd (from left): H = S^T * H
         // Cols k..activeEnd (from right): H = H * S
-
-        // Optimization: The window W block (Tw) is already computed.
-        // We can just paste Tw into H, but we MUST update the off-diagonal strips.
-
-        // Apply S from right to columns k..activeEnd (affecting all rows 0..n)
-        // H * S
-        // We perform this manually or using matrix multiplication on strips.
-        // Since S is w x w, this is efficient.
-
-        // Strategy:
-        // 1. Update H(0:k-1, k:activeEnd) = H(0:k-1, k:activeEnd) * S
-        // 2. Paste Tw into H(k:activeEnd, k:activeEnd)
-        // 3. Update H(k:activeEnd, activeEnd+1:n) = S^T * H(k:activeEnd, activeEnd+1:n)
-        // 4. Update coupling spike H(k:activeEnd, k-1) = spike vector (computed above)
 
         // 1. Right update off-diagonal (Top-Right strip)
         if (k > 0) {
@@ -159,9 +207,6 @@ public class AggressiveEarlyDeflation {
         }
 
         // 4. Update the subdiagonal coupling (The Spike)
-        // H(k+i, k-1) becomes spike[i]
-        // Theoretically, if we reordered, the spike components for deflated eigenvalues would be 0.
-        // Since we scanned from the bottom, spike[activeEnd - k - j] corresponds to the bottom rows.
         for (int j = 0; j < w; j++) {
             H.set(k + j, k - 1, spike[j]);
         }
@@ -177,20 +222,12 @@ public class AggressiveEarlyDeflation {
 
         // 7. Perform Deflation
         // Set the coupling entries for deflated eigenvalues to zero.
-        // The scan established that spike components for indices [w-deflatableCount ... w-1] are negligible.
-        // In the global matrix, these are rows [activeEnd-deflatableCount+1 ... activeEnd].
-        // The coupling is at column (k-1).
-
-        // Note: The spike vector is placed in column k-1.
-        // We explicitely zero out the specific spike entries that passed the test.
         for (int j = 0; j < deflatableCount; j++) {
             H.set(activeEnd - j, k - 1, 0.0);
         }
 
         // 8. Collect Shifts
         // The eigenvalues of the UNDEFLATED top part of the window are the shifts for the next sweep.
-        // Tw is strictly upper Hessenberg (quasi-triangular).
-        // The top part is Tw(0 : w-deflatableCount-1, ...).
         int undeflatedW = w - deflatableCount;
         List<Double> shiftsR = new ArrayList<>();
         List<Double> shiftsI = new ArrayList<>();
@@ -205,8 +242,6 @@ public class AggressiveEarlyDeflation {
                 // 2x2 block
                 double[] real = new double[w];
                 double[] imag = new double[w];
-                // Use the helper from ImplicitQRFrancis or re-implement 2x2 eigen solver
-                // For shifts, we just need the values.
                 compute2x2(Tw, idx, idx + 1, real, imag);
                 shiftsR.add(real[idx]);
                 shiftsI.add(imag[idx]);
@@ -233,7 +268,6 @@ public class AggressiveEarlyDeflation {
         }
     }
 
-    // Duplicated from ImplicitQRFrancis for independence or refactor to utility
     private static void compute2x2(Matrix T, int i, int j, double[] real, double[] imag) {
         double a = T.get(i, i);
         double b = T.get(i, j);
