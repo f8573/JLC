@@ -12,12 +12,38 @@ import java.util.List;
 /**
  * Implements the Explicit QR Algorithm for eigenvalue computation.
  * <p>
- * This implementation:
- * 1. Reduces the input matrix A to Hessenberg form H.
- * 2. Iteratively applies Q*H*Q^T updates (explicit shift) using Givens rotations
- * to drive H to Real Schur Form (quasi-triangular).
- * 3. Uses the Wilkinson shift strategy for convergence.
+ * This class provides a direct implementation of the QR iteration A<sub>k+1</sub> = R<sub>k</sub>Q<sub>k</sub>
+ * with explicit shifts. It is primarily used for educational purposes or for matrices where
+ * implicit methods (like Francis double-shift) are not applicable or desired.
  * </p>
+ *
+ * <h2>Algorithm:</h2>
+ * <ol>
+ * <li><b>Hessenberg Reduction:</b> Reduce A to upper Hessenberg form H.</li>
+ * <li><b>Iteration:</b> For each step k:
+ * <ul>
+ * <li>Determine a shift μ (Wilkinson shift strategy).</li>
+ * <li>Compute QR factorization: H - μI = Q R.</li>
+ * <li>Update H: H<sub>new</sub> = R Q + μI = Q<sup>T</sup> H Q.</li>
+ * </ul>
+ * </li>
+ * <li><b>Deflation:</b> When a subdiagonal element becomes negligible, split the problem
+ * into smaller sub-problems.</li>
+ * </ol>
+ *
+ * <h2>Properties:</h2>
+ * <ul>
+ * <li><b>Shift Strategy:</b> Uses the Wilkinson shift (eigenvalue of bottom 2x2 block closer to corner)
+ * to ensure cubic convergence for symmetric matrices and quadratic generally.</li>
+ * <li><b>Explicit vs Implicit:</b> This class forms H - μI explicitly, which can be
+ * less numerically stable than implicit bulge chasing for large shifts, but sufficient for
+ * general use.</li>
+ * </ul>
+ *
+ * @author JLC Development Team
+ * @version 1.0
+ * @since 1.0
+ * @see ImplicitQRFrancis
  */
 public class ExplicitQRIteration {
     private static final int MAX_ITERATIONS = 1000;
@@ -26,7 +52,7 @@ public class ExplicitQRIteration {
     /**
      * Computes the Real Schur Form T and unitary matrix Q such that A = Q * T * Q^T.
      *
-     * @param A Square matrix
+     * @param A Square real matrix.
      * @return Matrix array {T, Q} where T is the quasi-upper triangular Schur form
      * and Q is the accumulated orthogonal matrix.
      */
@@ -72,9 +98,6 @@ public class ExplicitQRIteration {
                 iter = 0;
             } else if (blockSize == 2) {
                 // 2x2 block: check if it splits (real eigs) or stays (complex eigs)
-                // In Real Schur form, we accept 2x2 blocks on diagonal.
-                // We can perform a check if it's already in a standard form, but typically we just deflate.
-                // Check if we can split it with a real shift?
                 if (Math.abs(H.get(q - 1, q - 2)) < EPSILON) {
                     q -= 2; // Split into 1x1s effectively
                 } else {
@@ -119,9 +142,6 @@ public class ExplicitQRIteration {
         double c = H.get(end, end - 1);
         double d = H.get(end, end);
 
-        // Eigenvalues of [[a, b], [c, d]]
-        // lambda = (tr +/- sqrt(tr^2 - 4*det))/2
-        // shift is the eigenvalue closer to d.
         double tr = a + d;
         double det = a * d - b * c;
         double disc = tr * tr - 4 * det;
@@ -133,32 +153,20 @@ public class ExplicitQRIteration {
             double l2 = (tr - sqrt) / 2;
             shift = (Math.abs(l1 - d) < Math.abs(l2 - d)) ? l1 : l2;
         } else {
-            // Complex eigenvalues.
-            // For Explicit QR on Real matrices, we can't use a complex shift directly
-            // without complex arithmetic (which would make H complex).
-            // Strategy: Use the real part of the eigenvalue (Rayleigh quotient approximation)
-            // or zero shift if unstable.
+            // Use real part of the eigenvalue (Rayleigh quotient approximation)
             shift = tr / 2.0;
         }
 
         // 2. Explicit Shifted QR Step: H - mu*I = Q_step * R
         // We compute Q_step using Givens rotations to zero the subdiagonal of (H - mu*I).
-        // Since H is Hessenberg, we only need to zero H[i+1, i].
 
         List<GivensRotation> rotations = new ArrayList<>();
-
-        // Apply shift to diagonal implicitly during rotation computation
-        // We don't want to destroy H, so we simulate the factorization
-        // H_shifted = H.copy(); for (int i=p; i<q; i++) H_shifted.set(i,i, H.get(i,i) - shift);
-        // But for speed, we can modify H temporarily or just track the column logic.
-        // Explicitly forming H - shift*I is fine for clarity here.
 
         for (int i = p; i < q; i++) {
             H.set(i, i, H.get(i, i) - shift);
         }
 
         // Compute Q_step = G_0 * G_1 * ... * G_{m-2}
-        // such that Q_step^T * (H - shift*I) = R (Upper Triangular)
         for (int i = p; i < q - 1; i++) {
             double x = H.get(i, i);
             double y = H.get(i + 1, i);
@@ -167,34 +175,16 @@ public class ExplicitQRIteration {
             rotations.add(rot);
 
             // Apply G^T from left to H (affecting rows i and i+1)
-            // Note: GivensRotation.applyLeft applies G^T * A
             rot.applyLeft(H, i, i + 1, i, q - 1);
-            // Optimization: col range starts at i (since cols < i are zero below diag)
         }
 
         // H is now R (upper triangular in the active block).
 
         // 3. Complete the similarity transform: H_new = R * Q_step + shift*I
-        // H_new = R * (G_0 * ... * G_{m-2}) + shift*I
         // Apply rotations from the right.
-
         for (int i = 0; i < rotations.size(); i++) {
             GivensRotation rot = rotations.get(i);
             int colIdx = p + i;
-            // applyRight applies A * G (which is A * Q_step if we use same rotations)
-            // Careful: Q_step = G_0 ... G_k.
-            // We want R * G_0 * G_1 ...
-            // GivensRotation stores (c, s).
-            // applyRight uses the transpose of the rotation matrix used in applyLeft.
-            // If applyLeft used G^T, applyRight uses (G^T)^T = G.
-            // We need R * Q_step? No, similarity is Q_step^T * A_old * Q_step.
-            // We computed R = Q_step^T * (A_old - shift*I).
-            // Next is A_new = R * Q_step + shift*I.
-            // So we multiply R by G_0, then G_1... from the right.
-            // rot.applyRight applies the rotation G.
-
-            // Apply the rotation to the full row range so the similarity transform
-            // R * Q_step is performed correctly across the whole matrix.
             rot.applyRight(H, colIdx, colIdx + 1, 0, n - 1);
         }
 
@@ -204,7 +194,6 @@ public class ExplicitQRIteration {
         }
 
         // 4. Accumulate Q
-        // Q_total = Q_total * Q_step
         if (Q != null) {
             for (int i = 0; i < rotations.size(); i++) {
                 GivensRotation rot = rotations.get(i);
@@ -215,9 +204,11 @@ public class ExplicitQRIteration {
     }
 
     /**
-     * Calculates the eigenvalues of the matrix A.
-     * @param A Square matrix
-     * @return List of complex eigenvalues
+     * Calculates the eigenvalues of the matrix A by reducing it to Real Schur form
+     * and extracting diagonal blocks.
+     *
+     * @param A Square real matrix.
+     * @return List of complex eigenvalues.
      */
     public static List<Complex> getEigenvalues(Matrix A) {
         Matrix[] schur = decompose(A.copy());
