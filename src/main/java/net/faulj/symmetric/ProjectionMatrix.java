@@ -57,4 +57,7 @@ import net.faulj.vector.Vector;
  */
 public class ProjectionMatrix {
     // Implementation placeholder
+    public ProjectionMatrix() {
+        throw new RuntimeException("Class unfinished");
+    }
 }

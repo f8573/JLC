@@ -73,4 +73,7 @@ import net.faulj.vector.Vector;
  * @see net.faulj.solve.LeastSquaresSolver
  */
 public class BestApproximation {
+	public BestApproximation() {
+		throw new RuntimeException("Class unfinished");
+	}
 }

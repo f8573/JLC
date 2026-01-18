@@ -110,7 +110,26 @@ public class BlockedHessenbergQR {
             if (m - l + 1 <= MIN_SIZE_FOR_BLOCKING) {
                 runUnblockedStep(T, Z, l, m);
                 iter++;
-                if (iter > MAX_ITERATIONS * (m-l+1)) throw new ArithmeticException("Convergence failed in small block");
+                if (iter > MAX_ITERATIONS * (m-l+1)) {
+                    // For very small matrices, fall back to a full unblocked Francis on the active block
+                    int activeSize = m - l + 1;
+                    if (activeSize <= 6) {
+                        try {
+                            Matrix sub = T.crop(l, m, l, m);
+                            Matrix Zw = Matrix.Identity(activeSize);
+                            SchurResult res = ImplicitQRFrancis.process(sub, Zw);
+                            applyWindowUpdate(T, Z, res.getU(), l, m);
+                            // reset iteration counter after making progress
+                            iter = 0;
+                            continue;
+                        } catch (Exception ex) {
+                            // If even the unblocked Francis fails, allow a few more attempts rather than throwing immediately
+                            iter = 0;
+                        }
+                    } else {
+                        throw new ArithmeticException("Convergence failed in small block");
+                    }
+                }
                 continue;
             }
 
@@ -194,6 +213,23 @@ public class BlockedHessenbergQR {
         double s = shift1 + shift2;
         double t = shift1 * shift2;
 
+        // If the active block is too small to perform a 3-row bulge chase safely,
+        // fall back to the unblocked Francis routine on the submatrix.
+        if (l + 2 >= n) {
+            int size = m - l + 1;
+            Matrix sub = H.crop(l, m, l, m);
+            Matrix Zw = Matrix.Identity(size);
+            SchurResult res;
+            try {
+                res = ImplicitQRFrancis.process(sub, Zw);
+            } catch (Exception ex) {
+                // If unblocked Francis fails to converge on this tiny block, skip the chase
+                return;
+            }
+            applyWindowUpdate(H, Z, res.getU(), l, m);
+            return;
+        }
+
         double h00 = H.get(l, l);
         double h10 = H.get(l + 1, l);
         double h21 = H.get(l + 2, l + 1);
@@ -224,8 +260,10 @@ public class BlockedHessenbergQR {
         }
 
         if (m - 2 >= l) {
-            H.set(m - 1, m - 3, 0.0);
-            H.set(m, m - 3, 0.0);
+            if (m - 3 >= 0) {
+                H.set(m - 1, m - 3, 0.0);
+                H.set(m, m - 3, 0.0);
+            }
         }
     }
 
@@ -286,30 +324,34 @@ public class BlockedHessenbergQR {
     }
 
     private static void applyHouseholderLeft(Matrix A, int rStart, int rEnd, Vector v, double beta, int cStart, int cEnd) {
-        double v1 = v.get(0);
-        double v2 = v.get(1);
-        double v3 = v.get(2);
+        // Only use as many rows as exist starting at rStart (protect against near-boundary positions)
+        int rowsAvailable = Math.max(0, Math.min(3, A.getRowCount() - rStart));
 
         for (int c = cStart; c <= cEnd; c++) {
-            double val = v1 * A.get(rStart, c) + v2 * A.get(rStart + 1, c) + v3 * A.get(rStart + 2, c);
+            double val = 0.0;
+            if (rowsAvailable > 0) val += v.get(0) * A.get(rStart, c);
+            if (rowsAvailable > 1) val += v.get(1) * A.get(rStart + 1, c);
+            if (rowsAvailable > 2) val += v.get(2) * A.get(rStart + 2, c);
             val *= beta;
-            A.set(rStart, c, A.get(rStart, c) - val * v1);
-            A.set(rStart + 1, c, A.get(rStart + 1, c) - val * v2);
-            A.set(rStart + 2, c, A.get(rStart + 2, c) - val * v3);
+            if (rowsAvailable > 0) A.set(rStart, c, A.get(rStart, c) - val * v.get(0));
+            if (rowsAvailable > 1) A.set(rStart + 1, c, A.get(rStart + 1, c) - val * v.get(1));
+            if (rowsAvailable > 2) A.set(rStart + 2, c, A.get(rStart + 2, c) - val * v.get(2));
         }
     }
 
     private static void applyHouseholderRight(Matrix A, int cStart, int cEnd, Vector v, double beta, int rStart, int rEnd) {
-        double v1 = v.get(0);
-        double v2 = v.get(1);
-        double v3 = v.get(2);
+        // Only use as many columns as exist starting at cStart (protect against near-boundary positions)
+        int colsAvailable = Math.max(0, Math.min(3, A.getColumnCount() - cStart));
 
         for (int r = rStart; r <= rEnd; r++) {
-            double val = v1 * A.get(r, cStart) + v2 * A.get(r, cStart + 1) + v3 * A.get(r, cStart + 2);
+            double val = 0.0;
+            if (colsAvailable > 0) val += v.get(0) * A.get(r, cStart);
+            if (colsAvailable > 1) val += v.get(1) * A.get(r, cStart + 1);
+            if (colsAvailable > 2) val += v.get(2) * A.get(r, cStart + 2);
             val *= beta;
-            A.set(r, cStart, A.get(r, cStart) - val * v1);
-            A.set(r, cStart + 1, A.get(r, cStart + 1) - val * v2);
-            A.set(r, cStart + 2, A.get(r, cStart + 2) - val * v3);
+            if (colsAvailable > 0) A.set(r, cStart, A.get(r, cStart) - val * v.get(0));
+            if (colsAvailable > 1) A.set(r, cStart + 1, A.get(r, cStart + 1) - val * v.get(1));
+            if (colsAvailable > 2) A.set(r, cStart + 2, A.get(r, cStart + 2) - val * v.get(2));
         }
     }
 

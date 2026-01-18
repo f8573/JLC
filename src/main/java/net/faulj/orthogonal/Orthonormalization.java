@@ -64,4 +64,7 @@ import java.util.List;
  * @see net.faulj.spaces.SubspaceBasis
  */
 public class Orthonormalization {
+	public Orthonormalization() {
+		throw new RuntimeException("Class unfinished");
+	}
 }

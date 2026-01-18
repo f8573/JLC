@@ -48,4 +48,7 @@ package net.faulj.svd;
  * @see net.faulj.decomposition.bidiagonal.Bidiagonalization
  */
 public class BidiagonalQR {
+	public BidiagonalQR() {
+		throw new RuntimeException("Class unfinished");
+	}
 }

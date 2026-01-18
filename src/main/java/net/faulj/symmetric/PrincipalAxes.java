@@ -51,4 +51,7 @@ import net.faulj.matrix.Matrix;
  */
 public class PrincipalAxes {
     // Implementation placeholder
+    public PrincipalAxes() {
+        throw new RuntimeException("Class unfinished");
+    }
 }

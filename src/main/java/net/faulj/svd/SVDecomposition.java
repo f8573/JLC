@@ -77,4 +77,7 @@ import net.faulj.decomposition.result.SVDResult;
  * @see BidiagonalQR
  */
 public class SVDecomposition {
+	public SVDecomposition() {
+		throw new RuntimeException("Class unfinished");
+	}
 }

@@ -40,4 +40,7 @@ import net.faulj.vector.Vector;
  * @see Projection
  */
 public class OrthogonalComplement {
+	public OrthogonalComplement() {
+		throw new RuntimeException("Class unfinished");
+	}
 }

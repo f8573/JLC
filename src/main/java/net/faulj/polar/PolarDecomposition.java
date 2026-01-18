@@ -106,6 +106,7 @@ public class PolarDecomposition {
      * Constructs a new PolarDecomposition solver.
      */
     public PolarDecomposition() {
+        throw new RuntimeException("Class is not yet implemented");
     }
 
     /**

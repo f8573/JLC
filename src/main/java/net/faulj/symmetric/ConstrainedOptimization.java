@@ -47,4 +47,7 @@ import net.faulj.matrix.Matrix;
  */
 public class ConstrainedOptimization {
     // Implementation placeholder
+    public ConstrainedOptimization() {
+        throw new RuntimeException("Class unfinished");
+    }
 }
