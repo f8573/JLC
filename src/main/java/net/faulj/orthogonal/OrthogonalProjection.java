@@ -69,4 +69,7 @@ import net.faulj.vector.Vector;
  * @see net.faulj.decomposition.qr.GramSchmidt
  */
 public class OrthogonalProjection {
+	public OrthogonalProjection() {
+		throw new RuntimeException("Class unfinished");
+	}
 }

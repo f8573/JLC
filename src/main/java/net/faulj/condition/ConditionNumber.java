@@ -71,4 +71,5 @@ package net.faulj.condition;
  * @see net.faulj.svd.SVDecomposition
  */
 public class ConditionNumber {
+
 }

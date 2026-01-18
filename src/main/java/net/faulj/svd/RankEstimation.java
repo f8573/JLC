@@ -53,4 +53,7 @@ import net.faulj.matrix.Matrix;
  * @see net.faulj.condition.ConditionNumber
  */
 public class RankEstimation {
+	public RankEstimation() {
+		throw new RuntimeException("Class unfinished");
+	}
 }

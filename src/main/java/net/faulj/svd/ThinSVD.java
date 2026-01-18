@@ -55,4 +55,7 @@ import net.faulj.decomposition.result.SVDResult;
  * @see SVDecomposition
  */
 public class ThinSVD {
+	public ThinSVD() {
+		throw new RuntimeException("Class unfinished");
+	}
 }

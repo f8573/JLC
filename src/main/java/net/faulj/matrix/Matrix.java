@@ -23,6 +23,20 @@ public class Matrix {
         pivotColumns = new ArrayList<>();
     }
 
+    public Matrix(double[][] data) {
+        Vector[] vectors = new Vector[data[0].length];
+        for (int j = 0; j < data[0].length; j++) {
+            double[] col = new double[data.length];
+            for (int i = 0; i < data.length; i++) {
+                col[i] = data[i][j];
+            }
+            vectors[j] = new Vector(col);
+        }
+        this.data = vectors;
+        this.columns = vectors.length;
+        pivotColumns = new ArrayList<>();
+    }
+
     public Matrix(int i, int j) {
         Matrix m = Matrix.zero(i,j);
         this.data = m.data;

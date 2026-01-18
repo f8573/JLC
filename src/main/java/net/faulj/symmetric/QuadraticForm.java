@@ -56,4 +56,7 @@ import net.faulj.vector.Vector;
  */
 public class QuadraticForm {
     // Implementation placeholder
+    public QuadraticForm() {
+        throw new RuntimeException("Class unfinished");
+    }
 }

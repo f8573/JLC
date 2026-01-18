@@ -1,5 +1,6 @@
 package net.faulj.vector;
 
+import net.faulj.core.Tolerance;
 import net.faulj.matrix.Matrix;
 
 import java.util.Arrays;
@@ -395,5 +396,20 @@ public class Vector {
      */
     public Matrix toMatrix() {
         return new Matrix(new Vector[]{this});
+    }
+
+    /**
+     * Converts negligible values to zeroes.
+     *
+     * @return a Vector with negligible values set to zero
+     */
+    public Vector round() {
+        double[] data = this.copy().getData();
+        for (int i = 0; i < data.length; i++) {
+            if (data[i] < Tolerance.get()) {
+                data[i] = 0;
+            }
+        }
+        return new Vector(data);
     }
 }

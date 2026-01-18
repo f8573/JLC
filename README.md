@@ -1,46 +1,35 @@
-# JLC
+<details open>
+  <summary>📁 src</summary>
 
-Welcome to the Java Linear Calculator! This Java project provides exact numerical manipulation for real and complex
-numbers, ensuring no loss of precision (except when approximating to decimal formats). The library leverages these exact
-numerical operations to offer robust linear algebra functionalities.
+  <details>
+    <summary>📁 components</summary>
+    <ul>
+      <li>📄 Button.tsx</li>
+      <li>📄 Modal.tsx</li>
+    </ul>
+  </details>
 
-## Features
+  <details>
+    <summary>📁 utils</summary>
+    <ul>
+      <li>📄 formatDate.ts</li>
+      <li>📄 math.ts</li>
+    </ul>
+  </details>
 
-- [x] Ring and field structure to allow types of number systems (e.g. matrices with noncommutative multiplication)
-- [ ] Numbers
-    - [x] Integers
-    - [x] Rational Numbers
-    - [ ] Irrational Numbers
-        - [ ] Square root
-            - [ ] Addition
-            - [x] Multiplication
-    - [ ] Complex Numbers
-- [ ] Linear Algebra
-    - [ ] Vectors
-    - [ ] Matrices
+  <ul>
+    <li>📄 index.ts</li>
+  </ul>
+</details>
 
-    ## Frontend + Backend (development)
+<details>
+  <summary>📁 tests</summary>
+  <ul>
+    <li>📄 app.test.ts</li>
+  </ul>
+</details>
 
-    This repository now includes a minimal Spring Boot backend and a Vite + React frontend for development.
-
-    - Backend: run the Spring Boot app (port 8080)
-    - Frontend: run the Vite dev server (port 5173) which proxies `/api` to the backend.
-
-    Quick start:
-
-    1. Start the Java backend:
-
-    ```powershell
-    ./gradlew.bat bootRun
-    ```
-
-    2. In a separate terminal, start the frontend dev server:
-
-    ```bash
-    cd frontend
-    npm install
-    npm run dev
-    ```
-
-    3. Open http://localhost:5173 to view the frontend which will call the backend `/api/ping` endpoint.
-
+<ul>
+  <li>📄 package.json</li>
+  <li>📄 README.md</li>
+</ul>

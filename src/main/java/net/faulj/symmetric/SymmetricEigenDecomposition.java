@@ -53,4 +53,7 @@ import net.faulj.decomposition.result.SchurResult;
  */
 public class SymmetricEigenDecomposition {
     // Implementation placeholder
+    public SymmetricEigenDecomposition() {
+        throw new RuntimeException("Class unfinished");
+    }
 }

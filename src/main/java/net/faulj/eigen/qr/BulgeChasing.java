@@ -254,7 +254,7 @@ public class BulgeChasing {
         }
 
         // Force the created zeros if this was a chasing step
-        if (colRef == pivotRow - 1) {
+        if (colRef >= 0 && colRef == pivotRow - 1) {
             H.set(pivotRow, colRef, x0 - alpha);
             for (int i = 1; i < len; i++) {
                 H.set(pivotRow + i, colRef, 0.0);

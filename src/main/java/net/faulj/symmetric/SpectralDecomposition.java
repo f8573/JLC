@@ -1,8 +1,5 @@
 package net.faulj.symmetric;
 
-import net.faulj.matrix.Matrix;
-import java.util.Arrays;
-
 /**
  * Encapsulates the Spectral Decomposition of a symmetric matrix.
  * <p>
@@ -71,4 +68,7 @@ import java.util.Arrays;
  */
 public class SpectralDecomposition {
     // Implementation placeholder
+    public SpectralDecomposition() {
+        throw new RuntimeException("Class unfinished");
+    }
 }

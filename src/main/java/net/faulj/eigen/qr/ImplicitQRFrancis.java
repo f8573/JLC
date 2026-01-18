@@ -112,6 +112,24 @@ public class ImplicitQRFrancis {
             }
             iter++;
 
+            // Handle very small active blocks directly to avoid out-of-bounds accesses
+            int blockSize = m - l + 1;
+            if (blockSize <= 1) {
+                if (blockSize == 1) {
+                    realEigenvalues[m] = T.get(m, m);
+                    imagEigenvalues[m] = 0.0;
+                    m--;
+                    iter = 0;
+                    continue;
+                }
+            }
+            if (blockSize == 2) {
+                compute2x2Eigenvalues(T, m - 1, m, realEigenvalues, imagEigenvalues);
+                m -= 2;
+                iter = 0;
+                continue;
+            }
+
             // 2. Francis Double Shift Step on active submatrix T[l..m, l..m]
             double h_mm = T.get(m, m);
             double h_mm1 = T.get(m, m - 1); // h_{m, m-1}

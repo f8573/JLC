@@ -58,4 +58,7 @@ import net.faulj.matrix.Matrix;
  * @see net.faulj.solve.LeastSquaresSolver
  */
 public class Pseudoinverse {
+	public Pseudoinverse() {
+		throw new RuntimeException("Class unfinished");
+	}
 }

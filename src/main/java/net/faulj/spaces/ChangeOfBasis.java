@@ -53,4 +53,7 @@ import net.faulj.vector.Vector;
  * @see net.faulj.matrix.Matrix
  */
 public class ChangeOfBasis {
+	public ChangeOfBasis() {
+		throw new RuntimeException("Class unfinished");
+	}
 }

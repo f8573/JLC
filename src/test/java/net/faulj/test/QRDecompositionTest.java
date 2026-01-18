@@ -1,15 +1,14 @@
 package net.faulj.test;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+import org.junit.Test;
+
 import net.faulj.decomposition.qr.HouseholderQR;
 import net.faulj.decomposition.qr.ImplicitQR;
 import net.faulj.decomposition.result.QRResult;
 import net.faulj.matrix.Matrix;
-import net.faulj.vector.Vector;
-import net.faulj.vector.VectorUtils;
-import org.junit.Test;
-import static org.junit.Assert.*;
-
-import java.util.Random;
 
 public class QRDecompositionTest {
 

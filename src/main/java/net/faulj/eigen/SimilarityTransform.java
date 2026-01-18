@@ -62,4 +62,7 @@ import net.faulj.matrix.Matrix;
  * @see net.faulj.decomposition.result.SchurResult
  */
 public class SimilarityTransform {
+	public SimilarityTransform() {
+		throw new RuntimeException("Class unfinished");
+	}
 }

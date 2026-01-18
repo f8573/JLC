@@ -37,4 +37,7 @@ import net.faulj.matrix.Matrix;
  * @see OrthogonalComplement
  */
 public class DirectSum {
+	public DirectSum() {
+		throw new RuntimeException("Class unfinished");
+	}
 }

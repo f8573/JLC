@@ -37,4 +37,7 @@ package net.faulj.scalar;
  * @see BigDouble
  */
 public class BigComplex {
+    public BigComplex() {
+        throw new RuntimeException("Class not implemented");
+    }
 }
