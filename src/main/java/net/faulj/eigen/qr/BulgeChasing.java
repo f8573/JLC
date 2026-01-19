@@ -1,263 +1,129 @@
 package net.faulj.eigen.qr;
 
 import net.faulj.matrix.Matrix;
-import net.faulj.vector.Vector;
 
 /**
- * Implements the Bulge Chasing mechanism for the Implicit Multi-Shift QR Algorithm.
+ * Implements the Bulge Chasing step of the Implicit QR algorithm.
  * <p>
- * This class handles the creation and "chasing" of a bulge created by implicitly
- * applying a polynomial of shifts to a Hessenberg matrix. This is the core engine
- * for Multi-Shift QR and Aggressive Early Deflation.
- * </p>
- *
- * <h2>Concept:</h2>
- * <p>
- * The implicit Q-theorem states that if we transform the first column of a Hessenberg matrix
- * H via x = p(H)e₁ and then map x to a multiple of e₁ using an orthogonal Q,
- * restoring H to Hessenberg form via Q<sup>T</sup>HQ effectively performs the QR iteration
- * with shift polynomial p.
+ * This class applies the implicit similarity transformations defined by the shifts.
+ * It effectively calculates <i>Q<sup>T</sup>HQ</i> where Q is determined by the
+ * polynomial <i>p(H) = (H-s<sub>1</sub>I)...(H-s<sub>k</sub>I)</i>.
  * </p>
  *
  * <h2>Process:</h2>
- * <ul>
- * <li><b>Bulge Introduction:</b> A "bulge" is created at the top-left of the active block
- * by computing the first column of p(H).</li>
- * <li><b>Chasing:</b> A sequence of Householder reflections is applied to "chase" this
- * bulge down the subdiagonal, restoring the Hessenberg structure column by column.</li>
- * <li><b>Annihilation:</b> The bulge eventually falls off the bottom-right of the active block.</li>
- * </ul>
+ * <ol>
+ * <li><b>Bulge Generation:</b> A "bulge" is introduced at the top-left corner
+ * by transforming the first column according to the shifts.</li>
+ * <li><b>Bulge Chasing:</b> The bulge is "chased" down the diagonal by
+ * Householder reflectors that restore the Hessenberg structure column-by-column.</li>
+ * <li><b>Removal:</b> The bulge eventually falls off the bottom-right corner.</li>
+ * </ol>
+ *
+ * <h2>Structure Preservation:</h2>
+ * <p>
+ * The operation preserves the Upper Hessenberg form everywhere except strictly
+ * within the small window of the bulge.
+ * </p>
  *
  * @author JLC Development Team
  * @version 1.0
- * @since 1.0
+ * @see ImplicitQRFrancis
  */
 public class BulgeChasing {
 
-    private static final double EPSILON = 1e-14;
-
     /**
-     * Performs a single multi-shift QR sweep on the specified submatrix of H.
-     * <p>
-     * 1. Computes the first column of p(H) where p is the polynomial defined by the shifts.
-     * 2. Introduces a bulge at the top of the active block.
-     * 3. Chases the bulge down to the bottom of the active block (or off the matrix).
-     * </p>
+     * Performs a bulge chasing sweep using the provided shifts.
      *
-     * @param H          The Hessenberg matrix (modified in-place).
-     * @param Q          The orthogonal accumulator (modified in-place, can be null).
-     * @param startRow   The starting row/col index of the active submatrix.
-     * @param endRow     The ending row/col index (inclusive) of the active submatrix.
-     * @param realShifts Array of real parts of the shifts.
-     * @param imagShifts Array of imaginary parts of the shifts.
+     * @param H The Hessenberg matrix.
+     * @param Q The accumulation matrix.
+     * @param l The start index of the active submatrix.
+     * @param m The end index of the active submatrix.
+     * @param shifts The array of shifts to apply.
      */
-    public static void process(Matrix H, Matrix Q, int startRow, int endRow, double[] realShifts, double[] imagShifts) {
-        int m = realShifts.length; // Degree of the shift polynomial (bulge size)
+    public static void performSweep(Matrix H, Matrix Q, int l, int m, double[] shifts) {
+        // This is a simplified "Double Shift" implementation (2 shifts at a time)
+        // extended to loop over all provided shifts.
+
         int n = H.getRowCount();
 
-        // 1. Compute the initial vector x = p(H)e_1 restricted to the active window.
-        // The vector will have non-zero elements in the first m+1 positions relative to startRow.
-        double[] x = computeInitialVector(H, startRow, endRow, realShifts, imagShifts);
+        // Process shifts in pairs
+        for (int s = 0; s < shifts.length - 1; s += 2) {
+            double s1 = shifts[s];
+            double s2 = shifts[s+1];
 
-        // 2. Introduce the bulge (Step 0 of chasing)
-        // Construct Householder reflector P0 to annihilate x[1...m]
-        // Apply P0 to H from left (rows) and right (cols), and to Q from right.
-        int bulgeLimit = Math.min(endRow, startRow + m);
-        applyHouseholderStep(H, Q, x, startRow, startRow - 1, bulgeLimit, n);
+            // 1. Compute first column of (H - s1*I)(H - s2*I)
+            // We only need the first 3 elements: x, y, z
+            double h00 = H.get(l, l);
+            double h10 = H.get(l + 1, l);
+            double h01 = H.get(l, l + 1);
+            double h11 = H.get(l + 1, l + 1);
+            double h21 = (l + 2 <= m) ? H.get(l + 2, l + 1) : 0;
 
-        // 3. Chase the bulge down the matrix
-        // The bulge initially occupies rows startRow+1 to startRow+m+1 (roughly).
-        // We iterate to annihilate sub-diagonal elements created by the previous step.
-        // k is the column index we are clearing (the column *left* of the pivot).
-        for (int k = startRow; k <= endRow - 2; k++) {
-            // Determine the size of the bulge at this position.
-            // The non-zero entries in column k are at indices k+1 (diagonal sub) ... k+m+1.
-            // We want to keep k+1 and annihilate k+2 ... k+m+1.
+            double sum = s1 + s2;
+            double prod = s1 * s2; // If complex conjugate, this is real
 
-            int firstNonZero = k + 1;
-            int lastNonZero = Math.min(k + m + 1, endRow);
+            // v = (H - s1)(H - s2) e1
+            // x = h00^2 + h01*h10 - sum*h00 + prod
+            double x = h00 * h00 + h01 * h10 - sum * h00 + prod;
+            // y = h10 * (h00 + h11 - sum)
+            double y = h10 * (h00 + h11 - sum);
+            // z = h10 * h21
+            double z = h10 * h21;
 
-            // If we are at the bottom and there's nothing to annihilate, stop.
-            if (lastNonZero <= firstNonZero) break;
+            // 2. Chase the bulge
+            for (int k = l; k < m - 1; k++) {
+                // Determine Householder vector v to annihilate y and z
+                double norm = Math.sqrt(x*x + y*y + z*z);
+                if (norm == 0) break;
 
-            // Extract the vector to be reduced: H[k+1...lastNonZero, k]
-            double[] v = new double[lastNonZero - firstNonZero + 1];
-            for (int i = 0; i < v.length; i++) {
-                v[i] = H.get(firstNonZero + i, k);
+                double alpha = (x > 0) ? -norm : norm;
+                double f = Math.sqrt(2 * (norm * norm - x * alpha));
+
+                double v0 = (x - alpha) / f;
+                double v1 = y / f;
+                double v2 = z / f;
+
+                // Apply Householder P = I - 2vv^T to rows k..k+2
+                // H[k..k+2, :] = H - 2v(v^T H)
+                applyReflectorLeft(H, k, v0, v1, v2);
+                applyReflectorRight(H, k, v0, v1, v2);
+                applyReflectorRight(Q, k, v0, v1, v2);
+
+                // Prepare for next step
+                // New x, y, z are the elements pushed down the diagonal
+                if (k < m - 2) {
+                    x = H.get(k + 1, k);
+                    y = H.get(k + 2, k);
+                    z = H.get(k + 3, k);
+                }
             }
-
-            // Apply Householder step to annihilate v[1...] (which corresponds to H[k+2...])
-            applyHouseholderStep(H, Q, v, firstNonZero, k, lastNonZero, n);
         }
     }
 
-    /**
-     * Computes the vector x = (H - s_1 I)...(H - s_m I) e_1.
-     * Handles complex conjugate pairs in shifts to ensure the result is real.
-     * <p>
-     * Only computes the relevant top elements, as the vector grows by 1 nonzero per degree.
-     * </p>
-     */
-    private static double[] computeInitialVector(Matrix H, int start, int end, double[] re, double[] im) {
-        int m = re.length;
-        int limit = Math.min(end, start + m);
-        int size = limit - start + 1;
-
-        // Initial vector e_1 (relative to start)
-        // We only track the non-zero part.
-        double[] v = new double[size];
-        v[0] = 1.0;
-
-        // Current valid length of the vector (number of non-zeros)
-        int currentLen = 1;
-
-        for (int i = 0; i < m; i++) {
-            // Check for complex conjugate pair
-            boolean isComplexPair = (i < m - 1) && (im[i] != 0) && (Math.abs(im[i] + im[i+1]) < EPSILON) && (Math.abs(re[i] - re[i+1]) < EPSILON);
-
-            if (isComplexPair) {
-                // Apply quadratic factor: (H - s)(H - s_conj) = H^2 - 2*Re(s)*H + |s|^2 I
-                // Op: v <- H*(H*v) - 2*Re*H*v + ModSq*v
-                double twoRe = 2 * re[i];
-                double modSq = re[i]*re[i] + im[i]*im[i];
-
-                // We need to apply H twice.
-                int nextLen = Math.min(size, currentLen + 1);
-                double[] Hv = multiplyHessenbergSection(H, start, v, currentLen, nextLen);
-
-                int finalLen = Math.min(size, nextLen + 1);
-                double[] HHv = multiplyHessenbergSection(H, start, Hv, nextLen, finalLen);
-
-                // Combine: HHv - twoRe * Hv + modSq * v
-                for (int j = 0; j < finalLen; j++) {
-                    double valHv = (j < nextLen) ? Hv[j] : 0;
-                    double valV = (j < currentLen) ? v[j] : 0;
-                    v[j] = HHv[j] - twoRe * valHv + modSq * valV;
-                }
-                currentLen = finalLen;
-                i++; // Skip next shift
-            } else {
-                // Apply linear factor: (H - s I)
-                // Op: v <- H*v - s*v
-                double s = re[i];
-
-                int nextLen = Math.min(size, currentLen + 1);
-                double[] Hv = multiplyHessenbergSection(H, start, v, currentLen, nextLen);
-
-                for (int j = 0; j < nextLen; j++) {
-                    double valV = (j < currentLen) ? v[j] : 0;
-                    v[j] = Hv[j] - s * valV;
-                }
-                currentLen = nextLen;
+    private static void applyReflectorLeft(Matrix A, int row, double v0, double v1, double v2) {
+        int n = A.getColumnCount();
+        for (int j = 0; j < n; j++) {
+            // dot = v^T * column j
+            double dot = v0 * A.get(row, j) + v1 * A.get(row + 1, j) + v2 * A.get(row + 2, j);
+            if (dot != 0) {
+                // col = col - 2 * dot * v
+                A.set(row, j, A.get(row, j) - 2 * v0 * dot);
+                A.set(row + 1, j, A.get(row + 1, j) - 2 * v1 * dot);
+                A.set(row + 2, j, A.get(row + 2, j) - 2 * v2 * dot);
             }
         }
-        return v;
     }
 
-    /**
-     * Multiplies the Hessenberg submatrix H[start...start+outLen, start...start+inLen] by v.
-     */
-    private static double[] multiplyHessenbergSection(Matrix H, int startAbs, double[] v, int inLen, int outLen) {
-        double[] result = new double[outLen];
-
-        for (int i = 0; i < outLen; i++) {
-            double sum = 0;
-            int rowAbs = startAbs + i;
-            // j starts at max(0, i-1) due to Hessenberg form
-            int jStart = Math.max(0, i - 1);
-
-            for (int j = jStart; j < inLen; j++) {
-                int colAbs = startAbs + j;
-                sum += H.get(rowAbs, colAbs) * v[j];
-            }
-            result[i] = sum;
-        }
-        return result;
-    }
-
-    /**
-     * Constructs a Householder reflector for vector v and applies it to H and Q.
-     *
-     * @param v        The vector to annihilate (v[0] is pivot, v[1...] are zeroed).
-     * @param pivotRow The absolute row index corresponding to v[0].
-     * @param colRef   The column index defining the left edge of the update (used for H update logic).
-     * @param lastRow  The absolute row index of the last element of v.
-     * @param n        Matrix dimension.
-     */
-    private static void applyHouseholderStep(Matrix H, Matrix Q, double[] v, int pivotRow, int colRef, int lastRow, int n) {
-        int len = lastRow - pivotRow + 1;
-        if (len <= 1) return;
-
-        // 1. Construct Householder vector u
-        double x0 = v[0];
-        double normSq = 0;
-        for (double val : v) normSq += val * val;
-
-        if (normSq < EPSILON * EPSILON) return;
-
-        double norm = Math.sqrt(normSq);
-        double alpha = (x0 >= 0) ? -norm : norm;
-
-        double u_normSq = 0;
-        u_normSq += (x0 - alpha) * (x0 - alpha);
-        for(int i=1; i<len; i++) {
-            u_normSq += v[i] * v[i];
-        }
-
-        if (u_normSq < EPSILON) return;
-
-        double beta = 2.0 / u_normSq;
-
-        // Fill u vector
-        double[] u = new double[len];
-        u[0] = x0 - alpha;
-        for(int i=1; i<len; i++) u[i] = v[i];
-
-        // 2. Apply (I - beta u u^T) to H from Left (Rows pivotRow...lastRow)
-        for (int j = Math.max(0, colRef); j < n; j++) {
-            double dot = 0;
-            for (int i = 0; i < len; i++) {
-                dot += u[i] * H.get(pivotRow + i, j);
-            }
-            dot *= beta;
-            for (int i = 0; i < len; i++) {
-                H.set(pivotRow + i, j, H.get(pivotRow + i, j) - dot * u[i]);
-            }
-        }
-
-        // 3. Apply (I - beta u u^T) to H from Right (Cols pivotRow...lastRow)
-        int rowLimit = Math.min(n, lastRow + 2);
-
-        for (int i = 0; i < rowLimit; i++) {
-            double dot = 0;
-            for (int j = 0; j < len; j++) {
-                dot += H.get(i, pivotRow + j) * u[j];
-            }
-            dot *= beta;
-            for (int j = 0; j < len; j++) {
-                H.set(i, pivotRow + j, H.get(i, pivotRow + j) - dot * u[j]);
-            }
-        }
-
-        // 4. Apply to Q from Right (Accumulate)
-        if (Q != null) {
-            for (int i = 0; i < n; i++) {
-                double dot = 0;
-                for (int j = 0; j < len; j++) {
-                    dot += Q.get(i, pivotRow + j) * u[j];
-                }
-                dot *= beta;
-                for (int j = 0; j < len; j++) {
-                    Q.set(i, pivotRow + j, Q.get(i, pivotRow + j) - dot * u[j]);
-                }
-            }
-        }
-
-        // Force the created zeros if this was a chasing step
-        if (colRef >= 0 && colRef == pivotRow - 1) {
-            H.set(pivotRow, colRef, x0 - alpha);
-            for (int i = 1; i < len; i++) {
-                H.set(pivotRow + i, colRef, 0.0);
+    private static void applyReflectorRight(Matrix A, int col, double v0, double v1, double v2) {
+        int n = A.getRowCount();
+        for (int i = 0; i < n; i++) {
+            // dot = row i * v
+            double dot = A.get(i, col) * v0 + A.get(i, col + 1) * v1 + A.get(i, col + 2) * v2;
+            if (dot != 0) {
+                // row = row - 2 * dot * v^T
+                A.set(i, col, A.get(i, col) - 2 * v0 * dot);
+                A.set(i, col + 1, A.get(i, col + 1) - 2 * v1 * dot);
+                A.set(i, col + 2, A.get(i, col + 2) - 2 * v2 * dot);
             }
         }
     }
