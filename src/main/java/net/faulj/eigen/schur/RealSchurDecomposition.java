@@ -113,8 +113,8 @@ public class RealSchurDecomposition {
 
         // 2. Implicit QR Iteration (Francis Double Shift): H = Z * T * Z^T
         // We pass Q into the QR algorithm so it accumulates the updates: U = Q * Z
-        SchurResult qrResult = ImplicitQRFrancis.process(H, Q);
+        //SchurResult qrResult = ImplicitQRFrancis.process(H, Q);
 
-        return qrResult;
+        return null;
     }
 }

@@ -1,7 +1,6 @@
 package net.faulj.eigen.qr;
 
 import net.faulj.matrix.Matrix;
-import net.faulj.vector.Vector;
 import net.faulj.decomposition.hessenberg.HessenbergReduction;
 import net.faulj.givens.GivensRotation;
 import net.faulj.scalar.Complex;
