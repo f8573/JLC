@@ -1,5 +1,6 @@
 package net.faulj.orthogonal;
 
+import net.faulj.decomposition.qr.HouseholderQR;
 import net.faulj.matrix.Matrix;
 import net.faulj.vector.Vector;
 
@@ -69,7 +70,8 @@ import net.faulj.vector.Vector;
  * @see net.faulj.decomposition.qr.GramSchmidt
  */
 public class OrthogonalProjection {
-	public OrthogonalProjection() {
-		throw new RuntimeException("Class unfinished");
+	public static Matrix createMatrix(Matrix A) {
+		Matrix Q = HouseholderQR.decompose(A).getQ();
+		return Q.multiply(Q.transpose());
 	}
 }

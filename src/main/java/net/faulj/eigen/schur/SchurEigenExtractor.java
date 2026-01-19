@@ -1,7 +1,9 @@
 package net.faulj.eigen.schur;
 
 import net.faulj.decomposition.result.SchurResult;
+import net.faulj.eigen.qr.ExplicitQRIteration;
 import net.faulj.matrix.Matrix;
+import net.faulj.scalar.Complex;
 
 /**
  * Utility class for computing eigenvectors from a Real Schur Decomposition.
@@ -42,5 +44,21 @@ import net.faulj.matrix.Matrix;
  * @see SchurResult
  */
 public class SchurEigenExtractor {
-    // Implementation pending
+    private Matrix Schur;
+    private Complex[] eigenvalues;
+
+    public SchurEigenExtractor(Matrix S) {
+        Schur = S;
+        int len = S.getColumnCount();
+        eigenvalues = new Complex[len];
+        initialize();
+    }
+
+    private void initialize() {
+        eigenvalues = ExplicitQRIteration.getEigenvalues(Schur).toArray(new Complex[0]);
+    }
+
+    public Complex[] getEigenvalues() {
+        return eigenvalues;
+    }
 }

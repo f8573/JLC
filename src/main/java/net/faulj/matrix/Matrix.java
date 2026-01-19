@@ -37,11 +37,21 @@ public class Matrix {
         pivotColumns = new ArrayList<>();
     }
 
-    public Matrix(int i, int j) {
-        Matrix m = Matrix.zero(i,j);
+    public Matrix(int rows, int cols) {
+        Matrix m = Matrix.zero(rows,cols);
         this.data = m.data;
         this.columns = m.columns;
         this.pivotColumns = m.pivotColumns;
+    }
+
+    public void setColumn(int colIndex, Vector column) {
+        if (colIndex < 0 || colIndex >= columns) {
+            throw new IllegalArgumentException("Invalid column index");
+        }
+        if (column.dimension() != getRowCount()) {
+            throw new IllegalArgumentException("Column dimension mismatch");
+        }
+        data[colIndex] = column;
     }
 
     public Vector[] getData() {
@@ -616,10 +626,6 @@ public class Matrix {
     public Matrix[] QR() {
         net.faulj.decomposition.result.QRResult res = net.faulj.decomposition.qr.HouseholderQR.decompose(this);
         return new Matrix[]{res.getQ(), res.getR()};
-    }
-
-    public Matrix[] implicitQR() {
-        return net.faulj.decomposition.qr.ImplicitQR.decompose(this);
     }
 
     

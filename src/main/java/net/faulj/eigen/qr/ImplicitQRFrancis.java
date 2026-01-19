@@ -129,7 +129,7 @@ public class ImplicitQRFrancis {
         }
 
         // Step 6: Extract Eigenvalues
-        //SchurEigenExtractor extractor = new SchurEigenExtractor(H);
-        return null;// new SchurResult(H, U, extractor.getRealParts(), extractor.getImagParts());
+        SchurEigenExtractor extractor = new SchurEigenExtractor(H);
+        return new SchurResult(H, U, extractor.getEigenvalues());
     }
 }

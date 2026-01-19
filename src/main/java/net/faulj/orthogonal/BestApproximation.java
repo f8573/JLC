@@ -1,6 +1,7 @@
 package net.faulj.orthogonal;
 
 import net.faulj.matrix.Matrix;
+import net.faulj.solve.LeastSquaresSolver;
 import net.faulj.vector.Vector;
 
 /**
@@ -73,7 +74,9 @@ import net.faulj.vector.Vector;
  * @see net.faulj.solve.LeastSquaresSolver
  */
 public class BestApproximation {
-	public BestApproximation() {
-		throw new RuntimeException("Class unfinished");
+	public Vector findClosest(Vector y, Matrix A) {
+		LeastSquaresSolver leastSquaresSolver = new LeastSquaresSolver();
+		Vector xHat = leastSquaresSolver.solve(A,y);
+		return A.multiply(xHat.toMatrix()).getData()[0];
 	}
 }

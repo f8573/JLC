@@ -47,6 +47,10 @@ import net.faulj.vector.Vector;
  */
 public class LeastSquaresSolver implements LinearSolver {
 
+    public LeastSquaresSolver() {
+
+    }
+
     /**
      * Approximates the solution to Ax = b by minimizing the residual error.
      *
@@ -57,6 +61,10 @@ public class LeastSquaresSolver implements LinearSolver {
      */
     @Override
     public Vector solve(Matrix A, Vector b) {
-        throw new UnsupportedOperationException("Least squares solving is not yet implemented.");
+        A = A.copy();
+        b = b.copy();
+        Matrix At = A.transpose();
+        Matrix AtA = At.multiply(A);
+        return AtA.inverse().multiply(At.multiply(b.toMatrix())).getData()[0];
     }
 }
