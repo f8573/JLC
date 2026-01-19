@@ -1,5 +1,10 @@
 package net.faulj.vector;
 
+import net.faulj.matrix.Matrix;
+
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * Static utility methods for vector creation and algorithms.
  * <p>
@@ -109,5 +114,72 @@ public class VectorUtils {
         v = v.resize(m+1);
         v.set(m,tau);
         return v;
+    }
+
+    /**
+     * Performs the Gram-Schmidt process on a list of vectors to create an orthonormal basis.
+     *
+     * @param vectors The input list of vectors
+     * @return A new list containing the orthonormalized basis vectors
+     */
+    public static List<Vector> gramSchmidt(List<Vector> vectors) {
+        List<Vector> orthogonalBasis = new ArrayList<>();
+        for (Vector vector : vectors) {
+            Vector projection = null;
+            if (!orthogonalBasis.isEmpty()) {
+                for (Vector basisVector : orthogonalBasis) {
+                    projection = basisVector.project(vector);
+                    vector = vector.subtract(projection); // Update the current vector
+                }
+            }
+            orthogonalBasis.add(vector.normalize()); // Normalize the updated vector and add to the basis
+        }
+        return orthogonalBasis;
+    }
+
+    /**
+     * Projects a list of vectors onto another list of vectors using Gram-Schmidt.
+     *
+     * @param projectors List of vectors used for projection (the vectors in this list should form an orthonormal basis)
+     * @param sourceVectors The list of vectors to be projected
+     * @return A new matrix where each column is the orthogonal projection of the corresponding input vector onto the projector vectors
+     */
+    public static Matrix projectOnto(List<Vector> projectors, List<Vector> sourceVectors) {
+        if (projectors.size() != sourceVectors.size()) {
+            throw new IllegalArgumentException("Number of projectors must match the number of source vectors");
+        }
+
+        // Ensure projectors form an orthonormal basis
+        List<Vector> orthogonalBasis = gramSchmidt(projectors);
+
+        Matrix resultMatrix = new Matrix(new Vector[sourceVectors.size()]);
+        for (int i = 0; i < sourceVectors.size(); i++) {
+            resultMatrix.setColumn(i, orthogonalBasis.get(i).project(sourceVectors.get(i)));
+        }
+        return resultMatrix;
+    }
+
+    /**
+     * Normalizes the orthonormalized basis to create a matrix.
+     *
+     * @param basis The list of orthonormal vectors
+     * @return A matrix where each column is the normalized basis vector
+     */
+    public static Matrix normalizeBasis(List<Vector> basis) {
+        Matrix resultMatrix = new Matrix(basis.getFirst().dimension(),basis.size());
+        for (int i = 0; i < basis.size(); i++) {
+            resultMatrix.setColumn(i, basis.get(i));
+        }
+        return resultMatrix;
+    }
+
+    /**
+     * Converts a list of vectors to a matrix where each column is a vector from the list.
+     *
+     * @param vectors The input list of vectors
+     * @return A new matrix with vectors as columns
+     */
+    public static Matrix toMatrix(List<Vector> vectors) {
+        return new Matrix(vectors.toArray(new Vector[0]));
     }
 }

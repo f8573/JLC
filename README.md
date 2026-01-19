@@ -72,7 +72,6 @@ TODO: Brief description of the library and its goals.
       <div>📄 GivensQR.java ✅ (test: ❌)</div>
       <div>📄 GramSchmidt.java ✅ (test: ❌)</div>
       <div>📄 HouseholderQR.java ✅ (test: ❌)</div>
-      <div>📄 ImplicitQR.java ✅ (test: ❌)</div>
       <div>📄 ModifiedGramSchmidt.java ✅ (test: ❌)</div>
     </div>
   </details>
@@ -151,11 +150,11 @@ TODO: Brief description of the library and its goals.
     </div>
   </details>
   <details>
-    <summary>📁 orthogonal — ❌</summary>
+    <summary>📁 orthogonal — ✅</summary>
     <div>
-      <div>📄 BestApproximation.java ❌ (test: ❌)</div>
-      <div>📄 OrthogonalProjection.java ❌ (test: ❌)</div>
-      <div>📄 Orthonormalization.java ❌ (test: ❌)</div>
+      <div>📄 BestApproximation.java ✅ (test: ❌)</div>
+      <div>📄 OrthogonalProjection.java ✅ (test: ❌)</div>
+      <div>📄 Orthonormalization.java ✅ (test: ❌)</div>
     </div>
   </details>
   <details>

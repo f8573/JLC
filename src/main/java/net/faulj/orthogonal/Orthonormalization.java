@@ -1,6 +1,9 @@
 package net.faulj.orthogonal;
 
+import net.faulj.matrix.Matrix;
 import net.faulj.vector.Vector;
+import net.faulj.vector.VectorUtils;
+
 import java.util.List;
 
 /**
@@ -64,7 +67,25 @@ import java.util.List;
  * @see net.faulj.spaces.SubspaceBasis
  */
 public class Orthonormalization {
-	public Orthonormalization() {
-		throw new RuntimeException("Class unfinished");
+	/**
+	 * Creates an orthonormal basis for a given list of vectors using the Gram-Schmidt process.
+	 *
+	 * @param vectors The input list of vectors to be orthonormalized
+	 * @return A new matrix containing the orthonormal basis vectors as columns
+	 */
+	public static Matrix createOrthonormalBasis(List<Vector> vectors) {
+		List<Vector> orthogonalBasis = VectorUtils.gramSchmidt(vectors);
+		return VectorUtils.normalizeBasis(orthogonalBasis);
+	}
+
+	/**
+	 * Projects a list of source vectors onto an orthonormal basis and returns the result as a matrix.
+	 *
+	 * @param projectorBasis The orthonormal basis vectors used for projection
+	 * @param sourceVectors  The list of source vectors to be projected
+	 * @return A new matrix where each column is the orthogonal projection of the corresponding input vector onto the projector basis
+	 */
+	public static Matrix projectOntoOrthonormalBasis(List<Vector> projectorBasis, List<Vector> sourceVectors) {
+		return VectorUtils.projectOnto(projectorBasis, sourceVectors);
 	}
 }

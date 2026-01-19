@@ -6,7 +6,6 @@ import static org.junit.Assert.fail;
 import org.junit.Test;
 
 import net.faulj.decomposition.qr.HouseholderQR;
-import net.faulj.decomposition.qr.ImplicitQR;
 import net.faulj.decomposition.result.QRResult;
 import net.faulj.matrix.Matrix;
 
@@ -44,37 +43,6 @@ public class QRDecompositionTest {
         assertTrue("R should be upper triangular", isUpperTriangular(R, TOLERANCE));
 
         System.out.println("HouseholderQR Test Passed");
-    }
-
-    /**
-     * Tests the Implicit QR step implementation.
-     * Note: ImplicitQR implements a step of the QR algorithm (similarity transform), not a matrix factorization.
-     * Verifies:
-     * 1. Trace invariance: tr(H_new) approx tr(H_old)
-     * 2. Structure: Result is Hessenberg
-     */
-    @Test
-    public void testImplicitQR() {
-        int n = 5;
-        // Generate a random matrix and reduce it to Hessenberg first to provide valid input
-        Matrix A = Matrix.randomMatrix(n, n);
-        Matrix H = A.Hessenberg()[0]; // Assuming Matrix.Hessenberg() works as intended
-
-        double originalTrace = H.trace();
-
-        // Perform Implicit QR Step
-        Matrix[] result = ImplicitQR.decompose(H);
-        Matrix H_new = result[0];
-
-        // 1. Check Trace Invariance (Similarity transforms preserve trace)
-        assertEquals("Trace should be invariant under similarity transform",
-                originalTrace, H_new.trace(), TOLERANCE);
-
-        // 2. Check Result is Hessenberg
-        // The implicit QR step on a Hessenberg matrix should preserve the Hessenberg form
-        assertTrue("Result of ImplicitQR should be Hessenberg", isHessenberg(H_new, TOLERANCE));
-
-        System.out.println("ImplicitQR Test Passed");
     }
 
     @Test

@@ -1,6 +1,7 @@
 package net.faulj.eigen.qr;
 
 import net.faulj.matrix.Matrix;
+import net.faulj.scalar.Complex;
 
 /**
  * Manages the Multi-Shift strategy for the Implicit QR algorithm.
@@ -63,6 +64,11 @@ public class MultiShiftQR {
 
         // Use real parts of eigenvalues as shifts
         // (A full implementation handles complex shifts via double-step logic)
-        return res.getRealEigenvalues();
+        Complex[] eigenvalues = res.getEigenvalues();
+        double[] reals = new double[Math.min(numShifts, eigenvalues.length)];
+        for (int i = 0; i < reals.length; i++) {
+            reals[i] = eigenvalues[i].real;
+        }
+        return reals;
     }
 }

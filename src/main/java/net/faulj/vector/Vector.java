@@ -412,4 +412,18 @@ public class Vector {
         }
         return new Vector(data);
     }
+
+    /**
+     * Projects a vector onto another vector.
+     *
+     * @param u The vector to project onto
+     * @return A new vector representing the projection of this vector onto u
+     */
+    public Vector project(Vector u) {
+        Vector v = this.copy();
+        u = u.copy();
+        double n = v.dot(u);
+        double d = u.dot(u);
+        return u.multiplyScalar(n/d);
+    }
 }
