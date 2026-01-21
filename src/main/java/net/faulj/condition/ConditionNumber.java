@@ -1,5 +1,10 @@
 package net.faulj.condition;
 
+import net.faulj.decomposition.bidiagonal.Bidiagonalization;
+import net.faulj.decomposition.result.BidiagonalizationResult;
+import net.faulj.matrix.Matrix;
+import net.faulj.svd.SVDecomposition;
+
 /**
  * Computes the condition number of matrices for numerical stability analysis.
  * <p>
@@ -71,5 +76,20 @@ package net.faulj.condition;
  * @see net.faulj.svd.SVDecomposition
  */
 public class ConditionNumber {
-
+    public static double computeNorm2SVD(Matrix A) {
+        A = A.copy();
+        SVDecomposition svDecomposition = new SVDecomposition();
+        double[] singularValues = svDecomposition.decompose(A).getSingularValues();
+        double min = Double.MAX_VALUE;
+        double max = Double.MIN_VALUE;
+        for(double d : singularValues) {
+            if (d > max) {
+                max = d;
+            }
+            if (d < min) {
+                min = d;
+            }
+        }
+        return max/min;
+    }
 }

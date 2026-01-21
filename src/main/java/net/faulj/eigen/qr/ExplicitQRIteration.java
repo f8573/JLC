@@ -1,12 +1,13 @@
 package net.faulj.eigen.qr;
 
+import net.faulj.decomposition.qr.HouseholderQR;
+import net.faulj.decomposition.result.QRResult;
 import net.faulj.matrix.Matrix;
-import net.faulj.decomposition.hessenberg.HessenbergReduction;
-import net.faulj.givens.GivensRotation;
 import net.faulj.scalar.Complex;
 
 import java.util.ArrayList;
 import java.util.List;
+
 
 /**
  * Implements the Explicit QR Algorithm for eigenvalue computation.
@@ -60,146 +61,102 @@ public class ExplicitQRIteration {
             throw new ArithmeticException("Matrix must be square");
         }
 
-        // 1. Reduce to Hessenberg Form
-        net.faulj.decomposition.result.HessenbergResult hess = HessenbergReduction.decompose(A);
-        Matrix H = hess.getH();
-        Matrix Q = hess.getQ(); // Accumulated Q from Hessenberg reduction
+        int n = A.getRowCount();
+        boolean symmetric = isSymmetric(A, EPSILON);
+        Matrix T = A.copy();
+        Matrix Q = Matrix.Identity(n);
+        int maxIterations = MAX_ITERATIONS * n;
 
-        int n = H.getRowCount();
-        int iter = 0;
-        int nMinus1 = n - 1;
-
-        // 2. Iterate
-        // We work on active submatrices H[p:q, p:q]
-        // Deflation happens when subdiagonal entry H[i, i-1] is negligible.
-        int q = n; // Active block end (exclusive)
-
-        while (q > 0 && iter < MAX_ITERATIONS * n) {
-            // Find the active block size.
-            // Scan up from q-1 to find the first negligible subdiagonal entry.
-            int p = q - 1;
-            while (p > 0) {
-                double hVal = Math.abs(H.get(p, p - 1));
-                double neighborSum = Math.abs(H.get(p - 1, p - 1)) + Math.abs(H.get(p, p));
-                if (hVal < EPSILON * (neighborSum + EPSILON)) {
-                    H.set(p, p - 1, 0.0);
-                    break;
-                }
-                p--;
+        for (int iter = 0; iter < maxIterations; iter++) {
+            if (isConverged(T, EPSILON, symmetric)) {
+                break;
             }
 
-            // Now the active block is H[p:q, p:q]
-            int blockSize = q - p;
+            double shift = computeWilkinsonShift(T);
+            Matrix shifted = T.copy();
+            for (int i = 0; i < n; i++) {
+                shifted.set(i, i, shifted.get(i, i) - shift);
+            }
 
-            if (blockSize == 1) {
-                // 1x1 block is already diagonal
-                q--;
-                iter = 0;
-            } else if (blockSize == 2) {
-                // 2x2 block: check if it splits (real eigs) or stays (complex eigs)
-                if (Math.abs(H.get(q - 1, q - 2)) < EPSILON) {
-                    q -= 2; // Split into 1x1s effectively
-                } else {
-                    // Check if eigenvalues are real
-                    double a = H.get(q - 2, q - 2);
-                    double b = H.get(q - 2, q - 1);
-                    double c = H.get(q - 1, q - 2);
-                    double d = H.get(q - 1, q - 1);
-                    double disc = (a + d) * (a + d) - 4 * (a * d - b * c);
+            QRResult qr = HouseholderQR.decompose(shifted);
+            Matrix qStep = qr.getQ();
+            Matrix rStep = qr.getR();
 
-                    if (disc >= 0) {
-                        // Real eigenvalues, continue iterating to zero the subdiagonal
-                        // Use Wilkinson shift to converge this 2x2 block
-                        performStep(H, Q, p, q);
-                        iter++;
-                    } else {
-                        // Complex eigenvalues. This is a converged 2x2 block in Real Schur Form.
-                        q -= 2;
-                        iter = 0;
-                    }
+            T = rStep.multiply(qStep);
+            for (int i = 0; i < n; i++) {
+                T.set(i, i, T.get(i, i) + shift);
+            }
+
+            Q = Q.multiply(qStep);
+
+            // Deflate tiny subdiagonal elements to stabilize convergence.
+            for (int i = 1; i < n; i++) {
+                if (Math.abs(T.get(i, i - 1)) < EPSILON) {
+                    T.set(i, i - 1, 0.0);
                 }
-            } else {
-                // blockSize > 2, perform iteration
-                performStep(H, Q, p, q);
-                iter++;
             }
         }
 
-        return new Matrix[]{H, Q};
+        return new Matrix[]{T, Q};
     }
 
-    /**
-     * Performs a single Explicit QR step with Wilkinson shift on the active block H[p:q, p:q].
-     */
-    private static void performStep(Matrix H, Matrix Q, int p, int q) {
-        int n = H.getRowCount();
+    private static boolean isConverged(Matrix T, double tol, boolean symmetric) {
+        int n = T.getRowCount();
+        for (int i = 2; i < n; i++) {
+            for (int j = 0; j < i - 1; j++) {
+                if (Math.abs(T.get(i, j)) > tol) {
+                    return false;
+                }
+            }
+        }
+        if (symmetric) {
+            for (int i = 1; i < n; i++) {
+                if (Math.abs(T.get(i, i - 1)) > tol) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
 
-        // 1. Calculate Wilkinson Shift based on trailing 2x2 of the active block
-        int end = q - 1;
-        double a = H.get(end - 1, end - 1);
-        double b = H.get(end - 1, end);
-        double c = H.get(end, end - 1);
-        double d = H.get(end, end);
+    private static boolean isSymmetric(Matrix A, double tol) {
+        int n = A.getRowCount();
+        for (int i = 0; i < n; i++) {
+            for (int j = i + 1; j < n; j++) {
+                if (Math.abs(A.get(i, j) - A.get(j, i)) > tol) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    private static double computeWilkinsonShift(Matrix T) {
+        int n = T.getRowCount();
+        if (n < 2) {
+            return T.get(0, 0);
+        }
+
+        int i = n - 2;
+        int j = n - 1;
+        double a = T.get(i, i);
+        double b = T.get(i, j);
+        double c = T.get(j, i);
+        double d = T.get(j, j);
 
         double tr = a + d;
         double det = a * d - b * c;
         double disc = tr * tr - 4 * det;
 
-        double shift;
         if (disc >= 0) {
             double sqrt = Math.sqrt(disc);
-            double l1 = (tr + sqrt) / 2;
-            double l2 = (tr - sqrt) / 2;
-            shift = (Math.abs(l1 - d) < Math.abs(l2 - d)) ? l1 : l2;
-        } else {
-            // Use real part of the eigenvalue (Rayleigh quotient approximation)
-            shift = tr / 2.0;
+            double l1 = (tr + sqrt) / 2.0;
+            double l2 = (tr - sqrt) / 2.0;
+            return (Math.abs(l1 - d) < Math.abs(l2 - d)) ? l1 : l2;
         }
 
-        // 2. Explicit Shifted QR Step: H - mu*I = Q_step * R
-        // We compute Q_step using Givens rotations to zero the subdiagonal of (H - mu*I).
-
-        List<GivensRotation> rotations = new ArrayList<>();
-
-        for (int i = p; i < q; i++) {
-            H.set(i, i, H.get(i, i) - shift);
-        }
-
-        // Compute Q_step = G_0 * G_1 * ... * G_{m-2}
-        for (int i = p; i < q - 1; i++) {
-            double x = H.get(i, i);
-            double y = H.get(i + 1, i);
-
-            GivensRotation rot = GivensRotation.compute(x, y);
-            rotations.add(rot);
-
-            // Apply G^T from left to H (affecting rows i and i+1)
-            rot.applyLeft(H, i, i + 1, i, q - 1);
-        }
-
-        // H is now R (upper triangular in the active block).
-
-        // 3. Complete the similarity transform: H_new = R * Q_step + shift*I
-        // Apply rotations from the right.
-        for (int i = 0; i < rotations.size(); i++) {
-            GivensRotation rot = rotations.get(i);
-            int colIdx = p + i;
-            rot.applyRight(H, colIdx, colIdx + 1, 0, n - 1);
-        }
-
-        // Restore shift
-        for (int i = p; i < q; i++) {
-            H.set(i, i, H.get(i, i) + shift);
-        }
-
-        // 4. Accumulate Q
-        if (Q != null) {
-            for (int i = 0; i < rotations.size(); i++) {
-                GivensRotation rot = rotations.get(i);
-                int colIdx = p + i;
-                rot.applyRight(Q, colIdx, colIdx + 1, 0, Q.getRowCount() - 1);
-            }
-        }
+        // Complex pair: use the real part to keep the iteration in real arithmetic.
+        return tr / 2.0;
     }
 
     /**

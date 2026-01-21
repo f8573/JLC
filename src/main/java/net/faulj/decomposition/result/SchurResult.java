@@ -153,6 +153,30 @@ public class SchurResult {
     public Matrix getU() { return U; }
     public Complex[] getEigenvalues() { return eigenvalues; }
     public Matrix getEigenvectors() { return eigenvectors; }
+    
+    /**
+     * Extracts the real parts of all eigenvalues.
+     * @return Array of real parts of eigenvalues
+     */
+    public double[] getRealEigenvalues() {
+        double[] real = new double[eigenvalues.length];
+        for (int i = 0; i < eigenvalues.length; i++) {
+            real[i] = eigenvalues[i].real;
+        }
+        return real;
+    }
+    
+    /**
+     * Extracts the imaginary parts of all eigenvalues.
+     * @return Array of imaginary parts of eigenvalues
+     */
+    public double[] getImagEigenvalues() {
+        double[] imag = new double[eigenvalues.length];
+        for (int i = 0; i < eigenvalues.length; i++) {
+            imag[i] = eigenvalues[i].imag;
+        }
+        return imag;
+    }
 
     @Override
     public String toString() {

@@ -148,6 +148,7 @@ TODO: Brief description of the library and its goals.
       <div>📄 Matrix.java ✅ (test: ❌)</div>
       <div>📄 MatrixFactory.java ✅ (test: ❌)</div>
       <div>📄 MatrixNorms.java ✅ (test: ❌)</div>
+      <div>📄 MatrixUtils.java ✅ (test: ❌)</div>
     </div>
   </details>
   <details>
@@ -159,9 +160,9 @@ TODO: Brief description of the library and its goals.
     </div>
   </details>
   <details>
-    <summary>📁 polar — ❌</summary>
+    <summary>📁 polar — ✅</summary>
     <div>
-      <div>📄 PolarDecomposition.java ❌ (test: ❌)</div>
+      <div>📄 PolarDecomposition.java ✅ (test: ❌)</div>
     </div>
   </details>
   <details>
