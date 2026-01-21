@@ -53,7 +53,7 @@ public class ImplicitQRFrancis {
         int n = A.getRowCount();
 
         // For very small matrices, use explicit QR (no fancy shifts, no recursion)
-        if (n < SMALL_MATRIX_THRESHOLD) {
+        if (n <= SMALL_MATRIX_THRESHOLD) {
             Matrix[] result = ExplicitQRIteration.decompose(A);
             SchurEigenExtractor extractor = new SchurEigenExtractor(result[0], result[1]);
             return new SchurResult(A, result[0], result[1], extractor.getEigenvalues(), extractor.getEigenvectors());

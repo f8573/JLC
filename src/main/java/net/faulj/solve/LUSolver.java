@@ -1,7 +1,6 @@
 package net.faulj.solve;
 
 import net.faulj.core.PermutationVector;
-import net.faulj.core.Tolerance;
 import net.faulj.decomposition.lu.LUDecomposition;
 import net.faulj.decomposition.result.LUResult;
 import net.faulj.matrix.Matrix;
@@ -69,7 +68,7 @@ import net.faulj.vector.Vector;
  * @see net.faulj.decomposition.lu.LUDecomposition
  * @see net.faulj.decomposition.result.LUResult
  */
-public class LUSolver {
+public class LUSolver implements LinearSolver {
 
     private final LUDecomposition luDecomposition;
 
@@ -101,6 +100,7 @@ public class LUSolver {
      * @throws IllegalArgumentException if dimensions mismatch.
      * @throws ArithmeticException if A is singular.
      */
+    @Override
     public Vector solve(Matrix A, Vector b) {
         if (b.dimension() != A.getRowCount()) {
             throw new IllegalArgumentException("Dimension mismatch: b has " + b.dimension()

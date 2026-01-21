@@ -69,7 +69,7 @@ import net.faulj.vector.Vector;
  * @see net.faulj.determinant.LUDeterminant
  * @see LUSolver
  */
-public class CramerSolver {
+public class CramerSolver implements LinearSolver {
 
     /**
      * Solves the linear system Ax = b.
@@ -93,6 +93,7 @@ public class CramerSolver {
      * @throws IllegalArgumentException if A is not square or dimensions mismatch.
      * @throws ArithmeticException if A is singular (det(A) ≈ 0).
      */
+    @Override
     public Vector solve(Matrix A, Vector b) {
         if (!A.isSquare()) {
             throw new IllegalArgumentException("Cramer's rule requires a square matrix");
