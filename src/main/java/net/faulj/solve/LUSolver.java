@@ -133,79 +133,18 @@ public class LUSolver {
         int n = L.getRowCount();
 
         // Apply permutation to b: Pb
-        double[] pb = new double[n];
+        double[] pbData = new double[n];
         for (int i = 0; i < n; i++) {
-            pb[i] = b.get(P.get(i));
+            pbData[i] = b.get(P.get(i));
         }
+        Vector pb = new Vector(pbData);
 
         // Forward substitution: Ly = Pb
-        double[] y = forwardSubstitution(L, pb);
+        // Note: TriangularSolver handles general L, which works for unit-diagonal L too.
+        Vector y = TriangularSolver.forwardSubstitution(L, pb);
 
         // Back substitution: Ux = y
-        double[] x = backSubstitution(U, y);
-
-        return new Vector(x);
-    }
-
-    /**
-     * Performs forward substitution to solve Ly = b.
-     * <p>
-     * Solves for y in:
-     * <pre>
-     * y₁ = b₁
-     * y₂ = b₂ - l₂₁y₁
-     * ...
-     * </pre>
-     * </p>
-     * * @param L Lower triangular matrix (assumed unit diagonal).
-     * @param b The RHS vector (permuted).
-     * @return The intermediate vector y.
-     */
-    private double[] forwardSubstitution(Matrix L, double[] b) {
-        int n = L.getRowCount();
-        double[] y = new double[n];
-
-        for (int i = 0; i < n; i++) {
-            double sum = b[i];
-            for (int j = 0; j < i; j++) {
-                sum -= L.get(i, j) * y[j];
-            }
-            y[i] = sum; // L[i,i] = 1 implicitly
-        }
-
-        return y;
-    }
-
-    /**
-     * Performs back substitution to solve Ux = y.
-     * <p>
-     * Solves for x starting from the last row:
-     * <pre>
-     * xₙ = yₙ / uₙₙ
-     * xᵢ = (yᵢ - Σ uᵢⱼxⱼ) / uᵢᵢ
-     * </pre>
-     * </p>
-     *
-     * @param U Upper triangular matrix.
-     * @param y The intermediate vector from forward substitution.
-     * @return The solution vector x.
-     * @throws ArithmeticException if a zero diagonal element is encountered (singular U).
-     */
-    private double[] backSubstitution(Matrix U, double[] y) {
-        int n = U.getRowCount();
-        double[] x = new double[n];
-
-        for (int i = n - 1; i >= 0; i--) {
-            double sum = y[i];
-            for (int j = i + 1; j < n; j++) {
-                sum -= U.get(i, j) * x[j];
-            }
-            double diag = U.get(i, i);
-            if (Tolerance.isZero(diag)) {
-                throw new ArithmeticException("Zero diagonal encountered in back substitution");
-            }
-            x[i] = sum / diag;
-        }
+        Vector x = TriangularSolver.backwardSubstitution(U, y);
 
         return x;
     }
