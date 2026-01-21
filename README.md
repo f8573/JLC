@@ -178,6 +178,7 @@ TODO: Brief description of the library and its goals.
       <div>📄 LeastSquaresSolver.java ✅ (test: ❌)</div>
       <div>📄 LinearSolver.java ✅ (test: ❌)</div>
       <div>📄 LUSolver.java ✅ (test: ❌)</div>
+      <div>📄 TriangularSolver.java ✅ (test: ❌)</div>
     </div>
   </details>
   <details>

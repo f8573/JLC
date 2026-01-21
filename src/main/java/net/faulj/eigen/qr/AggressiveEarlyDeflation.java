@@ -3,36 +3,30 @@ package net.faulj.eigen.qr;
 import net.faulj.matrix.Matrix;
 
 /**
- * Implements Aggressive Early Deflation (AED).
+ * Simplified Aggressive Early Deflation (AED) for large matrices.
  * <p>
- * AED is a strategy to accelerate the QR algorithm by identifying and deflating
- * converged eigenvalues in a "window" at the bottom-right of the Hessenberg matrix.
+ * This implementation avoids recursion and uses direct eigenvalue estimation
+ * for deflation windows. It's only applied to large matrices where the benefit
+ * outweighs the complexity.
  * </p>
  *
- * <h2>Mechanism:</h2>
- * <ol>
- * <li><b>Window Selection:</b> A window of size <i>w</i> (e.g., 10% of n) is chosen at the bottom-right.</li>
- * <li><b>Local Schur:</b> The Schur decomposition of this dense window is computed.</li>
- * <li><b>Spike Analysis:</b> The "spike" (connection to the rest of the matrix) is analyzed.
- * If spike elements corresponding to an eigenvalue are negligible, that eigenvalue is deflated.</li>
- * <li><b>Ordering:</b> Converged eigenvalues are swapped to the bottom of the window.</li>
- * </ol>
- *
- * <h2>Benefits:</h2>
- * <p>
- * AED drastically reduces the total number of QR sweeps required, often by a factor of 5-10
- * for large matrices, by "draining" eigenvalues that are close to convergence but
- * would otherwise require many full-matrix sweeps.
- * </p>
+ * <h2>Strategy:</h2>
+ * <ul>
+ * <li>Only used for matrices larger than 50x50.</li>
+ * <li>Uses simple 2x2 eigenvalue formulas instead of full Schur decomposition.</li>
+ * <li>Checks deflation criteria directly without recursive QR calls.</li>
+ * </ul>
  *
  * @author JLC Development Team
  * @version 1.0
- * @see ImplicitQRFrancis
  */
 public class AggressiveEarlyDeflation {
 
+    private static final int MIN_SIZE_FOR_AED = 50;
+
     /**
      * Attempts to deflate eigenvalues within the specified window.
+     * Returns 0 if matrix is too small or deflation is not beneficial.
      *
      * @param H The global Hessenberg matrix.
      * @param Q The global accumulation matrix.
@@ -43,68 +37,54 @@ public class AggressiveEarlyDeflation {
      */
     public static int process(Matrix H, Matrix Q, int m, int winSize, double tol) {
         int n = H.getRowCount();
-        int winStart = m - winSize + 1;
+        
+        // Only use AED for large matrices
+        if (m + 1 < MIN_SIZE_FOR_AED) {
+            return 0;
+        }
 
-        // 1. Extract the window
-        Matrix W = H.crop(winStart, m, winStart, m);
+        int winStart = Math.max(0, m - winSize + 1);
+        int actualWinSize = m - winStart + 1;
 
-        // 2. Compute Schur form of the window (Local Analysis)
-        // Since we cannot use explicit QR, we recursively call the Implicit solver
-        // on this small block.
-        net.faulj.decomposition.result.SchurResult localRes = ImplicitQRFrancis.decompose(W);
-        Matrix T_win = localRes.getT();
-        Matrix V_win = localRes.getU();
+        if (actualWinSize < 2) {
+            return 0;
+        }
 
-        // 3. Update the window in H and the spike
-        // The "spike" is the column vector H[winStart:m, winStart-1]
-        // We need to transform the spike: spike_new = V_win^T * spike
-
-        double spikeVal = H.get(winStart, winStart - 1);
-        double[] spike = new double[winSize];
-        // The spike only has one non-zero entry at the top due to Hessenberg form
-        // spike vector relative to window is [spikeVal, 0, 0 ... 0]^T
-
-        // Transformed spike element i = Sum(V_win[k, i] * spike[k]) = V_win[0, i] * spikeVal
-        // (Since V_win is orthogonal, V_win^T is its inverse)
-
+        // Simple deflation check: scan bottom rows of window
+        // Check if last 1x1 or 2x2 blocks are already converged
         int deflatedCount = 0;
 
-        // 4. Check deflation criteria (simplified for 1x1 blocks)
-        // Iterate backwards from the last eigenvalue in the window
-        for (int i = winSize - 1; i >= 0; i--) {
-            double s = Math.abs(spikeVal * V_win.get(0, i)); // The transformed spike element
-            double diag = Math.abs(T_win.get(i, i));
-
-            if (s <= tol * (diag + Math.abs(H.get(winStart - 1, winStart - 1)))) {
-                deflatedCount++;
-            } else {
-                break; // Cannot deflate this or subsequent (higher) eigenvalues
+        // Check last element
+        if (m > 0) {
+            double subdiag = Math.abs(H.get(m, m - 1));
+            double diagSum = Math.abs(H.get(m - 1, m - 1)) + Math.abs(H.get(m, m));
+            if (subdiag <= tol * (diagSum + tol)) {
+                H.set(m, m - 1, 0.0);
+                deflatedCount = 1;
             }
         }
 
-        // 5. Apply transformations if successful
-        if (deflatedCount > 0) {
-            // Apply V_win to H: H(win) = T_win
-            // We must also update rows/cols outside the window
-
-            // Update H window block
-            for(int i=0; i<winSize; i++) {
-                for(int j=0; j<winSize; j++) {
-                    H.set(winStart+i, winStart+j, T_win.get(i,j));
+        // Check if there's a 2x2 block that's converged
+        if (deflatedCount == 0 && m > 1) {
+            double subdiag1 = Math.abs(H.get(m, m - 1));
+            double subdiag2 = Math.abs(H.get(m - 1, m - 2));
+            
+            // Check if bottom 2x2 forms a complex conjugate pair (converged block)
+            if (subdiag1 > tol && subdiag2 <= tol) {
+                double a = H.get(m - 1, m - 1);
+                double b = H.get(m - 1, m);
+                double c = H.get(m, m - 1);
+                double d = H.get(m, m);
+                double disc = (a + d) * (a + d) - 4 * (a * d - b * c);
+                
+                if (disc < 0) {
+                    // Complex eigenvalues => converged 2x2 block
+                    H.set(m - 1, m - 2, 0.0);
+                    deflatedCount = 2;
                 }
             }
-
-            // Update off-diagonal blocks (Standard Schur update logic)
-            // Right update: H[:, win] = H[:, win] * V_win
-            // Left update: H[win, :] = V_win^T * H[win, :]
-
-            // Note: A full implementation requires updating the entire strip.
-            // For brevity in this exercise, we assume the recursive call handled the local block
-            // and we would perform the global updates here.
-
-            return deflatedCount;
         }
 
-        return 0;
+        return deflatedCount;
     }
 }

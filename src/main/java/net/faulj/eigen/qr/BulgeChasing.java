@@ -5,31 +5,23 @@ import net.faulj.matrix.Matrix;
 /**
  * Implements the Bulge Chasing step of the Implicit QR algorithm.
  * <p>
- * This class applies the implicit similarity transformations defined by the shifts.
- * It effectively calculates <i>Q<sup>T</sup>HQ</i> where Q is determined by the
- * polynomial <i>p(H) = (H-s<sub>1</sub>I)...(H-s<sub>k</sub>I)</i>.
+ * This simplified implementation includes bounds checking and safety limits
+ * to prevent array access errors and stack overflow issues.
  * </p>
  *
  * <h2>Process:</h2>
  * <ol>
- * <li><b>Bulge Generation:</b> A "bulge" is introduced at the top-left corner
- * by transforming the first column according to the shifts.</li>
- * <li><b>Bulge Chasing:</b> The bulge is "chased" down the diagonal by
- * Householder reflectors that restore the Hessenberg structure column-by-column.</li>
- * <li><b>Removal:</b> The bulge eventually falls off the bottom-right corner.</li>
+ * <li>Generate a bulge at the top-left corner using the shifts.</li>
+ * <li>Chase the bulge down the diagonal using Householder reflectors.</li>
+ * <li>Maintain Hessenberg structure throughout the process.</li>
  * </ol>
- *
- * <h2>Structure Preservation:</h2>
- * <p>
- * The operation preserves the Upper Hessenberg form everywhere except strictly
- * within the small window of the bulge.
- * </p>
  *
  * @author JLC Development Team
  * @version 1.0
- * @see ImplicitQRFrancis
  */
 public class BulgeChasing {
+
+    private static final double EPSILON = 1e-12;
 
     /**
      * Performs a bulge chasing sweep using the provided shifts.
@@ -41,18 +33,28 @@ public class BulgeChasing {
      * @param shifts The array of shifts to apply.
      */
     public static void performSweep(Matrix H, Matrix Q, int l, int m, double[] shifts) {
-        // This is a simplified "Double Shift" implementation (2 shifts at a time)
-        // extended to loop over all provided shifts.
+        if (shifts == null || shifts.length < 2) {
+            return; // Need at least 2 shifts
+        }
 
         int n = H.getRowCount();
+        
+        // Safety check: ensure active block is large enough
+        if (m - l < 2 || l < 0 || m >= n) {
+            return;
+        }
 
         // Process shifts in pairs
         for (int s = 0; s < shifts.length - 1; s += 2) {
             double s1 = shifts[s];
-            double s2 = shifts[s+1];
+            double s2 = shifts[s + 1];
+
+            // Safety check before accessing elements
+            if (l + 2 > m) {
+                break; // Not enough space for 3x3 reflector
+            }
 
             // 1. Compute first column of (H - s1*I)(H - s2*I)
-            // We only need the first 3 elements: x, y, z
             double h00 = H.get(l, l);
             double h10 = H.get(l + 1, l);
             double h01 = H.get(l, l + 1);
@@ -60,53 +62,59 @@ public class BulgeChasing {
             double h21 = (l + 2 <= m) ? H.get(l + 2, l + 1) : 0;
 
             double sum = s1 + s2;
-            double prod = s1 * s2; // If complex conjugate, this is real
+            double prod = s1 * s2;
 
-            // v = (H - s1)(H - s2) e1
-            // x = h00^2 + h01*h10 - sum*h00 + prod
+            // First column of (H - s1*I)(H - s2*I)
             double x = h00 * h00 + h01 * h10 - sum * h00 + prod;
-            // y = h10 * (h00 + h11 - sum)
             double y = h10 * (h00 + h11 - sum);
-            // z = h10 * h21
             double z = h10 * h21;
 
             // 2. Chase the bulge
-            for (int k = l; k < m - 1; k++) {
+            for (int k = l; k <= m - 2; k++) {
                 // Determine Householder vector v to annihilate y and z
-                double norm = Math.sqrt(x*x + y*y + z*z);
-                if (norm == 0) break;
+                double norm = Math.sqrt(x * x + y * y + z * z);
+                if (norm < EPSILON) break;
 
                 double alpha = (x > 0) ? -norm : norm;
-                double f = Math.sqrt(2 * (norm * norm - x * alpha));
+                double denom = Math.sqrt(2 * (norm * norm - x * alpha));
+                if (Math.abs(denom) < EPSILON) break;
 
-                double v0 = (x - alpha) / f;
-                double v1 = y / f;
-                double v2 = z / f;
+                double v0 = (x - alpha) / denom;
+                double v1 = y / denom;
+                double v2 = z / denom;
 
-                // Apply Householder P = I - 2vv^T to rows k..k+2
-                // H[k..k+2, :] = H - 2v(v^T H)
-                applyReflectorLeft(H, k, v0, v1, v2);
-                applyReflectorRight(H, k, v0, v1, v2);
-                applyReflectorRight(Q, k, v0, v1, v2);
+                // Bounds check
+                if (k + 2 >= n) break;
+
+                // Apply Householder reflector
+                applyReflectorLeft(H, k, m, v0, v1, v2);
+                applyReflectorRight(H, k, m, v0, v1, v2);
+                if (Q != null) {
+                    applyReflectorRight(Q, k, n - 1, v0, v1, v2);
+                }
 
                 // Prepare for next step
-                // New x, y, z are the elements pushed down the diagonal
                 if (k < m - 2) {
                     x = H.get(k + 1, k);
                     y = H.get(k + 2, k);
-                    z = H.get(k + 3, k);
+                    z = (k + 3 <= m) ? H.get(k + 3, k) : 0;
+                } else {
+                    break;
                 }
             }
         }
     }
 
-    private static void applyReflectorLeft(Matrix A, int row, double v0, double v1, double v2) {
+    /**
+     * Applies Householder reflector from the left with column range limiting.
+     */
+    private static void applyReflectorLeft(Matrix A, int row, int colEnd, double v0, double v1, double v2) {
         int n = A.getColumnCount();
-        for (int j = 0; j < n; j++) {
-            // dot = v^T * column j
+        int maxCol = Math.min(n, colEnd + 3); // Only update relevant columns
+        
+        for (int j = Math.max(0, row); j < maxCol; j++) {
             double dot = v0 * A.get(row, j) + v1 * A.get(row + 1, j) + v2 * A.get(row + 2, j);
-            if (dot != 0) {
-                // col = col - 2 * dot * v
+            if (Math.abs(dot) > EPSILON) {
                 A.set(row, j, A.get(row, j) - 2 * v0 * dot);
                 A.set(row + 1, j, A.get(row + 1, j) - 2 * v1 * dot);
                 A.set(row + 2, j, A.get(row + 2, j) - 2 * v2 * dot);
@@ -114,13 +122,15 @@ public class BulgeChasing {
         }
     }
 
-    private static void applyReflectorRight(Matrix A, int col, double v0, double v1, double v2) {
-        int n = A.getRowCount();
-        for (int i = 0; i < n; i++) {
-            // dot = row i * v
+    /**
+     * Applies Householder reflector from the right with row range limiting.
+     */
+    private static void applyReflectorRight(Matrix A, int col, int rowEnd, double v0, double v1, double v2) {
+        int maxRow = Math.min(A.getRowCount(), rowEnd + 1);
+        
+        for (int i = 0; i < maxRow; i++) {
             double dot = A.get(i, col) * v0 + A.get(i, col + 1) * v1 + A.get(i, col + 2) * v2;
-            if (dot != 0) {
-                // row = row - 2 * dot * v^T
+            if (Math.abs(dot) > EPSILON) {
                 A.set(i, col, A.get(i, col) - 2 * v0 * dot);
                 A.set(i, col + 1, A.get(i, col + 1) - 2 * v1 * dot);
                 A.set(i, col + 2, A.get(i, col + 2) - 2 * v2 * dot);
