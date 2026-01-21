@@ -1,6 +1,7 @@
 package net.faulj.decomposition.result;
 
 import net.faulj.matrix.Matrix;
+import net.faulj.matrix.MatrixUtils;
 
 /**
  * Encapsulates the result of Polar decomposition.
@@ -168,10 +169,12 @@ import net.faulj.matrix.Matrix;
  * @see SVDResult
  */
 public class PolarResult {
+    private final Matrix A;
     private final Matrix U;  // Orthogonal matrix
     private final Matrix P;  // Positive semi-definite matrix
 
-    public PolarResult(Matrix U, Matrix P) {
+    public PolarResult(Matrix A, Matrix U, Matrix P) {
+        this.A = A;
         this.U = U;
         this.P = P;
     }
@@ -200,13 +203,19 @@ public class PolarResult {
         return U.multiply(P);
     }
 
-    /**
-     * Computes reconstruction error ||A - UP||_F
-     * @param A original matrix
-     * @return Frobenius norm of reconstruction error
-     */
-    public double getResidualNorm(Matrix A) {
-        Matrix reconstructed = reconstruct();
-        return A.subtract(reconstructed).frobeniusNorm();
+    public double residualNorm() {
+        return MatrixUtils.normResidual(A, reconstruct());
+    }
+
+    public double residualElement() {
+        return MatrixUtils.backwardErrorComponentwise(A, reconstruct());
+    }
+
+    public double[] verifyOrthogonality(Matrix O) {
+        Matrix I = Matrix.Identity(O.getRowCount());
+        O = O.multiply(O.transpose());
+        double n = MatrixUtils.normResidual(I, O);
+        double e = MatrixUtils.backwardErrorComponentwise(I, O);
+        return new double[]{n, e};
     }
 }

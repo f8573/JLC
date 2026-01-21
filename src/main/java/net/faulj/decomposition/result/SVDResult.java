@@ -1,6 +1,7 @@
 package net.faulj.decomposition.result;
 
 import net.faulj.matrix.Matrix;
+import net.faulj.matrix.MatrixUtils;
 
 /**
  * Encapsulates the result of Singular Value Decomposition (SVD).
@@ -163,11 +164,13 @@ import net.faulj.matrix.Matrix;
  * @see net.faulj.svd.RankEstimation
  */
 public class SVDResult {
+    private final Matrix A;
     private final Matrix U;
     private final double[] singularValues;
     private final Matrix V;
 
-    public SVDResult(Matrix U, double[] singularValues, Matrix V) {
+    public SVDResult(Matrix A, Matrix U, double[] singularValues, Matrix V) {
+        this.A = A;
         this.U = U;
         this.singularValues = singularValues;
         this.V = V;
@@ -225,9 +228,19 @@ public class SVDResult {
      * @param A original matrix
      * @return Frobenius norm of reconstruction error
      */
-    public double getResidualNorm(Matrix A) {
-        Matrix reconstructed = reconstruct();
-        return A.subtract(reconstructed).frobeniusNorm();
+    public double residualNorm() {
+        return MatrixUtils.normResidual(A, reconstruct());
+    }
+
+    public double residualElement() {
+        return MatrixUtils.backwardErrorComponentwise(A, reconstruct());
+    }
+
+    public double[] verifyOrthogonality(Matrix O) {
+        Matrix I = Matrix.Identity(O.getRowCount());
+        double n = MatrixUtils.normResidual(I, O);
+        double e = MatrixUtils.backwardErrorComponentwise(I, O);
+        return new double[]{n, e};
     }
 
     /**

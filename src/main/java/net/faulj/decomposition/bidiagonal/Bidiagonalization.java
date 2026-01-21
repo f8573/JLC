@@ -1,5 +1,8 @@
 package net.faulj.decomposition.bidiagonal;
 
+import net.faulj.decomposition.result.BidiagonalizationResult;
+import net.faulj.matrix.Matrix;
+
 /**
  * Computes the bidiagonal decomposition of a rectangular matrix using Householder reflections.
  * <p>
@@ -110,4 +113,132 @@ package net.faulj.decomposition.bidiagonal;
  * @see net.faulj.svd.BidiagonalQR
  */
 public class Bidiagonalization {
+    private static final double TOL = 1e-12;
+
+    public BidiagonalizationResult decompose(Matrix A) {
+        if (A == null) {
+            throw new IllegalArgumentException("Matrix must not be null");
+        }
+        int m = A.getRowCount();
+        int n = A.getColumnCount();
+        if (m >= n) {
+            return decomposeUpper(A);
+        }
+        BidiagonalizationResult transposed = decomposeUpper(A.transpose());
+        return new BidiagonalizationResult(
+                A,
+                transposed.getV(),
+                transposed.getB().transpose(),
+                transposed.getU()
+        );
+    }
+
+    private BidiagonalizationResult decomposeUpper(Matrix A) {
+        int m = A.getRowCount();
+        int n = A.getColumnCount();
+        net.faulj.matrix.Matrix B = A.copy();
+        net.faulj.matrix.Matrix U = net.faulj.matrix.Matrix.Identity(m);
+        net.faulj.matrix.Matrix V = net.faulj.matrix.Matrix.Identity(n);
+
+        int limit = Math.min(m, n);
+        for (int k = 0; k < limit; k++) {
+            int len = m - k;
+            double[] x = new double[len];
+            for (int i = 0; i < len; i++) {
+                x[i] = B.get(k + i, k);
+            }
+            double normX = norm2(x);
+            if (normX > TOL) {
+                if (!tailIsZero(x) || Math.abs(x[0] - normX) > TOL) {
+                    net.faulj.vector.Vector hh = net.faulj.vector.VectorUtils.householder(new net.faulj.vector.Vector(x));
+                    double tau = hh.get(len);
+                    net.faulj.vector.Vector v = hh.resize(len);
+                    applyHouseholderLeft(B, k, k, v.getData(), tau);
+                    applyHouseholderRight(U, 0, k, v.getData(), tau);
+                    for (int i = 1; i < len; i++) {
+                        B.set(k + i, k, 0.0);
+                    }
+                }
+            }
+
+            if (k < n - 1) {
+                int lenRow = n - k - 1;
+                double[] xRow = new double[lenRow];
+                for (int j = 0; j < lenRow; j++) {
+                    xRow[j] = B.get(k, k + 1 + j);
+                }
+                double normRow = norm2(xRow);
+                if (normRow > TOL) {
+                    if (!tailIsZero(xRow) || Math.abs(xRow[0] - normRow) > TOL) {
+                        net.faulj.vector.Vector hh = net.faulj.vector.VectorUtils.householder(new net.faulj.vector.Vector(xRow));
+                        double tau = hh.get(lenRow);
+                        net.faulj.vector.Vector v = hh.resize(lenRow);
+                        applyHouseholderRight(B, k, k + 1, v.getData(), tau);
+                        applyHouseholderRight(V, 0, k + 1, v.getData(), tau);
+                        for (int j = 1; j < lenRow; j++) {
+                            B.set(k, k + 1 + j, 0.0);
+                        }
+                    }
+                }
+            }
+        }
+
+        return new net.faulj.decomposition.result.BidiagonalizationResult(A, U, B, V);
+    }
+
+    private static double norm2(double[] x) {
+        double sum = 0.0;
+        for (double v : x) {
+            sum += v * v;
+        }
+        return Math.sqrt(sum);
+    }
+
+    private static boolean tailIsZero(double[] x) {
+        for (int i = 1; i < x.length; i++) {
+            if (Math.abs(x[i]) > TOL) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void applyHouseholderLeft(net.faulj.matrix.Matrix M, int startRow, int startCol, double[] v, double tau) {
+        int rows = M.getRowCount();
+        int cols = M.getColumnCount();
+        int len = v.length;
+        for (int col = startCol; col < cols; col++) {
+            double dot = 0.0;
+            for (int i = 0; i < len; i++) {
+                dot += v[i] * M.get(startRow + i, col);
+            }
+            if (Math.abs(dot) < 1e-15) {
+                continue;
+            }
+            double scale = tau * dot;
+            for (int i = 0; i < len; i++) {
+                int r = startRow + i;
+                M.set(r, col, M.get(r, col) - scale * v[i]);
+            }
+        }
+    }
+
+    private static void applyHouseholderRight(net.faulj.matrix.Matrix M, int startRow, int startCol, double[] v, double tau) {
+        int rows = M.getRowCount();
+        int len = v.length;
+        for (int row = startRow; row < rows; row++) {
+            double dot = 0.0;
+            for (int j = 0; j < len; j++) {
+                dot += M.get(row, startCol + j) * v[j];
+            }
+            if (Math.abs(dot) < 1e-15) {
+                continue;
+            }
+            double scale = tau * dot;
+            for (int j = 0; j < len; j++) {
+                int c = startCol + j;
+                M.set(row, c, M.get(row, c) - scale * v[j]);
+            }
+        }
+    }
 }

@@ -213,6 +213,6 @@ public class LUDecomposition {
             singular = true;
         }
         
-        return new LUResult(L, U, P, singular);
+        return new LUResult(A, L, U, P, singular);
     }
 }

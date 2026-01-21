@@ -4,9 +4,6 @@ import net.faulj.matrix.Matrix;
 import net.faulj.decomposition.result.SchurResult;
 import net.faulj.decomposition.result.HessenbergResult;
 import net.faulj.eigen.schur.SchurEigenExtractor;
-import net.faulj.scalar.Complex;
-
-import java.util.List;
 
 /**
  * Implements the Francis Implicit QR Algorithm with adaptive size-based strategy.
@@ -58,8 +55,8 @@ public class ImplicitQRFrancis {
         // For very small matrices, use explicit QR (no fancy shifts, no recursion)
         if (n < SMALL_MATRIX_THRESHOLD) {
             Matrix[] result = ExplicitQRIteration.decompose(A);
-            List<Complex> eigenvalues = ExplicitQRIteration.getEigenvalues(A);
-            return new SchurResult(result[0], result[1], eigenvalues.toArray(new Complex[0]));
+            SchurEigenExtractor extractor = new SchurEigenExtractor(result[0], result[1]);
+            return new SchurResult(A, result[0], result[1], extractor.getEigenvalues(), extractor.getEigenvectors());
         }
 
         // Step 1: Reduce to Hessenberg
@@ -107,8 +104,8 @@ public class ImplicitQRFrancis {
         }
 
         // Extract eigenvalues
-        SchurEigenExtractor extractor = new SchurEigenExtractor(H);
-        return new SchurResult(H, U, extractor.getEigenvalues());
+        SchurEigenExtractor extractor = new SchurEigenExtractor(H, U);
+        return new SchurResult(A, H, U, extractor.getEigenvalues(), extractor.getEigenvectors());
     }
 
     /**

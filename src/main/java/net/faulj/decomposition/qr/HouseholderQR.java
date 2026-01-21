@@ -221,6 +221,6 @@ public class HouseholderQR {
 			}
 		}
 
-		return new QRResult(Q, R);
+		return new QRResult(A, Q, R);
 	}
 }

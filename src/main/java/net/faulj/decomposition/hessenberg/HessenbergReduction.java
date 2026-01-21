@@ -1,5 +1,6 @@
 package net.faulj.decomposition.hessenberg;
 
+import net.faulj.decomposition.result.HessenbergResult;
 import net.faulj.matrix.Matrix;
 import net.faulj.vector.Vector;
 import net.faulj.vector.VectorUtils;
@@ -151,7 +152,9 @@ import net.faulj.vector.VectorUtils;
  * @see net.faulj.decomposition.qr.HouseholderQR
  */
 public class HessenbergReduction {
-	public static Matrix[] decompose(Matrix A) {
+
+
+	public static HessenbergResult decompose(Matrix A) {
 		if (!A.isSquare()) {
 			throw new ArithmeticException("Matrix must be square to compute Hessenberg form");
 		}
@@ -178,7 +181,6 @@ public class HessenbergReduction {
 			}
 		}
 		Matrix H = M;
-		Vector[] V = vVectors.toArray(new Vector[0]);
-		return new Matrix[]{H, Q};
+		return new HessenbergResult(A, H, Q);
 	}
 }

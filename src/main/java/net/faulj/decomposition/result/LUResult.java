@@ -2,6 +2,7 @@ package net.faulj.decomposition.result;
 
 import net.faulj.core.PermutationVector;
 import net.faulj.matrix.Matrix;
+import net.faulj.matrix.MatrixUtils;
 
 /**
  * Encapsulates the result of LU decomposition with partial pivoting.
@@ -102,13 +103,15 @@ import net.faulj.matrix.Matrix;
  */
 public class LUResult {
     
+    private final Matrix A;
     private final Matrix L;
     private final Matrix U;
     private final PermutationVector P;
     private final boolean singular;
     private final double determinant;
-    
-    public LUResult(Matrix L, Matrix U, PermutationVector P, boolean singular) {
+
+    public LUResult(Matrix A, Matrix L, Matrix U, PermutationVector P, boolean singular) {
+        this.A = A;
         this.L = L;
         this.U = U;
         this.P = P;
@@ -132,26 +135,34 @@ public class LUResult {
     public double getDeterminant() { return determinant; }
     
     /**
-     * Reconstructs PA from L and U for verification.
+     * Reconstructs LU (note: PA is obtained by applying P externally if needed).
      */
     public Matrix reconstruct() {
         return L.multiply(U);
     }
-    
-    /**
-     * Computes reconstruction error ||PA - LU||_F
-     */
-    public double getResidualNorm(Matrix A) {
-        Matrix PA = permuteRows(A);
-        Matrix LU = reconstruct();
-        return PA.subtract(LU).frobeniusNorm();
+
+    public double residualNorm() {
+        Matrix PA = permuteRows();
+        return MatrixUtils.normResidual(PA, reconstruct());
+    }
+
+    public double residualElement() {
+        Matrix PA = permuteRows();
+        return MatrixUtils.backwardErrorComponentwise(PA, reconstruct());
+    }
+
+    public double[] verifyOrthogonality(Matrix O) {
+        Matrix I = Matrix.Identity(O.getRowCount());
+        O = O.multiply(O.transpose());
+        double n = MatrixUtils.normResidual(I, O);
+        double e = MatrixUtils.backwardErrorComponentwise(I, O);
+        return new double[]{n, e};
     }
     
-    private Matrix permuteRows(Matrix A) {
+    private Matrix permuteRows() {
         Matrix result = A.copy();
         for (int i = 0; i < P.size(); i++) {
             if (P.get(i) != i) {
-                // Apply permutation to rows
                 for (int j = 0; j < A.getColumnCount(); j++) {
                     result.set(i, j, A.get(P.get(i), j));
                 }

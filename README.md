@@ -78,6 +78,7 @@ TODO: Brief description of the library and its goals.
   <details>
     <summary>📁 result — ✅</summary>
     <div>
+      <div>📄 BidiagonalizationResult.java ✅ (test: ❌)</div>
       <div>📄 CholeskyResult.java ✅ (test: ❌)</div>
       <div>📄 HessenbergResult.java ✅ (test: ❌)</div>
       <div>📄 LUResult.java ✅ (test: ❌)</div>
@@ -182,9 +183,9 @@ TODO: Brief description of the library and its goals.
     </div>
   </details>
   <details>
-    <summary>📁 spaces — 🕤</summary>
+    <summary>📁 spaces — 🕢</summary>
     <div>
-      <div>📄 ChangeOfBasis.java ❌ (test: ❌)</div>
+      <div>📄 ChangeOfBasis.java ✅ (test: ❌)</div>
       <div>📄 CoordinateMapping.java ❌ (test: ❌)</div>
       <div>📄 DirectSum.java ❌ (test: ❌)</div>
       <div>📄 OrthogonalComplement.java ❌ (test: ❌)</div>
@@ -193,13 +194,13 @@ TODO: Brief description of the library and its goals.
     </div>
   </details>
   <details>
-    <summary>📁 svd — ❌</summary>
+    <summary>📁 svd — 🕖</summary>
     <div>
       <div>📄 BidiagonalQR.java ❌ (test: ❌)</div>
       <div>📄 Pseudoinverse.java ❌ (test: ❌)</div>
       <div>📄 RankEstimation.java ❌ (test: ❌)</div>
-      <div>📄 SVDecomposition.java ❌ (test: ❌)</div>
-      <div>📄 ThinSVD.java ❌ (test: ❌)</div>
+      <div>📄 SVDecomposition.java ✅ (test: ❌)</div>
+      <div>📄 ThinSVD.java ✅ (test: ❌)</div>
     </div>
   </details>
   <details>

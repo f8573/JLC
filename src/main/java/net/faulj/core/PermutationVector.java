@@ -1,5 +1,7 @@
 package net.faulj.core;
 
+import net.faulj.matrix.Matrix;
+
 import java.util.Arrays;
 
 /**
@@ -89,10 +91,8 @@ import java.util.Arrays;
  * @see net.faulj.determinant.LUDeterminant
  */
 public class PermutationVector {
-    
     private final int[] perm;
     private int exchangeCount;
-    
     public PermutationVector(int size) {
         this.perm = new int[size];
         for (int i = 0; i < size; i++) {
@@ -100,7 +100,6 @@ public class PermutationVector {
         }
         this.exchangeCount = 0;
     }
-    
     public void exchange(int i, int j) {
         if (i != j) {
             int temp = perm[i];
@@ -109,34 +108,48 @@ public class PermutationVector {
             exchangeCount++;
         }
     }
-    
     public int get(int index) {
         return perm[index];
     }
-    
     public int size() {
         return perm.length;
     }
-    
     public int getExchangeCount() {
         return exchangeCount;
     }
-    
     /**
      * Returns the sign of the permutation: +1 for even, -1 for odd exchanges.
      */
     public int sign() {
         return (exchangeCount % 2 == 0) ? 1 : -1;
     }
-    
     public int[] toArray() {
         return Arrays.copyOf(perm, perm.length);
     }
-    
     public PermutationVector copy() {
         PermutationVector p = new PermutationVector(perm.length);
         System.arraycopy(this.perm, 0, p.perm, 0, perm.length);
         p.exchangeCount = this.exchangeCount;
         return p;
+    }
+
+    /**
+     * Builds and returns the permutation matrix P corresponding to this permutation vector.
+     * Row i of P has a 1 at column perm[i], so that applying P to a matrix A yields rows
+     * (PA)[i,*] = A[perm[i],*], matching the usage in LUResult.
+     *
+     * @return an n-by-n permutation Matrix P
+     */
+    public Matrix asMatrix() {
+        int n = perm.length;
+        Matrix P = new Matrix(n, n);
+        // set explicit entries to be clear; assume Matrix initializes to zeros but set anyway
+        for (int i = 0; i < n; i++) {
+            for (int j = 0; j < n; j++) {
+                P.set(i, j, 0.0);
+            }
+            P.set(i, perm[i], 1.0);
+        }
+        return P;
     }
 }

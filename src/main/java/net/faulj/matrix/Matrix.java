@@ -6,6 +6,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import net.faulj.core.Tolerance;
 import net.faulj.vector.Vector;
 import net.faulj.vector.VectorUtils;
 import net.faulj.spaces.SubspaceBasis;
@@ -630,7 +631,7 @@ public class Matrix {
 
     
 
-    public Matrix[] Hessenberg() {
+    public net.faulj.decomposition.result.HessenbergResult Hessenberg() {
         return net.faulj.decomposition.hessenberg.HessenbergReduction.decompose(this);
     }
 
@@ -752,6 +753,4 @@ public class Matrix {
         }
         return new Matrix(data);
     }
-    
-    
 }

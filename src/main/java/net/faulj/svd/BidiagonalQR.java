@@ -29,7 +29,8 @@ package net.faulj.svd;
  *
  * <h2>Input Form:</h2>
  * <pre>
- * B = ┌ d₀  e₀  0   0 ┐
+ * B =
+ * ┌ d₀  e₀  0   0 ┐
  * │ 0   d₁  e₁  0 │
  * │ 0   0   d₂  e₂│
  * └ 0   0   0   d₃┘
