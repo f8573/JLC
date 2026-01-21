@@ -1,5 +1,7 @@
 package net.faulj.polar;
 
+import net.faulj.decomposition.bidiagonal.Bidiagonalization;
+import net.faulj.decomposition.result.BidiagonalizationResult;
 import net.faulj.decomposition.result.PolarResult;
 import net.faulj.matrix.Matrix;
 import net.faulj.svd.SVDecomposition;
@@ -103,13 +105,6 @@ import net.faulj.svd.SVDecomposition;
 public class PolarDecomposition {
 
     /**
-     * Constructs a new PolarDecomposition solver.
-     */
-    public PolarDecomposition() {
-        throw new RuntimeException("Class is not yet implemented");
-    }
-
-    /**
      * Decomposes the given matrix A into the product of an orthogonal matrix U
      * and a positive semi-definite matrix P.
      *
@@ -117,8 +112,14 @@ public class PolarDecomposition {
      * @return The resulting {@link PolarResult} containing matrices U and P.
      * @throws IllegalArgumentException if the matrix dimensions are invalid or memory allocation fails.
      */
-    public PolarResult decompose(Matrix A) {
-        // Implementation logic would go here
-        return null;
+    public static PolarResult decompose(Matrix A) {
+        Bidiagonalization bidiagonalization = new Bidiagonalization();
+        BidiagonalizationResult bidiagonalizationResult = bidiagonalization.decompose(A);
+        Matrix W = bidiagonalizationResult.getU();
+        Matrix B = bidiagonalizationResult.getB();
+        Matrix V = bidiagonalizationResult.getV();
+        Matrix P = V.multiply(B.multiply(V.transpose()));
+        Matrix U = W.multiply(V.transpose());
+        return new PolarResult(A, U, P);
     }
 }

@@ -1,6 +1,7 @@
 package net.faulj.decomposition.result;
 
 import net.faulj.matrix.Matrix;
+import net.faulj.matrix.MatrixUtils;
 
 /**
  * Encapsulates the result of QR decomposition.
@@ -99,10 +100,12 @@ import net.faulj.matrix.Matrix;
  * @see net.faulj.solve.LeastSquaresSolver
  */
 public class QRResult {
+    private final Matrix A;
     private final Matrix Q;
     private final Matrix R;
 
-    public QRResult(Matrix Q, Matrix R) {
+    public QRResult(Matrix A, Matrix Q, Matrix R) {
+        this.A = A;
         this.Q = Q;
         this.R = R;
     }
@@ -119,9 +122,19 @@ public class QRResult {
         return Q.multiply(R);
     }
 
-    public double getResidualNorm(Matrix A) {
-        Matrix QR = reconstruct();
-        Matrix diff = A.subtract(QR);
-        return diff.frobeniusNorm();
+    public double residualNorm() {
+        return MatrixUtils.normResidual(A, reconstruct());
+    }
+
+    public double residualElement() {
+        return MatrixUtils.backwardErrorComponentwise(A, reconstruct());
+    }
+
+    public double[] verifyOrthogonality(Matrix O) {
+        Matrix I = Matrix.Identity(O.getRowCount());
+        O = O.multiply(O.transpose());
+        double n = MatrixUtils.normResidual(I, O);
+        double e = MatrixUtils.backwardErrorComponentwise(I, O);
+        return new double[]{n, e};
     }
 }

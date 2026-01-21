@@ -1,6 +1,7 @@
 package net.faulj.decomposition.result;
 
 import net.faulj.matrix.Matrix;
+import net.faulj.matrix.MatrixUtils;
 
 /**
  * Encapsulates the result of Hessenberg reduction.
@@ -121,8 +122,9 @@ import net.faulj.matrix.Matrix;
 public class HessenbergResult {
     private final Matrix H;
     private final Matrix Q;
-
-    public HessenbergResult(Matrix H, Matrix Q) {
+    private final Matrix A;
+    public HessenbergResult(Matrix A, Matrix H, Matrix Q) {
+        this.A = A;
         this.H = H;
         this.Q = Q;
     }
@@ -142,8 +144,19 @@ public class HessenbergResult {
         return Q.multiply(H).multiply(Q.transpose());
     }
 
-    public double getResidualNorm(Matrix A) {
-        Matrix recon = reconstruct();
-        return A.subtract(recon).frobeniusNorm();
+    public double residualNorm() {
+        return MatrixUtils.normResidual(A, reconstruct());
+    }
+
+    public double residualElement() {
+        return MatrixUtils.backwardErrorComponentwise(A, reconstruct());
+    }
+
+    public double[] verifyOrthogonality(Matrix O) {
+        Matrix I = Matrix.Identity(O.getRowCount());
+        O = O.multiply(O.transpose());
+        double n = MatrixUtils.normResidual(I, O);
+        double e = MatrixUtils.backwardErrorComponentwise(I, O);
+        return new double[]{n, e};
     }
 }

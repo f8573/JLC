@@ -102,7 +102,7 @@ public class BlockedHessenbergQR {
             }
         }
 
-        return new HessenbergResult(H, Q);
+        return new HessenbergResult(A, H, Q);
     }
 
     private static void applyHouseholderLeft(Matrix A, double[] v, int startRow) {

@@ -1,6 +1,8 @@
 package net.faulj.decomposition.result;
 
 import net.faulj.matrix.Matrix;
+import net.faulj.matrix.MatrixUtils;
+import net.faulj.vector.Vector;
 
 /**
  * Encapsulates the result of Cholesky decomposition.
@@ -115,8 +117,10 @@ import net.faulj.matrix.Matrix;
  */
 public class CholeskyResult {
     private final Matrix L;
+    private final Matrix A;
 
-    public CholeskyResult(Matrix L) {
+    public CholeskyResult(Matrix A, Matrix L) {
+        this.A = A;
         this.L = L;
     }
 
@@ -157,13 +161,70 @@ public class CholeskyResult {
         return prod * prod;  // Square it
     }
 
+    public double residualNorm() {
+        return MatrixUtils.normResidual(A, reconstruct());
+    }
+
+    public double residualElement() {
+        return MatrixUtils.backwardErrorComponentwise(A, reconstruct());
+    }
+
+    public double[] verifyOrthogonality(Matrix O) {
+        Matrix I = Matrix.Identity(O.getRowCount());
+        O = O.multiply(O.transpose());
+        double n = MatrixUtils.normResidual(I, O);
+        double e = MatrixUtils.backwardErrorComponentwise(I, O);
+        return new double[]{n, e};
+    }
+
     /**
-     * Computes reconstruction error ||A - LL^T||_F
-     * @param A original matrix
-     * @return Frobenius norm of reconstruction error
+     * Solves Ax = b using the Cholesky factors (A = L L^T).
+     * Performs forward substitution Ly = b and back substitution L^T x = y.
+     * @param b right-hand side vector
+     * @return solution vector x
      */
-    public double getResidualNorm(Matrix A) {
-        Matrix reconstructed = reconstruct();
-        return A.subtract(reconstructed).frobeniusNorm();
+    public Vector solve(Vector b) {
+        if (b == null) throw new IllegalArgumentException("Right-hand side vector must not be null");
+        int n = L.getRowCount();
+        if (b.dimension() != n) throw new IllegalArgumentException("Dimension mismatch");
+
+        double[] y = new double[n];
+        // forward substitution: L * y = b
+        for (int i = 0; i < n; i++) {
+            double sum = 0.0;
+            for (int k = 0; k < i; k++) {
+                sum += L.get(i, k) * y[k];
+            }
+            y[i] = (b.get(i) - sum) / L.get(i, i);
+        }
+
+        double[] x = new double[n];
+        // back substitution: L^T * x = y
+        for (int i = n - 1; i >= 0; i--) {
+            double sum = 0.0;
+            for (int k = i + 1; k < n; k++) {
+                sum += L.get(k, i) * x[k];
+            }
+            x[i] = (y[i] - sum) / L.get(i, i);
+        }
+
+        return new Vector(x);
+    }
+
+    /**
+     * Computes the inverse of the original matrix using the Cholesky factors.
+     * @return inverse matrix A^{-1}
+     */
+    public Matrix inverse() {
+        int n = L.getRowCount();
+        Vector[] cols = new Vector[n];
+        for (int j = 0; j < n; j++) {
+            double[] e = new double[n];
+            e[j] = 1.0;
+            Vector ej = new Vector(e);
+            Vector x = solve(ej);
+            cols[j] = x;
+        }
+        return new Matrix(cols);
     }
 }

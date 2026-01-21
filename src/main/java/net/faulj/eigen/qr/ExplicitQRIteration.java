@@ -61,9 +61,9 @@ public class ExplicitQRIteration {
         }
 
         // 1. Reduce to Hessenberg Form
-        Matrix[] hessDecomp = HessenbergReduction.decompose(A);
-        Matrix H = hessDecomp[0];
-        Matrix Q = hessDecomp[1]; // Accumulated Q from Hessenberg reduction
+        net.faulj.decomposition.result.HessenbergResult hess = HessenbergReduction.decompose(A);
+        Matrix H = hess.getH();
+        Matrix Q = hess.getQ(); // Accumulated Q from Hessenberg reduction
 
         int n = H.getRowCount();
         int iter = 0;

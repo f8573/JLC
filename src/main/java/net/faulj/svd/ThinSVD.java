@@ -56,6 +56,19 @@ import net.faulj.decomposition.result.SVDResult;
  */
 public class ThinSVD {
 	public ThinSVD() {
-		throw new RuntimeException("Class unfinished");
+	}
+
+	public SVDResult decompose(Matrix A) {
+		if (A == null) {
+			throw new IllegalArgumentException("Matrix must not be null");
+		}
+		SVDResult full = new SVDecomposition().decompose(A);
+		int m = A.getRowCount();
+		int n = A.getColumnCount();
+		int r = Math.min(m, n);
+		Matrix U = full.getU().crop(0, m - 1, 0, r - 1);
+		Matrix V = full.getV().crop(0, n - 1, 0, r - 1);
+		double[] sigma = java.util.Arrays.copyOf(full.getSingularValues(), r);
+		return new SVDResult(A, U, sigma, V);
 	}
 }

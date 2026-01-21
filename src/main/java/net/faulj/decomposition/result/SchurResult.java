@@ -1,6 +1,7 @@
 package net.faulj.decomposition.result;
 
 import net.faulj.matrix.Matrix;
+import net.faulj.matrix.MatrixUtils;
 import net.faulj.scalar.Complex;
 
 import java.util.Arrays;
@@ -130,24 +131,50 @@ import java.util.Arrays;
  * @see HessenbergResult
  */
 public class SchurResult {
+    private final Matrix A;
     private final Matrix T; // Quasi-upper triangular matrix
     private final Matrix U; // Unitary/Orthogonal matrix (Schur vectors)
     private final Complex[] eigenvalues;
+    private final Matrix eigenvectors;
 
-    public SchurResult(Matrix T, Matrix U, Complex[] eigenvalues) {
+    public SchurResult(Matrix A, Matrix T, Matrix U, Complex[] eigenvalues) {
+        this(A, T, U, eigenvalues, null);
+    }
+
+    public SchurResult(Matrix A, Matrix T, Matrix U, Complex[] eigenvalues, Matrix eigenvectors) {
+        this.A = A;
         this.T = T;
         this.U = U;
         this.eigenvalues = eigenvalues;
+        this.eigenvectors = eigenvectors;
     }
 
     public Matrix getT() { return T; }
     public Matrix getU() { return U; }
     public Complex[] getEigenvalues() { return eigenvalues; }
+    public Matrix getEigenvectors() { return eigenvectors; }
 
     @Override
     public String toString() {
         return "SchurResult{\n" +
                 "  T=" + T.getRowCount() + "x" + T.getColumnCount() + "\n" +
+                "  Eigenvectors=" + (eigenvectors == null ? "null" : eigenvectors.getRowCount() + "x" + eigenvectors.getColumnCount()) + "\n" +
                 "  Eigenvalues=" + Arrays.toString(eigenvalues);
+    }
+
+    public double residualNorm() {
+        return MatrixUtils.normResidual(A, U.multiply(T).multiply(U.transpose()));
+    }
+
+    public double residualElement() {
+        return MatrixUtils.backwardErrorComponentwise(A, U.multiply(T).multiply(U.transpose()));
+    }
+
+    public double[] verifyOrthogonality(Matrix O) {
+        Matrix I = Matrix.Identity(O.getRowCount());
+        O = O.multiply(O.transpose());
+        double n = MatrixUtils.normResidual(I, O);
+        double e = MatrixUtils.backwardErrorComponentwise(I, O);
+        return new double[]{n, e};
     }
 }
