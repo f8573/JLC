@@ -54,4 +54,279 @@ package net.faulj.compute;
  * @see BlockedMultiply
  */
 public class DispatchPolicy {
+    public enum Algorithm {
+        NAIVE,
+        BLOCKED,
+        CUDA,
+        PARALLEL,
+        STRASSEN,
+        SPECIALIZED
+    }
+
+    @FunctionalInterface
+    public interface GpuDetector {
+        boolean isCudaAvailable();
+    }
+
+    private static volatile DispatchPolicy globalPolicy = builder().build();
+
+    private final int naiveThreshold;
+    private final int blockedThreshold;
+    private final int strassenThreshold;
+    private final int parallelThreshold;
+    private final int baseBlockSize;
+    private final int minBlockSize;
+    private final int maxBlockSize;
+    private final int parallelism;
+    private final boolean enableParallel;
+    private final boolean enableStrassen;
+    private final boolean enableCuda;
+    private final int cudaMinDim;
+    private final long cudaMinElements;
+    private final long cudaMinFlops;
+    private final GpuDetector cudaDetector;
+
+    private DispatchPolicy(Builder builder) {
+        this.naiveThreshold = builder.naiveThreshold;
+        this.blockedThreshold = builder.blockedThreshold;
+        this.strassenThreshold = builder.strassenThreshold;
+        this.parallelThreshold = builder.parallelThreshold;
+        this.baseBlockSize = builder.baseBlockSize;
+        this.minBlockSize = builder.minBlockSize;
+        this.maxBlockSize = builder.maxBlockSize;
+        this.parallelism = builder.parallelism;
+        this.enableParallel = builder.enableParallel;
+        this.enableStrassen = builder.enableStrassen;
+        this.enableCuda = builder.enableCuda;
+        this.cudaMinDim = builder.cudaMinDim;
+        this.cudaMinElements = builder.cudaMinElements;
+        this.cudaMinFlops = builder.cudaMinFlops;
+        this.cudaDetector = builder.cudaDetector;
+    }
+
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    public static DispatchPolicy defaultPolicy() {
+        return globalPolicy;
+    }
+
+    public static DispatchPolicy getGlobalPolicy() {
+        return globalPolicy;
+    }
+
+    public static void setGlobalPolicy(DispatchPolicy policy) {
+        if (policy == null) {
+            throw new IllegalArgumentException("Dispatch policy must not be null");
+        }
+        globalPolicy = policy;
+    }
+
+    public static void resetGlobalPolicy() {
+        globalPolicy = builder().build();
+    }
+
+    public Algorithm selectForMultiply(int m, int n, int k) {
+        int maxDim = Math.max(m, Math.max(n, k));
+        if (maxDim <= naiveThreshold) {
+            return Algorithm.NAIVE;
+        }
+        if (shouldOffloadToCuda(m, n, k)) {
+            return Algorithm.CUDA;
+        }
+        boolean square = (m == n && n == k);
+        if (enableStrassen && square && maxDim >= strassenThreshold) {
+            return Algorithm.STRASSEN;
+        }
+        if (enableParallel && maxDim >= parallelThreshold && parallelism > 1) {
+            return Algorithm.PARALLEL;
+        }
+        if (maxDim >= blockedThreshold) {
+            return Algorithm.BLOCKED;
+        }
+        return Algorithm.NAIVE;
+    }
+
+    public boolean shouldOffloadToCuda(int m, int n, int k) {
+        if (!enableCuda) {
+            return false;
+        }
+        if (cudaDetector == null || !cudaDetector.isCudaAvailable()) {
+            return false;
+        }
+        int minDim = Math.min(m, Math.min(n, k));
+        if (minDim < cudaMinDim) {
+            return false;
+        }
+        long elements = (long) m * k + (long) k * n + (long) m * n;
+        if (elements < cudaMinElements) {
+            return false;
+        }
+        long flops = 2L * m * n * k;
+        return flops >= cudaMinFlops;
+    }
+
+    public int blockSize(int m, int n, int k) {
+        int limit = Math.min(m, Math.min(n, k));
+        if (limit <= 0) {
+            return 0;
+        }
+        int size = Math.min(baseBlockSize, limit);
+        size = Math.min(size, maxBlockSize);
+        if (size < minBlockSize) {
+            size = limit;
+        }
+        int aligned = size - (size % 8);
+        if (aligned > 0) {
+            size = aligned;
+        }
+        return Math.max(1, size);
+    }
+
+    public int getParallelism() {
+        return parallelism;
+    }
+
+    public int getNaiveThreshold() {
+        return naiveThreshold;
+    }
+
+    public int getBlockedThreshold() {
+        return blockedThreshold;
+    }
+
+    public int getStrassenThreshold() {
+        return strassenThreshold;
+    }
+
+    public int getParallelThreshold() {
+        return parallelThreshold;
+    }
+
+    public boolean isParallelEnabled() {
+        return enableParallel;
+    }
+
+    public boolean isStrassenEnabled() {
+        return enableStrassen;
+    }
+
+    public boolean isCudaEnabled() {
+        return enableCuda;
+    }
+
+    public int getCudaMinDim() {
+        return cudaMinDim;
+    }
+
+    public long getCudaMinElements() {
+        return cudaMinElements;
+    }
+
+    public long getCudaMinFlops() {
+        return cudaMinFlops;
+    }
+
+    public static final class Builder {
+        private int naiveThreshold = 64;
+        private int blockedThreshold = 256;
+        private int strassenThreshold = 1024;
+        private int parallelThreshold = 2048;
+        private int baseBlockSize = 64;
+        private int minBlockSize = 16;
+        private int maxBlockSize = 256;
+        private int parallelism = Math.max(1, Runtime.getRuntime().availableProcessors());
+        private boolean enableParallel = true;
+        private boolean enableStrassen = false;
+        private boolean enableCuda = true;
+        private int cudaMinDim = 256;
+        private long cudaMinElements = 1_000_000L;
+        private long cudaMinFlops = 1_000_000_000L;
+        private GpuDetector cudaDetector = CudaSupport::isCudaAvailable;
+
+        public Builder naiveThreshold(int naiveThreshold) {
+            this.naiveThreshold = Math.max(1, naiveThreshold);
+            return this;
+        }
+
+        public Builder blockedThreshold(int blockedThreshold) {
+            this.blockedThreshold = Math.max(1, blockedThreshold);
+            return this;
+        }
+
+        public Builder strassenThreshold(int strassenThreshold) {
+            this.strassenThreshold = Math.max(1, strassenThreshold);
+            return this;
+        }
+
+        public Builder parallelThreshold(int parallelThreshold) {
+            this.parallelThreshold = Math.max(1, parallelThreshold);
+            return this;
+        }
+
+        public Builder blockSize(int blockSize) {
+            this.baseBlockSize = Math.max(1, blockSize);
+            return this;
+        }
+
+        public Builder minBlockSize(int minBlockSize) {
+            this.minBlockSize = Math.max(1, minBlockSize);
+            return this;
+        }
+
+        public Builder maxBlockSize(int maxBlockSize) {
+            this.maxBlockSize = Math.max(1, maxBlockSize);
+            return this;
+        }
+
+        public Builder parallelism(int parallelism) {
+            this.parallelism = Math.max(1, parallelism);
+            return this;
+        }
+
+        public Builder enableParallel(boolean enableParallel) {
+            this.enableParallel = enableParallel;
+            return this;
+        }
+
+        public Builder enableStrassen(boolean enableStrassen) {
+            this.enableStrassen = enableStrassen;
+            return this;
+        }
+
+        public Builder enableCuda(boolean enableCuda) {
+            this.enableCuda = enableCuda;
+            return this;
+        }
+
+        public Builder cudaMinDim(int cudaMinDim) {
+            this.cudaMinDim = Math.max(1, cudaMinDim);
+            return this;
+        }
+
+        public Builder cudaMinElements(long cudaMinElements) {
+            this.cudaMinElements = Math.max(1L, cudaMinElements);
+            return this;
+        }
+
+        public Builder cudaMinFlops(long cudaMinFlops) {
+            this.cudaMinFlops = Math.max(1L, cudaMinFlops);
+            return this;
+        }
+
+        public Builder cudaDetector(GpuDetector cudaDetector) {
+            this.cudaDetector = cudaDetector;
+            return this;
+        }
+
+        public DispatchPolicy build() {
+            if (minBlockSize > maxBlockSize) {
+                int temp = minBlockSize;
+                minBlockSize = maxBlockSize;
+                maxBlockSize = temp;
+            }
+            return new DispatchPolicy(this);
+        }
+    }
 }

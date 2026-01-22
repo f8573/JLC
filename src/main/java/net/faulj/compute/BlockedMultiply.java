@@ -1,5 +1,7 @@
 package net.faulj.compute;
 
+import net.faulj.matrix.Matrix;
+
 /**
  * Implements cache-optimized blocked matrix multiplication algorithms.
  * <p>
@@ -48,4 +50,92 @@ package net.faulj.compute;
  * @see net.faulj.matrix.Matrix
  */
 public class BlockedMultiply {
+    private static final double ZERO_EPS = 1e-15;
+
+    private BlockedMultiply() {
+    }
+
+    public static Matrix multiply(Matrix a, Matrix b) {
+        return multiply(a, b, DispatchPolicy.defaultPolicy());
+    }
+
+    public static Matrix multiply(Matrix a, Matrix b, DispatchPolicy policy) {
+        if (a == null || b == null) {
+            throw new IllegalArgumentException("Matrices must not be null");
+        }
+        if (policy == null) {
+            policy = DispatchPolicy.getGlobalPolicy();
+        }
+        int m = a.getRowCount();
+        int k = a.getColumnCount();
+        int k2 = b.getRowCount();
+        int n = b.getColumnCount();
+        if (k != k2) {
+            throw new IllegalArgumentException("Inner dimensions must agree for multiplication: " + k + " != " + k2);
+        }
+        if (m == 0 || n == 0 || k == 0) {
+            return net.faulj.matrix.Matrix.zero(m, n);
+        }
+
+        DispatchPolicy.Algorithm algorithm = policy.selectForMultiply(m, n, k);
+        int blockSize = policy.blockSize(m, n, k);
+
+        switch (algorithm) {
+            case NAIVE:
+                return multiplyNaive(a, b);
+            case CUDA:
+                return multiplyBlocked(a, b, blockSize);
+            case PARALLEL:
+                return multiplyParallel(a, b, blockSize, policy.getParallelism());
+            case BLOCKED:
+            case STRASSEN:
+            case SPECIALIZED:
+            default:
+                return multiplyBlocked(a, b, blockSize);
+        }
+    }
+
+    public static Matrix multiplyNaive(Matrix a, Matrix b) {
+        int m = a.getRowCount();
+        int k = a.getColumnCount();
+        int n = b.getColumnCount();
+
+        net.faulj.vector.Vector[] aCols = a.getData();
+        net.faulj.vector.Vector[] bCols = b.getData();
+        net.faulj.vector.Vector[] resultCols = new net.faulj.vector.Vector[n];
+
+        for (int j = 0; j < n; j++) {
+            double[] cCol = new double[m];
+            double[] bCol = bCols[j].getData();
+            for (int kk = 0; kk < k; kk++) {
+                double bVal = bCol[kk];
+                if (Math.abs(bVal) <= ZERO_EPS) {
+                    continue;
+                }
+                double[] aCol = aCols[kk].getData();
+                for (int i = 0; i < m; i++) {
+                    cCol[i] += aCol[i] * bVal;
+                }
+            }
+            resultCols[j] = new net.faulj.vector.Vector(cCol);
+        }
+
+        return new Matrix(resultCols);
+    }
+
+    public static Matrix multiplyBlocked(Matrix a, Matrix b, int blockSize) {
+        int m = a.getRowCount();
+        int n = b.getColumnCount();
+        Matrix c = net.faulj.matrix.Matrix.zero(m, n);
+        BLAS3Kernels.dgemm(a, b, c, 1.0, 0.0, blockSize);
+        return c;
+    }
+
+    public static Matrix multiplyParallel(Matrix a, Matrix b, int blockSize, int parallelism) {
+        int m = a.getRowCount();
+        int n = b.getColumnCount();
+        Matrix c = net.faulj.matrix.Matrix.zero(m, n);
+        BLAS3Kernels.dgemmParallel(a, b, c, 1.0, 0.0, blockSize, parallelism);
+        return c;
+    }
 }
