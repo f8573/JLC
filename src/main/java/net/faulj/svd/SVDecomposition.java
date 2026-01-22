@@ -295,7 +295,7 @@ public class SVDecomposition {
 				dot += bj.get(r) * result.get(r);
 			}
 			for (int r = 0; r < result.dimension(); r++) {
-				result.getData()[r] -= dot * bj.get(r);
+				result.set(r, result.get(r) - dot * bj.get(r));
 			}
 		}
 		return result;

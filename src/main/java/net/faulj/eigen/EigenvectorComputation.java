@@ -2,9 +2,6 @@ package net.faulj.eigen;
 
 import net.faulj.decomposition.result.SchurResult;
 import net.faulj.matrix.Matrix;
-import net.faulj.vector.Vector;
-import net.faulj.vector.VectorUtils;
-import net.faulj.core.Tolerance;
 
 /**
  * Utilities for computing eigenvectors from matrix decompositions.
@@ -70,7 +67,37 @@ import net.faulj.core.Tolerance;
  * @see net.faulj.decomposition.result.SchurResult
  */
 public class EigenvectorComputation {
+    /**
+     * Computes eigenvectors from a Schur decomposition result.
+     *
+     * @param schur The Schur result containing T and U
+     * @return Matrix whose columns are eigenvectors (complex-aware)
+     */
+    public static Matrix computeEigenvectors(SchurResult schur) {
+        if (schur == null) {
+            throw new IllegalArgumentException("Schur result must not be null");
+        }
+        Matrix T = schur.getT();
+        Matrix U = schur.getU();
+        if (T == null || U == null) {
+            throw new IllegalArgumentException("Schur result must contain T and U");
+        }
+        net.faulj.eigen.schur.SchurEigenExtractor extractor =
+                new net.faulj.eigen.schur.SchurEigenExtractor(T, U);
+        return extractor.getEigenvectors();
+    }
 
-
-
+    /**
+     * Computes eigenvectors by performing a real Schur decomposition first.
+     *
+     * @param A The input matrix
+     * @return Matrix whose columns are eigenvectors (complex-aware)
+     */
+    public static Matrix computeEigenvectors(Matrix A) {
+        if (A == null) {
+            throw new IllegalArgumentException("Matrix must not be null");
+        }
+        SchurResult schur = net.faulj.eigen.schur.RealSchurDecomposition.decompose(A);
+        return computeEigenvectors(schur);
+    }
 }

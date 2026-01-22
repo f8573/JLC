@@ -54,7 +54,7 @@ public class BatchProcessingTest {
     public void testCudaSupportRefreshAndDetection() {
         // Refresh any cached detection
         CudaSupport.refresh();
-        Boolean available = Boolean.valueOf(CudaSupport.isCudaAvailable());
+        Boolean available = CudaSupport.isCudaAvailable();
         assertNotNull(available);
     }
 }

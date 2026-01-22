@@ -1,52 +1,15 @@
 package net.faulj.eigen.schur;
 
 import net.faulj.core.Tolerance;
-import net.faulj.decomposition.result.SchurResult;
 import net.faulj.matrix.Matrix;
 import net.faulj.scalar.Complex;
 import net.faulj.vector.Vector;
-import net.faulj.vector.VectorUtils;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Utility class for computing eigenvectors from a Real Schur Decomposition.
- * <p>
- * While the Schur decomposition (A = UTU<sup>T</sup>) reveals eigenvalues on the diagonal blocks of T,
- * it does not explicitly provide the eigenvectors of A. This class bridges that gap by computing
- * the eigenvectors of the quasi-triangular matrix T and transforming them back to the basis of A.
- * </p>
- *
- * <h2>Algorithm:</h2>
- * <ol>
- * <li><b>Solve for y:</b> For each eigenvalue λ, find the eigenvector y of T by solving the system:
- * <pre>(T - λI)y = 0</pre>
- * Since T is quasi-upper triangular, this is solved via back-substitution.
- * </li>
- * <li><b>Transform to x:</b> Convert the eigenvector y (relative to T) to the eigenvector x (relative to A)
- * using the Schur vectors U:
- * <pre>x = Uy</pre>
- * </li>
- * </ol>
- *
- * <h2>Complex Eigenvectors:</h2>
- * <p>
- * For complex eigenvalues coming from 2×2 diagonal blocks, this class handles the complex arithmetic
- * required to compute the corresponding complex conjugate eigenvector pairs.
- * </p>
- *
- * <h2>Usage:</h2>
- * <p>
- * This class is typically used when both eigenvalues and eigenvectors are required, but the
- * stability of the Schur decomposition is preferred over direct eigendecomposition algorithms.
- * </p>
- *
- * @author JLC Development Team
- * @version 1.0
- * @since 1.0
- * @see RealSchurDecomposition
- * @see SchurResult
  */
 public class SchurEigenExtractor {
     private final Matrix schur;
@@ -122,11 +85,12 @@ public class SchurEigenExtractor {
         while (i < n) {
             if (i < n - 1 && Math.abs(T.get(i + 1, i)) > tol) {
                 Complex lambda = values[i];
-                Vector[] parts = solveComplexTriangularEigenvector(T, lambda, i, tol);
-                Matrix yMatrix = new Matrix(new Vector[]{parts[0], parts[1]});
+                Vector y = solveComplexTriangularEigenvector(T, lambda, i, tol);
+                Matrix yMatrix = new Matrix(new Vector[]{y});
                 Matrix xMatrix = U.multiply(yMatrix);
-                columns[i] = xMatrix.getData()[0];
-                columns[i + 1] = xMatrix.getData()[1];
+                Vector x = xMatrix.getData()[0];
+                columns[i] = x;
+                columns[i + 1] = x.conjugate();
                 i += 2;
                 continue;
             }
@@ -161,7 +125,7 @@ public class SchurEigenExtractor {
         return new Vector(y);
     }
 
-    private static Vector[] solveComplexTriangularEigenvector(Matrix T, Complex lambda, int index, double tol) {
+    private static Vector solveComplexTriangularEigenvector(Matrix T, Complex lambda, int index, double tol) {
         int n = T.getRowCount();
         double alpha = lambda.real;
         double beta = lambda.imag;
@@ -263,6 +227,6 @@ public class SchurEigenExtractor {
             row--;
         }
 
-        return new Vector[]{new Vector(p), new Vector(q)};
+        return new Vector(p, q);
     }
 }
