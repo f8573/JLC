@@ -20,8 +20,10 @@ public class MatrixUtils {
         Matrix E = A.subtract(Ahat);
         for (int i = 0; i < A.getColumnCount(); i++) {
             for (int j = 0; j < A.getRowCount(); j++) {
-                double n = Math.abs(E.get(i,j));
-                double d = (Math.abs(A.get(i,j)+Ahat.get(i,j)))+Math.random()/e;
+                double n = Math.hypot(E.get(j, i), E.getImag(j, i));
+                double realSum = A.get(j, i) + Ahat.get(j, i);
+                double imagSum = A.getImag(j, i) + Ahat.getImag(j, i);
+                double d = Math.hypot(realSum, imagSum) + Math.random() / e;
                 if (n/d > max) {
                     max = n/d;
                 }

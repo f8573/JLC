@@ -2,48 +2,139 @@ package net.faulj.matrix;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
 import net.faulj.compute.BlockedMultiply;
-import net.faulj.core.Tolerance;
 import net.faulj.vector.Vector;
-import net.faulj.vector.VectorUtils;
 import net.faulj.spaces.SubspaceBasis;
 
 public class Matrix {
-    private Vector[] data;
+    private final int rows;
     private final int columns;
+    private double[] data;
+    private double[] imag;
     private int exchanges;
-    private ArrayList<Vector> pivotColumns;
+    private final ArrayList<Vector> pivotColumns;
     private double tol = 1e-10;
+    private transient Vector[] columnViews;
 
     public Matrix(Vector[] data) {
-        this.data = data;
+        if (data == null || data.length == 0) {
+            this.rows = 0;
+            this.columns = 0;
+            this.data = new double[0];
+            this.pivotColumns = new ArrayList<>();
+            return;
+        }
+        int rowCount = data[0].dimension();
+        this.rows = rowCount;
         this.columns = data.length;
+        this.data = new double[rows * columns];
+        boolean anyImag = false;
+        for (Vector v : data) {
+            if (v.dimension() != rowCount) {
+                throw new IllegalArgumentException("Column dimension mismatch");
+            }
+            if (v.hasImag()) {
+                anyImag = true;
+            }
+        }
+        if (anyImag) {
+            this.imag = new double[rows * columns];
+        }
+        for (int col = 0; col < columns; col++) {
+            Vector v = data[col];
+            int idx = col;
+            double[] colData = v.getData();
+            double[] colImag = anyImag ? (v.hasImag() ? v.getImagData() : null) : null;
+            for (int row = 0; row < rows; row++) {
+                this.data[idx] = colData[row];
+                if (this.imag != null && colImag != null) {
+                    this.imag[idx] = colImag[row];
+                }
+                idx += columns;
+            }
+        }
         pivotColumns = new ArrayList<>();
     }
 
     public Matrix(double[][] data) {
-        Vector[] vectors = new Vector[data[0].length];
-        for (int j = 0; j < data[0].length; j++) {
-            double[] col = new double[data.length];
-            for (int i = 0; i < data.length; i++) {
-                col[i] = data[i][j];
-            }
-            vectors[j] = new Vector(col);
+        if (data == null || data.length == 0 || data[0].length == 0) {
+            throw new IllegalArgumentException("Data must be non-empty");
         }
-        this.data = vectors;
-        this.columns = vectors.length;
+        this.rows = data.length;
+        this.columns = data[0].length;
+        this.data = new double[rows * columns];
+        for (int row = 0; row < rows; row++) {
+            if (data[row].length != columns) {
+                throw new IllegalArgumentException("All rows must have the same length");
+            }
+            System.arraycopy(data[row], 0, this.data, row * columns, columns);
+        }
+        pivotColumns = new ArrayList<>();
+    }
+
+    public Matrix(double[][] real, double[][] imag) {
+        if (real == null || real.length == 0 || real[0].length == 0) {
+            throw new IllegalArgumentException("Data must be non-empty");
+        }
+        this.rows = real.length;
+        this.columns = real[0].length;
+        if (imag != null && (imag.length != rows || imag[0].length != columns)) {
+            throw new IllegalArgumentException("Imaginary data dimensions must match real data dimensions");
+        }
+        this.data = new double[rows * columns];
+        if (imag != null) {
+            this.imag = new double[rows * columns];
+        }
+        for (int row = 0; row < rows; row++) {
+            if (real[row].length != columns) {
+                throw new IllegalArgumentException("All rows must have the same length");
+            }
+            System.arraycopy(real[row], 0, this.data, row * columns, columns);
+            if (imag != null) {
+                System.arraycopy(imag[row], 0, this.imag, row * columns, columns);
+            }
+        }
         pivotColumns = new ArrayList<>();
     }
 
     public Matrix(int rows, int cols) {
-        Matrix m = Matrix.zero(rows,cols);
-        this.data = m.data;
-        this.columns = m.columns;
-        this.pivotColumns = m.pivotColumns;
+        if (rows < 0 || cols < 0) {
+            throw new IllegalArgumentException("Matrix dimensions must be non-negative");
+        }
+        this.rows = rows;
+        this.columns = cols;
+        this.data = new double[rows * cols];
+        this.pivotColumns = new ArrayList<>();
+    }
+
+    private Matrix(int rows, int cols, double[] data, double[] imag, boolean wrap) {
+        this.rows = rows;
+        this.columns = cols;
+        this.data = data;
+        this.imag = imag;
+        this.pivotColumns = new ArrayList<>();
+    }
+
+    public static Matrix wrap(double[] data, int rows, int cols) {
+        return wrap(data, null, rows, cols);
+    }
+
+    public static Matrix wrap(double[] data, double[] imag, int rows, int cols) {
+        if (data == null) {
+            throw new IllegalArgumentException("Data must not be null");
+        }
+        if (rows < 0 || cols < 0) {
+            throw new IllegalArgumentException("Matrix dimensions must be non-negative");
+        }
+        if (data.length != rows * cols) {
+            throw new IllegalArgumentException("Data length does not match dimensions");
+        }
+        if (imag != null && imag.length != data.length) {
+            throw new IllegalArgumentException("Imaginary data length does not match dimensions");
+        }
+        return new Matrix(rows, cols, data, imag, true);
     }
 
     public void setColumn(int colIndex, Vector column) {
@@ -53,27 +144,118 @@ public class Matrix {
         if (column.dimension() != getRowCount()) {
             throw new IllegalArgumentException("Column dimension mismatch");
         }
-        data[colIndex] = column;
+        double[] colData = column.getData();
+        double[] colImag = column.hasImag() ? column.getImagData() : null;
+        int idx = colIndex;
+        if (colImag != null) {
+            ensureImagData();
+        }
+        for (int row = 0; row < rows; row++) {
+            data[idx] = colData[row];
+            if (imag != null) {
+                imag[idx] = colImag == null ? 0.0 : colImag[row];
+            }
+            idx += columns;
+        }
+    }
+
+    public void setColumn(int colIndex, double[] column) {
+        if (colIndex < 0 || colIndex >= columns) {
+            throw new IllegalArgumentException("Invalid column index");
+        }
+        if (column.length != getRowCount()) {
+            throw new IllegalArgumentException("Column dimension mismatch");
+        }
+        int idx = colIndex;
+        for (int row = 0; row < rows; row++) {
+            data[idx] = column[row];
+            if (imag != null) {
+                imag[idx] = 0.0;
+            }
+            idx += columns;
+        }
+    }
+
+    public double[] getColumn(int colIndex) {
+        if (colIndex < 0 || colIndex >= columns) {
+            throw new IllegalArgumentException("Invalid column index");
+        }
+        double[] col = new double[rows];
+        int idx = colIndex;
+        for (int row = 0; row < rows; row++) {
+            col[row] = data[idx];
+            idx += columns;
+        }
+        return col;
+    }
+
+    public double[] getRow(int rowIndex) {
+        if (rowIndex < 0 || rowIndex >= rows) {
+            throw new IllegalArgumentException("Invalid row index");
+        }
+        double[] row = new double[columns];
+        System.arraycopy(data, rowIndex * columns, row, 0, columns);
+        return row;
     }
 
     public Vector[] getData() {
-        return data;
+        if (columns == 0) {
+            return new Vector[0];
+        }
+        if (columnViews == null || columnViews.length != columns) {
+            Vector[] views = new Vector[columns];
+            for (int col = 0; col < columns; col++) {
+                views[col] = new Vector(this, col);
+            }
+            columnViews = views;
+        }
+        return columnViews;
     }
 
     public void setData(Vector[] data) {
-        this.data = data;
+        if (data == null) {
+            throw new IllegalArgumentException("Data must not be null");
+        }
+        if (data.length != columns) {
+            throw new IllegalArgumentException("Column count mismatch");
+        }
+        for (int col = 0; col < columns; col++) {
+            setColumn(col, data[col]);
+        }
     }
 
     public double get(int row, int column) {
-        return data[column].get(row);
+        return data[row * columns + column];
+    }
+
+    public double getImag(int row, int column) {
+        if (imag == null) {
+            return 0.0;
+        }
+        return imag[row * columns + column];
     }
 
     public void set(int row, int column, double value) {
-        data[column].set(row, value);
+        data[row * columns + column] = value;
+    }
+
+    public void setImag(int row, int column, double value) {
+        if (imag == null) {
+            if (value == 0.0) {
+                return;
+            }
+            ensureImagData();
+        }
+        imag[row * columns + column] = value;
+    }
+
+    public void setComplex(int row, int column, double real, double imaginary) {
+        data[row * columns + column] = real;
+        setImag(row, column, imaginary);
     }
 
     public int getRowCount() {
-        return data.length > 0 ? data[0].dimension() : 0;
+        return rows;
     }
 
     public int getColumnCount() {
@@ -84,124 +266,232 @@ public class Matrix {
         return pivotColumns;
     }
 
+    public double[] getRawData() {
+        return data;
+    }
+
+    public double[] getRawImagData() {
+        return imag;
+    }
+
+    public double[] ensureImagData() {
+        if (imag == null) {
+            imag = new double[data.length];
+        }
+        return imag;
+    }
+
+    public void setImagData(double[] imag) {
+        if (imag != null && imag.length != data.length) {
+            throw new IllegalArgumentException("Imaginary data length does not match dimensions");
+        }
+        this.imag = imag;
+    }
+
+    public boolean hasImagData() {
+        return imag != null;
+    }
+
+    public boolean isReal() {
+        if (imag == null) {
+            return true;
+        }
+        for (double v : imag) {
+            if (v != 0.0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void ensureReal(String operation) {
+        if (!isReal()) {
+            throw new UnsupportedOperationException(operation + " requires a real-valued matrix");
+        }
+    }
+
     public void exchangeRows(int row1, int row2) {
-        if (row1 < 0 || row2 < 0 || row1 >= getRowCount() || row2 >= getRowCount()) {
+        if (row1 < 0 || row2 < 0 || row1 >= rows || row2 >= rows) {
             throw new IllegalArgumentException("Invalid row indices");
         }
+        if (row1 == row2) {
+            return;
+        }
+        int offset1 = row1 * columns;
+        int offset2 = row2 * columns;
         for (int col = 0; col < columns; col++) {
-            double temp = get(row1, col);
-            set(row1, col, get(row2, col));
-            set(row2, col, temp);
+            double temp = data[offset1 + col];
+            data[offset1 + col] = data[offset2 + col];
+            data[offset2 + col] = temp;
+            if (imag != null) {
+                double tempI = imag[offset1 + col];
+                imag[offset1 + col] = imag[offset2 + col];
+                imag[offset2 + col] = tempI;
+            }
         }
     }
 
     public void addMultipleOfRow(int sourceRow, int targetRow, double multiplier) {
-        if (sourceRow < 0 || targetRow < 0 || sourceRow >= getRowCount() || targetRow >= getRowCount()) {
+        if (sourceRow < 0 || targetRow < 0 || sourceRow >= rows || targetRow >= rows) {
             throw new IllegalArgumentException("Invalid row indices");
         }
+        int sourceOffset = sourceRow * columns;
+        int targetOffset = targetRow * columns;
         for (int col = 0; col < columns; col++) {
-            set(targetRow, col, get(targetRow, col) + multiplier * get(sourceRow, col));
+            data[targetOffset + col] += multiplier * data[sourceOffset + col];
+            if (imag != null) {
+                imag[targetOffset + col] += multiplier * imag[sourceOffset + col];
+            }
         }
     }
 
     public Matrix add(Matrix other) {
-        if (columns != other.getColumnCount() || getRowCount() != other.getRowCount()) {
+        if (columns != other.getColumnCount() || rows != other.getRowCount()) {
             throw new IllegalArgumentException("Matrices must have equal dimensions");
         }
-        Matrix m = this.copy();
-        Vector[] mData = m.getData();
-        Vector[] oData = other.getData();
-        for (int i = 0; i < m.getColumnCount(); i++) {
-            mData[i] = mData[i].add(oData[i]);
+        Matrix result = new Matrix(rows, columns);
+        double[] out = result.data;
+        double[] a = this.data;
+        double[] b = other.data;
+        double[] ai = this.imag;
+        double[] bi = other.imag;
+        double[] oi = null;
+        if (ai != null || bi != null) {
+            oi = result.ensureImagData();
         }
-
-        return m;
+        for (int i = 0; i < out.length; i++) {
+            out[i] = a[i] + b[i];
+            if (oi != null) {
+                oi[i] = (ai == null ? 0.0 : ai[i]) + (bi == null ? 0.0 : bi[i]);
+            }
+        }
+        return result;
     }
 
     public Matrix subtract(Matrix other) {
-        if (columns != other.getColumnCount() || getRowCount() != other.getRowCount()) {
+        if (columns != other.getColumnCount() || rows != other.getRowCount()) {
             throw new IllegalArgumentException("Matrices must have equal dimensions");
         }
-        Matrix m = this.copy();
-        Vector[] mData = m.getData();
-        Vector[] oData = other.getData();
-        for (int i = 0; i < m.getColumnCount(); i++) {
-            mData[i] = mData[i].subtract(oData[i]);
+        Matrix result = new Matrix(rows, columns);
+        double[] out = result.data;
+        double[] a = this.data;
+        double[] b = other.data;
+        double[] ai = this.imag;
+        double[] bi = other.imag;
+        double[] oi = null;
+        if (ai != null || bi != null) {
+            oi = result.ensureImagData();
         }
-
-        return m;
+        for (int i = 0; i < out.length; i++) {
+            out[i] = a[i] - b[i];
+            if (oi != null) {
+                oi[i] = (ai == null ? 0.0 : ai[i]) - (bi == null ? 0.0 : bi[i]);
+            }
+        }
+        return result;
     }
 
     public void multiplyRow(int row, double multiplier) {
-        if (row < 0 || row >= getRowCount()) {
+        if (row < 0 || row >= rows) {
             throw new IllegalArgumentException("Invalid row index");
         }
+        int offset = row * columns;
         for (int col = 0; col < columns; col++) {
-            set(row, col, get(row, col) * multiplier);
-        }
-    }
-
-    private Vector[] transposeVectors() {
-        int rows = getRowCount();
-        Vector[] transposed = new Vector[rows];
-        for (int i = 0; i < rows; i++) {
-            double[] rowData = new double[columns];
-            for (int j = 0; j < columns; j++) {
-                rowData[j] = get(i, j);
+            data[offset + col] *= multiplier;
+            if (imag != null) {
+                imag[offset + col] *= multiplier;
             }
-            transposed[i] = new Vector(rowData);
         }
-        return transposed;
     }
 
     public Matrix transpose() {
-        return new Matrix(transposeVectors());
+        Matrix result = new Matrix(columns, rows);
+        double[] out = result.data;
+        double[] outImag = null;
+        if (imag != null) {
+            outImag = result.ensureImagData();
+        }
+        for (int row = 0; row < rows; row++) {
+            int rowOffset = row * columns;
+            for (int col = 0; col < columns; col++) {
+                int outIndex = col * rows + row;
+                out[outIndex] = data[rowOffset + col];
+                if (outImag != null) {
+                    outImag[outIndex] = imag[rowOffset + col];
+                }
+            }
+        }
+        return result;
     }
 
     public Matrix copy() {
-        Vector[] copiedData = new Vector[data.length];
-        for (int i = 0; i < data.length; i++) {
-            copiedData[i] = data[i].copy();
+        Matrix result = new Matrix(rows, columns);
+        System.arraycopy(data, 0, result.data, 0, data.length);
+        if (imag != null) {
+            result.imag = Arrays.copyOf(imag, imag.length);
         }
-        return new Matrix(copiedData);
+        return result;
     }
 
     @Override
     public String toString() {
         StringBuilder s = new StringBuilder();
-        for(Vector v : data) {
-            s.append(v.toString()).append("\n");
+        for (int row = 0; row < rows; row++) {
+            if (imag == null) {
+                s.append(Arrays.toString(getRow(row))).append("\n");
+                continue;
+            }
+            double[] rowReal = getRow(row);
+            double[] rowImag = new double[columns];
+            int offset = row * columns;
+            for (int col = 0; col < columns; col++) {
+                rowImag[col] = imag[offset + col];
+            }
+            StringBuilder line = new StringBuilder("[");
+            for (int col = 0; col < columns; col++) {
+                if (col > 0) {
+                    line.append(", ");
+                }
+                double re = rowReal[col];
+                double im = rowImag[col];
+                if (im == 0) {
+                    line.append(re);
+                } else if (im > 0) {
+                    line.append(re).append(" + ").append(im).append("i");
+                } else {
+                    line.append(re).append(" - ").append(-im).append("i");
+                }
+            }
+            line.append("]");
+            s.append(line).append("\n");
         }
         return s.toString();
     }
 
     public void toRowEchelonForm() {
+        ensureReal("Row echelon form");
         exchanges = 0;
         int pivotRow = 0;
 
-        for (int col = 0; col < getColumnCount(); col++) {
-            // Find pivot
+        for (int col = 0; col < columns; col++) {
             int nonZeroRow = -1;
-            for (int row = pivotRow; row < getRowCount(); row++) {
+            for (int row = pivotRow; row < rows; row++) {
                 if (Math.abs(get(row, col)) > tol) {
                     nonZeroRow = row;
                     break;
                 }
             }
 
-            // If no pivot found in this column, move to next
             if (nonZeroRow == -1) {
                 continue;
             }
 
-            // Exchange rows if necessary
             if (nonZeroRow != pivotRow) {
                 exchangeRows(pivotRow, nonZeroRow);
                 exchanges++;
             }
 
-            // Zero entries below pivot
-            for (int row = pivotRow + 1; row < getRowCount(); row++) {
+            for (int row = pivotRow + 1; row < rows; row++) {
                 if (Math.abs(get(row, col)) > tol) {
                     double multiplier = -get(row, col) / get(pivotRow, col);
                     addMultipleOfRow(pivotRow, row, multiplier);
@@ -209,54 +499,42 @@ public class Matrix {
             }
 
             pivotRow++;
-            if (pivotRow >= getRowCount()) {
+            if (pivotRow >= rows) {
                 break;
             }
         }
     }
 
-    /**
-     * Transforms the matrix into its Reduced Row Echelon Form (RREF)
-     * where:
-     * 1. Each pivot is 1
-     * 2. Pivots are the only non-zero entries in their columns
-     * 3. All entries above and below pivots are zero
-     */
     public void toReducedRowEchelonForm() {
+        ensureReal("Reduced row echelon form");
         int pivotRow = 0;
         int pivotCol = 0;
         pivotColumns.clear();
 
-        // We'll process columns from left to right
-        while (pivotCol < getColumnCount() && pivotRow < getRowCount()) {
-            // Find pivot
+        while (pivotCol < columns && pivotRow < rows) {
             int nonZeroRow = -1;
-            for (int row = pivotRow; row < getRowCount(); row++) {
+            for (int row = pivotRow; row < rows; row++) {
                 if (Math.abs(get(row, pivotCol)) > tol) {
                     nonZeroRow = row;
                     break;
                 }
             }
 
-            // If no pivot found in this column, move to next column
             if (nonZeroRow == -1) {
                 pivotCol++;
                 continue;
             }
 
-            // Exchange rows if necessary
             if (nonZeroRow != pivotRow) {
                 exchangeRows(pivotRow, nonZeroRow);
             }
 
-            // Make pivot element 1
             double pivotValue = get(pivotRow, pivotCol);
-            pivotColumns.add(data[pivotCol]);
+            pivotColumns.add(getData()[pivotCol]);
             if (Math.abs(pivotValue) > tol) {
                 multiplyRow(pivotRow, 1.0 / pivotValue);
             }
 
-            // Zero entries above pivot
             for (int row = 0; row < pivotRow; row++) {
                 if (Math.abs(get(row, pivotCol)) > tol) {
                     double multiplier = -get(row, pivotCol);
@@ -264,8 +542,7 @@ public class Matrix {
                 }
             }
 
-            // Zero entries below pivot
-            for (int row = pivotRow + 1; row < getRowCount(); row++) {
+            for (int row = pivotRow + 1; row < rows; row++) {
                 if (Math.abs(get(row, pivotCol)) > tol) {
                     double multiplier = -get(row, pivotCol);
                     addMultipleOfRow(pivotRow, row, multiplier);
@@ -277,36 +554,22 @@ public class Matrix {
         }
     }
 
-    /**
-     * Solves the linear equation Ax = b by forming the augmented matrix [A|b],
-     * reducing it to RREF, and reading the solution from the augmented column.
-     * If the system is inconsistent or underdetermined (non-unique), an
-     * ArithmeticException is thrown.
-     *
-     * @param b the right-hand side vector
-     * @return solution vector x
-     */
     public Vector solve(Vector b) {
+        ensureReal("Solve");
         if (b == null) {
             throw new IllegalArgumentException("Right-hand side vector b must not be null");
         }
-        if (b.dimension() != getRowCount()) {
+        if (b.dimension() != rows) {
             throw new IllegalArgumentException("Dimension mismatch: b has length " + b.dimension() +
-                    " but matrix has " + getRowCount() + " rows");
+                    " but matrix has " + rows + " rows");
         }
 
-        // Form augmented matrix [A | b]
         Matrix augmented = this.AppendVector(b, "RIGHT");
-
-        // Reduce to RREF
         augmented.toReducedRowEchelonForm();
 
-        int rows = augmented.getRowCount();
-        int cols = augmented.getColumnCount();
-        int originalCols = this.getColumnCount();
-        int augmentedColIndex = cols - 1;
+        int originalCols = this.columns;
+        int augmentedColIndex = augmented.getColumnCount() - 1;
 
-        // Check for inconsistency: a row with all zeros in A but non-zero in augmented column
         for (int r = 0; r < rows; r++) {
             boolean allZero = true;
             for (int c = 0; c < originalCols; c++) {
@@ -320,12 +583,10 @@ public class Matrix {
             }
         }
 
-        // Count pivot columns (leading ones) to detect uniqueness
         int pivotCount = 0;
         for (int r = 0; r < rows; r++) {
             for (int c = 0; c < originalCols; c++) {
                 if (Math.abs(augmented.get(r, c) - 1.0) < tol) {
-                    // ensure it's the only non-zero in its column (RREF should guarantee this)
                     boolean isPivot = true;
                     for (int r2 = 0; r2 < rows; r2++) {
                         if (r2 != r && Math.abs(augmented.get(r2, c)) > tol) {
@@ -347,20 +608,13 @@ public class Matrix {
             throw new ArithmeticException("Infinite solutions exist (underdetermined system)");
         }
 
-        // Extract solution from last column (the augmented column)
         return augmented.getData()[augmentedColIndex].copy();
     }
 
-    /**
-     * Appends a vector to this matrix either on the LEFT or RIGHT and returns a new Matrix.
-     * Position must be either "LEFT" or "RIGHT" (case-insensitive).
-     * The vector's dimension must match the matrix row count.
-     */
     public Matrix AppendVector(Vector v, String position) {
         if (v == null) {
             throw new IllegalArgumentException("Vector to append must not be null");
         }
-        int rows = getRowCount();
         if (v.dimension() != rows) {
             throw new IllegalArgumentException("Vector dimension " + v.dimension() + " does not match matrix row count " + rows);
         }
@@ -369,134 +623,161 @@ public class Matrix {
             throw new IllegalArgumentException("Position must be either \"LEFT\" or \"RIGHT\"");
         }
 
-        Vector[] newData = new Vector[columns + 1];
+        Matrix result = new Matrix(rows, columns + 1);
+        double[] out = result.data;
+        double[] outImag = null;
+        double[] vImag = v.hasImag() ? v.getImagData() : null;
+        if (imag != null || vImag != null) {
+            outImag = result.ensureImagData();
+        }
         if (pos.equals("RIGHT")) {
-            for (int i = 0; i < columns; i++) {
-                newData[i] = data[i].copy();
+            for (int row = 0; row < rows; row++) {
+                int srcOffset = row * columns;
+                int dstOffset = row * (columns + 1);
+                System.arraycopy(data, srcOffset, out, dstOffset, columns);
+                out[dstOffset + columns] = v.get(row);
+                if (outImag != null) {
+                    if (imag != null) {
+                        System.arraycopy(imag, srcOffset, outImag, dstOffset, columns);
+                    }
+                    outImag[dstOffset + columns] = vImag == null ? 0.0 : vImag[row];
+                }
             }
-            newData[columns] = v.copy();
         } else {
-            // LEFT
-            newData[0] = v.copy();
-            for (int i = 0; i < columns; i++) {
-                newData[i + 1] = data[i].copy();
+            for (int row = 0; row < rows; row++) {
+                int srcOffset = row * columns;
+                int dstOffset = row * (columns + 1);
+                out[dstOffset] = v.get(row);
+                System.arraycopy(data, srcOffset, out, dstOffset + 1, columns);
+                if (outImag != null) {
+                    outImag[dstOffset] = vImag == null ? 0.0 : vImag[row];
+                    if (imag != null) {
+                        System.arraycopy(imag, srcOffset, outImag, dstOffset + 1, columns);
+                    }
+                }
             }
         }
-        return new Matrix(newData);
+        return result;
     }
 
-    /**
-     * Appends another matrix to this matrix in the specified direction and returns a new Matrix.
-     * Position must be one of "LEFT", "RIGHT", "UP", "DOWN" (case-insensitive).
-     * - LEFT/RIGHT: matrices are concatenated horizontally (column-wise) and must have the same row count.
-     * - UP/DOWN: matrices are concatenated vertically (row-wise) and must have the same column count.
-     */
     public Matrix AppendMatrix(Matrix other, String position) {
         if (other == null) {
             throw new IllegalArgumentException("Matrix to append must not be null");
         }
         String pos = position == null ? "RIGHT" : position.toUpperCase();
         if (pos.equals("LEFT") || pos.equals("RIGHT")) {
-            // Horizontal concatenation: row counts must match
-            if (other.getRowCount() != getRowCount()) {
+            if (other.getRowCount() != rows) {
                 throw new IllegalArgumentException("Row count mismatch for horizontal append");
             }
             int newCols = columns + other.getColumnCount();
-            Vector[] newData = new Vector[newCols];
-            if (pos.equals("LEFT")) {
-                // copy other's columns first
-                for (int i = 0; i < other.getColumnCount(); i++) {
-                    newData[i] = other.getData()[i].copy();
-                }
-                for (int i = 0; i < columns; i++) {
-                    newData[other.getColumnCount() + i] = data[i].copy();
-                }
-            } else {
-                // RIGHT
-                for (int i = 0; i < columns; i++) {
-                    newData[i] = data[i].copy();
-                }
-                for (int i = 0; i < other.getColumnCount(); i++) {
-                    newData[columns + i] = other.getData()[i].copy();
-                }
+            Matrix result = new Matrix(rows, newCols);
+            double[] out = result.data;
+            double[] left = other.data;
+            double[] right = this.data;
+            double[] outImag = null;
+            if (imag != null || other.imag != null) {
+                outImag = result.ensureImagData();
             }
-            return new Matrix(newData);
-        } else if (pos.equals("UP") || pos.equals("DOWN")) {
-            // Vertical concatenation: column counts must match
-            if (other.getColumnCount() != getColumnCount()) {
-                throw new IllegalArgumentException("Column count mismatch for vertical append");
-            }
-            int newRows = getRowCount() + other.getRowCount();
-            Vector[] newData = new Vector[columns];
-            for (int col = 0; col < columns; col++) {
-                double[] combined = new double[newRows];
-                if (pos.equals("UP")) {
-                    // place other on top
-                    for (int r = 0; r < other.getRowCount(); r++) {
-                        combined[r] = other.get(r, col);
-                    }
-                    for (int r = 0; r < getRowCount(); r++) {
-                        combined[other.getRowCount() + r] = get(r, col);
+            for (int row = 0; row < rows; row++) {
+                int dstOffset = row * newCols;
+                if (pos.equals("LEFT")) {
+                    System.arraycopy(left, row * other.columns, out, dstOffset, other.columns);
+                    System.arraycopy(right, row * columns, out, dstOffset + other.columns, columns);
+                    if (outImag != null) {
+                        if (other.imag != null) {
+                            System.arraycopy(other.imag, row * other.columns, outImag, dstOffset, other.columns);
+                        }
+                        if (imag != null) {
+                            System.arraycopy(imag, row * columns, outImag, dstOffset + other.columns, columns);
+                        }
                     }
                 } else {
-                    // DOWN: place other below
-                    for (int r = 0; r < getRowCount(); r++) {
-                        combined[r] = get(r, col);
-                    }
-                    for (int r = 0; r < other.getRowCount(); r++) {
-                        combined[getRowCount() + r] = other.get(r, col);
+                    System.arraycopy(right, row * columns, out, dstOffset, columns);
+                    System.arraycopy(left, row * other.columns, out, dstOffset + columns, other.columns);
+                    if (outImag != null) {
+                        if (imag != null) {
+                            System.arraycopy(imag, row * columns, outImag, dstOffset, columns);
+                        }
+                        if (other.imag != null) {
+                            System.arraycopy(other.imag, row * other.columns, outImag, dstOffset + columns, other.columns);
+                        }
                     }
                 }
-                newData[col] = new Vector(combined);
             }
-            return new Matrix(newData);
+            return result;
+        } else if (pos.equals("UP") || pos.equals("DOWN")) {
+            if (other.getColumnCount() != columns) {
+                throw new IllegalArgumentException("Column count mismatch for vertical append");
+            }
+            int newRows = rows + other.getRowCount();
+            Matrix result = new Matrix(newRows, columns);
+            double[] out = result.data;
+            double[] outImag = null;
+            if (imag != null || other.imag != null) {
+                outImag = result.ensureImagData();
+            }
+            if (pos.equals("UP")) {
+                System.arraycopy(other.data, 0, out, 0, other.data.length);
+                System.arraycopy(this.data, 0, out, other.data.length, this.data.length);
+                if (outImag != null) {
+                    if (other.imag != null) {
+                        System.arraycopy(other.imag, 0, outImag, 0, other.imag.length);
+                    }
+                    if (imag != null) {
+                        System.arraycopy(imag, 0, outImag, other.data.length, imag.length);
+                    }
+                }
+            } else {
+                System.arraycopy(this.data, 0, out, 0, this.data.length);
+                System.arraycopy(other.data, 0, out, this.data.length, other.data.length);
+                if (outImag != null) {
+                    if (imag != null) {
+                        System.arraycopy(imag, 0, outImag, 0, imag.length);
+                    }
+                    if (other.imag != null) {
+                        System.arraycopy(other.imag, 0, outImag, this.data.length, other.imag.length);
+                    }
+                }
+            }
+            return result;
         } else {
             throw new IllegalArgumentException("Position must be one of LEFT, RIGHT, UP, DOWN");
         }
     }
 
     public double diagonalProduct() {
-        if (getRowCount() != getColumnCount()) {
+        ensureReal("Diagonal product");
+        if (rows != columns) {
             throw new ArithmeticException("Row-column count mismatch");
         }
         double result = 1;
         for (int i = 0; i < columns; i++) {
-            result *= get(i,i);
+            result *= data[i * columns + i];
         }
-
         return result;
     }
 
     public double trace() {
-        if (getRowCount() != getColumnCount()) {
+        ensureReal("Trace");
+        if (rows != columns) {
             throw new ArithmeticException("Row-column count mismatch");
         }
         double result = 0;
         for (int i = 0; i < columns; i++) {
-            result += get(i,i);
+            result += data[i * columns + i];
         }
-
         return result;
     }
 
-    /**
-     * Returns the inverse of this matrix.
-     * Terminates early using isInvertible(); if not invertible, throws an ArithmeticException.
-     * The inverse is computed by forming [A | I], reducing to RREF, and returning the right block.
-     * @return inverse matrix A^{-1}
-     */
     public Matrix inverse() {
-        // Ensure square and invertible
+        ensureReal("Inverse");
         if (!isInvertible()) {
             throw new ArithmeticException("Matrix is not invertible");
         }
-        int n = getRowCount();
-        // Append identity to the right
+        int n = rows;
         Matrix augmented = this.AppendMatrix(Matrix.Identity(n), "RIGHT");
-        // Reduce to RREF
         augmented.toReducedRowEchelonForm();
-        // Extract the right block (columns n..2n-1)
-        int originalCols = this.getColumnCount();
+        int originalCols = this.columns;
         Vector[] invCols = new Vector[originalCols];
         for (int c = 0; c < originalCols; c++) {
             invCols[c] = augmented.getData()[originalCols + c].copy();
@@ -504,36 +785,27 @@ public class Matrix {
         return new Matrix(invCols);
     }
 
-    /**
-     * Factory method to create an n x n identity matrix.
-     * Note: method named Identity(int n) because a Java method must have a name.
-     */
     public static Matrix Identity(int n) {
         if (n <= 0) {
             throw new IllegalArgumentException("Size n must be positive");
         }
-        Vector[] cols = new Vector[n];
-        for (int c = 0; c < n; c++) {
-            double[] col = new double[n];
-            for (int r = 0; r < n; r++) {
-                col[r] = (r == c) ? 1.0 : 0.0;
-            }
-            cols[c] = new Vector(col);
+        Matrix m = new Matrix(n, n);
+        for (int i = 0; i < n; i++) {
+            m.data[i * n + i] = 1.0;
         }
-        return new Matrix(cols);
+        return m;
     }
 
     public double determinant() {
-        if (getRowCount() != getColumnCount()) {
+        ensureReal("Determinant");
+        if (rows != columns) {
             throw new ArithmeticException("Row-column count mismatch");
         }
-        // Use partial-pivot Gaussian elimination on a copy for numerical stability
         Matrix m = this.copy();
-        int n = m.getRowCount();
+        int n = m.rows;
         int exchanges = 0;
 
         for (int col = 0; col < n; col++) {
-            // find pivot with maximum absolute value in this column (partial pivoting)
             int maxRow = col;
             double maxAbs = Math.abs(m.get(col, col));
             for (int r = col + 1; r < n; r++) {
@@ -545,7 +817,7 @@ public class Matrix {
             }
 
             if (maxAbs <= tol) {
-                return 0.0; // singular (within tolerance)
+                return 0.0;
             }
 
             if (maxRow != col) {
@@ -553,12 +825,13 @@ public class Matrix {
                 exchanges++;
             }
 
-            // eliminate below
             double pivot = m.get(col, col);
             for (int r = col + 1; r < n; r++) {
                 double factor = m.get(r, col) / pivot;
+                int rowOffset = r * n;
+                int pivotOffset = col * n;
                 for (int c = col; c < n; c++) {
-                    m.set(r, c, m.get(r, c) - factor * m.get(col, c));
+                    m.data[rowOffset + c] -= factor * m.data[pivotOffset + c];
                 }
             }
         }
@@ -573,22 +846,14 @@ public class Matrix {
         return determinant() != 0;
     }
 
-    /**
-     * Multiplies this matrix (m x p) by another matrix (p x n) and returns the product (m x n).
-     * Uses the column-oriented storage: each column of the product is A * (column j of other).
-     * @param other right-hand-side matrix
-     * @return product matrix
-     */
     public Matrix multiply(Matrix other) {
         return BlockedMultiply.multiply(this, other);
     }
 
-    //rref nonzero rows
     public Set<Vector> rowSpaceBasis() {
         return SubspaceBasis.rowSpaceBasis(this);
     }
 
-    //columns with pivots
     public Set<Vector> columnSpaceBasis() {
         return SubspaceBasis.columnSpaceBasis(this);
     }
@@ -602,20 +867,20 @@ public class Matrix {
         return new Matrix[]{res.getQ(), res.getR()};
     }
 
-    
+    public Matrix[] thinQR() {
+        net.faulj.decomposition.result.QRResult res = net.faulj.decomposition.qr.HouseholderQR.decomposeThin(this);
+        return new Matrix[]{res.getQ(), res.getR()};
+    }
 
     public net.faulj.decomposition.result.HessenbergResult Hessenberg() {
         return net.faulj.decomposition.hessenberg.HessenbergReduction.decompose(this);
     }
 
     public boolean isSquare() {
-        return getRowCount() == getColumnCount();
+        return rows == columns;
     }
 
     public static Matrix diag(int num, Matrix matrix) {
-        //put zeroes on the right of I
-        //put zeroes on the left of matrix
-        //put the matrix under the I
         if (!matrix.isSquare()) {
             throw new IllegalArgumentException("Both matrices must be square to make a new diagonal");
         }
@@ -628,102 +893,127 @@ public class Matrix {
 
         int i = I.getRowCount();
         int m = matrix.getRowCount();
-        I = I.AppendMatrix(Matrix.zero(i,m), "RIGHT");
-        matrix = matrix.AppendMatrix(Matrix.zero(m,i), "LEFT");
+        I = I.AppendMatrix(Matrix.zero(i, m), "RIGHT");
+        matrix = matrix.AppendMatrix(Matrix.zero(m, i), "LEFT");
         return I.AppendMatrix(matrix, "DOWN");
     }
 
     public static Matrix zero(int rows, int columns) {
-        Vector[] data = new Vector[columns];
-        for(int i = 0; i < columns; i++) {
-            data[i] = VectorUtils.zero(rows);
-        }
-        return new Matrix(data);
+        return new Matrix(rows, columns);
     }
 
     public Matrix multiplyScalar(double d) {
-        Matrix m = this.copy();
-        Vector[] mData = m.getData();
-        for(int i = 0; i < m.getColumnCount(); i++) {
-            mData[i] = mData[i].multiplyScalar(d);
+        Matrix result = new Matrix(rows, columns);
+        double[] out = result.data;
+        for (int i = 0; i < data.length; i++) {
+            out[i] = data[i] * d;
         }
-        return m;
+        if (imag != null) {
+            double[] outImag = result.ensureImagData();
+            for (int i = 0; i < imag.length; i++) {
+                outImag[i] = imag[i] * d;
+            }
+        }
+        return result;
     }
 
-    /**
-     * Computes the Frobenius norm: sqrt(sum of squares of all entries).
-     */
     public double frobeniusNorm() {
         return MatrixNorms.frobeniusNorm(this);
     }
 
-    /**
-     * Computes the 1-norm (maximum absolute column sum).
-     */
     public double norm1() {
         return MatrixNorms.norm1(this);
     }
 
-    /**
-     * Computes the infinity norm (maximum absolute row sum).
-     */
     public double normInf() {
         return MatrixNorms.normInf(this);
     }
 
     public Matrix round(double tolerance) {
-        Matrix m = this.copy();
-        Vector[] mData = m.getData();
-        for (int i = 0; i < m.getColumnCount(); i++) {
-            Vector v = mData[i];
-            double[] vData = v.getData();
-            for (int j = 0; j < v.dimension(); j++) {
-                if (vData[j] < tolerance) {
-                    vData[j] = 0;
-                }
+        Matrix result = new Matrix(rows, columns);
+        double[] out = result.data;
+        for (int i = 0; i < data.length; i++) {
+            double val = data[i];
+            out[i] = val < tolerance ? 0.0 : val;
+        }
+        if (imag != null) {
+            double[] outImag = result.ensureImagData();
+            for (int i = 0; i < imag.length; i++) {
+                double val = imag[i];
+                outImag[i] = val < tolerance ? 0.0 : val;
             }
         }
-        return m;
+        return result;
     }
 
     public Matrix crop(int fromRow, int toRow, int fromCol, int toCol) {
-        if (fromRow < 0 || toRow >= getRowCount() || fromCol < 0 || toCol >= getColumnCount()
+        if (fromRow < 0 || toRow >= rows || fromCol < 0 || toCol >= columns
                 || fromRow > toRow || fromCol > toCol) {
             throw new IllegalArgumentException("Invalid crop dimensions");
         }
 
         int newRows = toRow - fromRow + 1;
         int newCols = toCol - fromCol + 1;
-        Vector[] newData = new Vector[newCols];
-
-        for (int col = 0; col < newCols; col++) {
-            double[] colData = new double[newRows];
-            for (int row = 0; row < newRows; row++) {
-                colData[row] = get(fromRow + row, fromCol + col);
-            }
-            newData[col] = new Vector(colData);
+        Matrix result = new Matrix(newRows, newCols);
+        double[] out = result.data;
+        double[] outImag = null;
+        if (imag != null) {
+            outImag = result.ensureImagData();
         }
 
-        return new Matrix(newData);
+        for (int row = 0; row < newRows; row++) {
+            int srcOffset = (fromRow + row) * columns + fromCol;
+            int dstOffset = row * newCols;
+            System.arraycopy(data, srcOffset, out, dstOffset, newCols);
+            if (outImag != null) {
+                System.arraycopy(imag, srcOffset, outImag, dstOffset, newCols);
+            }
+        }
+
+        return result;
     }
 
     public Matrix minor(int i, int j) {
-        //basically, add all the columns to the arraylist, then transpose, then add rows to the other arraylist, then return
-        Matrix m = this.copy();
-        List<Vector> cols = new ArrayList<>(Arrays.asList(m.getData()));
-        cols.remove(j);
-        Matrix m1 = new Matrix(cols.toArray(new Vector[0]));
-        m1 = m1.transpose();
-        List<Vector> rows = new ArrayList<>(Arrays.asList(m1.getData()));
-        rows.remove(i);
-        return new Matrix(rows.toArray(new Vector[0])).transpose();
+        if (rows != columns) {
+            throw new IllegalArgumentException("Matrix must be square to compute a minor");
+        }
+        Matrix result = new Matrix(rows - 1, columns - 1);
+        double[] out = result.data;
+        double[] outImag = null;
+        if (imag != null) {
+            outImag = result.ensureImagData();
+        }
+        int outCols = result.columns;
+        int outRow = 0;
+        for (int row = 0; row < rows; row++) {
+            if (row == i) {
+                continue;
+            }
+            int outCol = 0;
+            int rowOffset = row * columns;
+            int outOffset = outRow * outCols;
+            for (int col = 0; col < columns; col++) {
+                if (col == j) {
+                    continue;
+                }
+                int srcIndex = rowOffset + col;
+                out[outOffset + outCol] = data[srcIndex];
+                if (outImag != null) {
+                    outImag[outOffset + outCol] = imag[srcIndex];
+                }
+                outCol++;
+            }
+            outRow++;
+        }
+        return result;
     }
 
     public static Matrix randomMatrix(int rows, int cols) {
-        Vector[] data = new Vector[cols];
-        for (int i = 0; i < cols; i++) {
-            data[i] = VectorUtils.random(rows);
+        Matrix m = new Matrix(rows, cols);
+        double[] out = m.data;
+        for (int i = 0; i < out.length; i++) {
+            out[i] = Math.random();
         }
-        return new Matrix(data);
+        return m;
     }
 }

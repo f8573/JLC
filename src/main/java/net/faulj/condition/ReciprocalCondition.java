@@ -80,5 +80,70 @@ package net.faulj.condition;
  * @see net.faulj.decomposition.lu.LUDecomposition
  * @see net.faulj.matrix.MatrixNorms
  */
+import net.faulj.decomposition.result.LUResult;
+import net.faulj.matrix.Matrix;
+import net.faulj.matrix.MatrixNorms;
+import net.faulj.solve.LUSolver;
+import net.faulj.vector.Vector;
+
+/**
+ * Utility for estimating the reciprocal condition number from an LU factorization.
+ */
 public class ReciprocalCondition {
+
+	/**
+	 * Estimate RCOND = 1 / (||A||_1 * ||A^{-1}||_1) using a provided LU factorization.
+	 * <p>
+	 * This implementation builds the inverse by solving n systems A x = e_j using the
+	 * provided LU factors and computes the 1-norm of the inverse. The 1-norm of A is
+	 * obtained from the LU reconstruction (PA has same column sums as A so norm1 is preserved).
+	 * </p>
+	 *
+	 * @param lu LU factorization result for matrix A (PA = LU)
+	 * @return estimated reciprocal condition number in the 1-norm; returns 0.0 if singular
+	 */
+	public static double estimateFromLU(LUResult lu) {
+		if (lu == null) throw new IllegalArgumentException("LU result must not be null");
+		if (lu.isSingular()) return 0.0;
+
+		// Norm of A: use norm1 of LU reconstruction (row permutation does not change column sums)
+		Matrix LU = lu.reconstruct();
+		double normA = MatrixNorms.norm1(LU);
+
+		return estimateFromLU(lu, normA);
+	}
+
+	/**
+	 * Estimate RCOND given LU factorization and a precomputed norm of A (1-norm).
+	 *
+	 * @param lu LU factorization result for matrix A (PA = LU)
+	 * @param normA precomputed 1-norm of A (must be >= 0)
+	 * @return estimated reciprocal condition number; 0.0 if singular or invalid inputs
+	 */
+	public static double estimateFromLU(LUResult lu, double normA) {
+		if (lu == null) throw new IllegalArgumentException("LU result must not be null");
+		if (normA < 0) throw new IllegalArgumentException("normA must be non-negative");
+		if (lu.isSingular()) return 0.0;
+		if (normA == 0.0) return 0.0;
+
+		int n = lu.getL().getRowCount();
+		LUSolver solver = new LUSolver();
+
+		// Build inverse column-by-column by solving A x = e_j
+		Vector[] invCols = new Vector[n];
+		for (int j = 0; j < n; j++) {
+			double[] e = new double[n];
+			e[j] = 1.0;
+			Vector ej = new Vector(e);
+			Vector col = solver.solve(lu, ej);
+			invCols[j] = col;
+		}
+
+		Matrix invA = new Matrix(invCols);
+		double normInv = MatrixNorms.norm1(invA);
+		if (normInv == 0.0) return 0.0;
+
+		return 1.0 / (normA * normInv);
+	}
+
 }
