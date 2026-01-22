@@ -6,6 +6,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+import net.faulj.compute.BlockedMultiply;
 import net.faulj.core.Tolerance;
 import net.faulj.vector.Vector;
 import net.faulj.vector.VectorUtils;
@@ -579,35 +580,7 @@ public class Matrix {
      * @return product matrix
      */
     public Matrix multiply(Matrix other) {
-        if (other == null) {
-            throw new IllegalArgumentException("Other matrix must not be null");
-        }
-        int m = getRowCount();           // rows of this
-        int p = getColumnCount();        // columns of this
-        int p2 = other.getRowCount();    // rows of other
-        int n = other.getColumnCount();  // columns of other
-
-        if (p != p2) {
-            throw new IllegalArgumentException("Inner dimensions must agree for multiplication: " + p + " != " + p2);
-        }
-
-        Vector[] resultCols = new Vector[n];
-        // For each column j of 'other', compute column j of the product
-        for (int j = 0; j < n; j++) {
-            double[] col = new double[m];
-            for (int k = 0; k < p; k++) {
-                double alpha = other.get(k, j);
-                if (Math.abs(alpha) <= 1e-15) {
-                    continue;
-                }
-                Vector aCol = this.data[k];
-                for (int i = 0; i < m; i++) {
-                    col[i] += alpha * aCol.get(i);
-                }
-            }
-            resultCols[j] = new Vector(col);
-        }
-        return new Matrix(resultCols);
+        return BlockedMultiply.multiply(this, other);
     }
 
     //rref nonzero rows
