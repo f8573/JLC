@@ -38,18 +38,18 @@ public class BidiagonalizationResult {
     }
 
     public double residualNorm() {
-        return MatrixUtils.normResidual(A, reconstruct());
+        return MatrixUtils.normResidual(A, reconstruct(), 1e-10);
     }
 
     public double residualElement() {
-        return MatrixUtils.backwardErrorComponentwise(A, reconstruct());
+        return MatrixUtils.backwardErrorComponentwise(A, reconstruct(), 1e-10);
     }
 
     public double[] verifyOrthogonality(Matrix O) {
         Matrix I = Matrix.Identity(O.getRowCount());
         O = O.multiply(O.transpose());
-        double n = MatrixUtils.normResidual(I, O);
-        double e = MatrixUtils.backwardErrorComponentwise(I, O);
+        double n = MatrixUtils.normResidual(I, O, 1e-10);
+        double e = MatrixUtils.backwardErrorComponentwise(I, O, 1e-10);
         return new double[]{n, e};
     }
 }

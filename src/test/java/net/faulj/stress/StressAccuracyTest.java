@@ -29,6 +29,8 @@ public class StressAccuracyTest {
     private static final double LARGE_QR_RESIDUAL_LIMIT = 5e-2;
     private static final double LARGE_HESS_RESIDUAL_LIMIT = 5e-2;
     private static final double TRACE_TOL = 1e-5;
+    // How often to print progress during the main stress loop (in trials)
+    private static final int PROGRESS_INTERVAL = 100;
 
     @Test
     public void stressDecompositionAndEigenAccuracy() {
@@ -37,18 +39,25 @@ public class StressAccuracyTest {
         for (int t = 0; t < TRIALS; t++) {
             int n = MIN_SIZE + (t % (MAX_SIZE - MIN_SIZE + 1));
             Matrix A = randomMatrix(rnd, n);
-
             QRResult qr = HouseholderQR.decompose(A);
-            assertTrue("QR residual too large at size " + n + " trial " + t + ": " + qr.residualNorm(),
-                    qr.residualNorm() < QR_RESIDUAL_LIMIT);
+            double qrRes = qr.residualNorm();
+            assertTrue("QR residual too large at size " + n + " trial " + t + ": " + qrRes,
+                qrRes < QR_RESIDUAL_LIMIT);
 
             HessenbergResult hess = HessenbergReduction.decompose(A);
-            assertTrue("Hessenberg residual too large at size " + n + " trial " + t + ": " + hess.residualNorm(),
-                    hess.residualNorm() < HESS_RESIDUAL_LIMIT);
+            double hessRes = hess.residualNorm();
+            assertTrue("Hessenberg residual too large at size " + n + " trial " + t + ": " + hessRes,
+                hessRes < HESS_RESIDUAL_LIMIT);
 
             SchurResult schur = RealSchurDecomposition.decompose(A);
-            assertTrue("Schur residual too large at size " + n + " trial " + t + ": " + schur.residualNorm(),
-                    schur.residualNorm() < SCHUR_RESIDUAL_LIMIT);
+            double schurRes = schur.residualNorm();
+            assertTrue("Schur residual too large at size " + n + " trial " + t + ": " + schurRes,
+                schurRes < SCHUR_RESIDUAL_LIMIT);
+
+            if (t % PROGRESS_INTERVAL == 0) {
+            System.out.printf("[stress] trial=%d size=%d QR=%.3e HESS=%.3e SCHUR=%.3e trace=%.6f%n",
+                t, n, qrRes, hessRes, schurRes, A.trace());
+            }
 
             Complex[] eigenvalues = schur.getEigenvalues();
             double sumReal = 0.0;
@@ -57,10 +66,14 @@ public class StressAccuracyTest {
                 sumReal += eigenvalue.real;
                 sumImag += eigenvalue.imag;
             }
+                if (t % (PROGRESS_INTERVAL * 5) == 0) {
+                System.out.printf("[eigs] trial=%d size=%d sumReal=%.6f sumImag=%.6f%n",
+                    t, n, sumReal, sumImag);
+                }
 
-            assertEquals("Trace mismatch at size " + n + " trial " + t,
+                assertEquals("Trace mismatch at size " + n + " trial " + t,
                     A.trace(), sumReal, TRACE_TOL);
-            assertEquals("Imaginary sum should be near zero at size " + n + " trial " + t,
+                assertEquals("Imaginary sum should be near zero at size " + n + " trial " + t,
                     0.0, sumImag, TRACE_TOL);
         }
     }
@@ -71,15 +84,20 @@ public class StressAccuracyTest {
         Random rnd = new Random(7654321L);
 
         for (int size : LARGE_SIZES) {
+            System.out.printf("[large] starting size=%d%n", size);
             Matrix A = randomMatrix(rnd, size);
 
             QRResult qr = HouseholderQR.decompose(A);
-            assertTrue("QR residual too large at size " + size + ": " + qr.residualNorm(),
-                    qr.residualNorm() < LARGE_QR_RESIDUAL_LIMIT);
+            double qrRes = qr.residualNorm();
+            System.out.printf("[large] size=%d QR=%.3e%n", size, qrRes);
+            assertTrue("QR residual too large at size " + size + ": " + qrRes,
+                qrRes < LARGE_QR_RESIDUAL_LIMIT);
 
             HessenbergResult hess = HessenbergReduction.decompose(A);
-            assertTrue("Hessenberg residual too large at size " + size + ": " + hess.residualNorm(),
-                    hess.residualNorm() < LARGE_HESS_RESIDUAL_LIMIT);
+            double hessRes = hess.residualNorm();
+            System.out.printf("[large] size=%d HESS=%.3e%n", size, hessRes);
+            assertTrue("Hessenberg residual too large at size " + size + ": " + hessRes,
+                hessRes < LARGE_HESS_RESIDUAL_LIMIT);
         }
     }
 

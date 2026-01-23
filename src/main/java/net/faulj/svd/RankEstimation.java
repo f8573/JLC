@@ -53,7 +53,101 @@ import net.faulj.matrix.Matrix;
  * @see net.faulj.condition.ConditionNumber
  */
 public class RankEstimation {
+	private static final double EPS = 2.220446049250313e-16;
+
 	public RankEstimation() {
-		throw new RuntimeException("Class unfinished");
+	}
+
+	/**
+	 * Estimates the numerical rank using the default tolerance based on the singular values length.
+	 *
+	 * @param singularValues singular values in descending order
+	 * @return numerical rank
+	 */
+	public static int effectiveRank(double[] singularValues) {
+		if (singularValues == null) {
+			throw new IllegalArgumentException("Singular values must not be null");
+		}
+		double tol = defaultTolerance(singularValues, singularValues.length, singularValues.length);
+		return effectiveRank(singularValues, tol);
+	}
+
+	/**
+	 * Estimates the numerical rank using the default tolerance based on matrix dimensions.
+	 *
+	 * @param singularValues singular values in descending order
+	 * @param rows number of rows in the original matrix
+	 * @param cols number of columns in the original matrix
+	 * @return numerical rank
+	 */
+	public static int effectiveRank(double[] singularValues, int rows, int cols) {
+		if (singularValues == null) {
+			throw new IllegalArgumentException("Singular values must not be null");
+		}
+		double tol = defaultTolerance(singularValues, rows, cols);
+		return effectiveRank(singularValues, tol);
+	}
+
+	/**
+	 * Estimates the numerical rank using a user-provided tolerance.
+	 *
+	 * @param singularValues singular values in descending order
+	 * @param tolerance threshold for counting singular values as non-zero
+	 * @return numerical rank
+	 */
+	public static int effectiveRank(double[] singularValues, double tolerance) {
+		if (singularValues == null) {
+			throw new IllegalArgumentException("Singular values must not be null");
+		}
+		if (tolerance < 0) {
+			throw new IllegalArgumentException("Tolerance must be non-negative");
+		}
+		int rank = 0;
+		for (double s : singularValues) {
+			if (Math.abs(s) > tolerance) {
+				rank++;
+			}
+		}
+		return rank;
+	}
+
+	/**
+	 * Estimates the numerical rank of a matrix by computing its singular values.
+	 *
+	 * @param A matrix to analyze
+	 * @return numerical rank
+	 */
+	public static int effectiveRank(Matrix A) {
+		if (A == null) {
+			throw new IllegalArgumentException("Matrix must not be null");
+		}
+		if (!A.isReal()) {
+			throw new UnsupportedOperationException("Rank estimation via SVD requires a real-valued matrix");
+		}
+		double[] singularValues = new SVDecomposition().decompose(A).getSingularValues();
+		double tol = defaultTolerance(singularValues, A.getRowCount(), A.getColumnCount());
+		return effectiveRank(singularValues, tol);
+	}
+
+	/**
+	 * Computes the default tolerance for numerical rank decisions.
+	 *
+	 * @param singularValues singular values in descending order
+	 * @param rows number of rows in the original matrix
+	 * @param cols number of columns in the original matrix
+	 * @return tolerance value
+	 */
+	public static double defaultTolerance(double[] singularValues, int rows, int cols) {
+		if (singularValues == null) {
+			throw new IllegalArgumentException("Singular values must not be null");
+		}
+		double maxSigma = 0.0;
+		for (double s : singularValues) {
+			maxSigma = Math.max(maxSigma, Math.abs(s));
+		}
+		if (maxSigma == 0.0) {
+			return 0.0;
+		}
+		return Math.max(rows, cols) * maxSigma * EPS;
 	}
 }

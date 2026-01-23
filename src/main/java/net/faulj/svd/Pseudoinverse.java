@@ -58,7 +58,87 @@ import net.faulj.matrix.Matrix;
  * @see net.faulj.solve.LeastSquaresSolver
  */
 public class Pseudoinverse {
+	private static final double EPS = 2.220446049250313e-16;
+
 	public Pseudoinverse() {
-		throw new RuntimeException("Class unfinished");
+	}
+
+	/**
+	 * Computes the Moore-Penrose pseudoinverse using the default tolerance.
+	 *
+	 * @param A input matrix
+	 * @return pseudoinverse of A
+	 */
+	public Matrix compute(Matrix A) {
+		if (A == null) {
+			throw new IllegalArgumentException("Matrix must not be null");
+		}
+		if (!A.isReal()) {
+			throw new UnsupportedOperationException("Pseudoinverse requires a real-valued matrix");
+		}
+		SVDecomposition svd = new SVDecomposition();
+		net.faulj.decomposition.result.SVDResult result = svd.decompose(A);
+		double tol = defaultTolerance(result.getSingularValues(), A.getRowCount(), A.getColumnCount());
+		return computeFromSvd(result, tol);
+	}
+
+	/**
+	 * Computes the Moore-Penrose pseudoinverse using a custom tolerance.
+	 *
+	 * @param A input matrix
+	 * @param tolerance threshold below which singular values are treated as zero
+	 * @return pseudoinverse of A
+	 */
+	public Matrix compute(Matrix A, double tolerance) {
+		if (A == null) {
+			throw new IllegalArgumentException("Matrix must not be null");
+		}
+		if (tolerance < 0) {
+			throw new IllegalArgumentException("Tolerance must be non-negative");
+		}
+		if (!A.isReal()) {
+			throw new UnsupportedOperationException("Pseudoinverse requires a real-valued matrix");
+		}
+		SVDecomposition svd = new SVDecomposition();
+		net.faulj.decomposition.result.SVDResult result = svd.decompose(A);
+		return computeFromSvd(result, tolerance);
+	}
+
+	private static Matrix computeFromSvd(net.faulj.decomposition.result.SVDResult result, double tolerance) {
+		Matrix U = result.getU();
+		Matrix V = result.getV();
+		double[] singularValues = result.getSingularValues();
+
+		int m = U.getRowCount();
+		int n = V.getRowCount();
+		int r = Math.min(Math.min(U.getColumnCount(), V.getColumnCount()), singularValues.length);
+
+		if (r == 0) {
+			return Matrix.zero(n, m);
+		}
+
+		Matrix Uthin = U.getColumnCount() == r ? U : U.crop(0, m - 1, 0, r - 1);
+		Matrix Vthin = V.getColumnCount() == r ? V : V.crop(0, n - 1, 0, r - 1);
+
+		Matrix sigmaPlus = new Matrix(r, r);
+		for (int i = 0; i < r; i++) {
+			double s = singularValues[i];
+			if (Math.abs(s) > tolerance) {
+				sigmaPlus.set(i, i, 1.0 / s);
+			}
+		}
+
+		return Vthin.multiply(sigmaPlus).multiply(Uthin.transpose());
+	}
+
+	private static double defaultTolerance(double[] singularValues, int rows, int cols) {
+		double maxSigma = 0.0;
+		for (double s : singularValues) {
+			maxSigma = Math.max(maxSigma, Math.abs(s));
+		}
+		if (maxSigma == 0.0) {
+			return 0.0;
+		}
+		return Math.max(rows, cols) * maxSigma * EPS;
 	}
 }

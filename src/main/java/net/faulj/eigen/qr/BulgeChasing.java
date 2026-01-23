@@ -112,7 +112,7 @@ public class BulgeChasing {
         int n = A.getColumnCount();
         int maxCol = Math.min(n, colEnd + 3); // Only update relevant columns
         
-        for (int j = Math.max(0, row); j < maxCol; j++) {
+        for (int j = 0; j < maxCol; j++) {
             double dot = v0 * A.get(row, j) + v1 * A.get(row + 1, j) + v2 * A.get(row + 2, j);
             if (Math.abs(dot) > EPSILON) {
                 A.set(row, j, A.get(row, j) - 2 * v0 * dot);

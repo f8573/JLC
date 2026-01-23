@@ -143,19 +143,19 @@ public class LUResult {
 
     public double residualNorm() {
         Matrix PA = permuteRows();
-        return MatrixUtils.normResidual(PA, reconstruct());
+        return MatrixUtils.normResidual(PA, reconstruct(), 1e-10);
     }
 
     public double residualElement() {
         Matrix PA = permuteRows();
-        return MatrixUtils.backwardErrorComponentwise(PA, reconstruct());
+        return MatrixUtils.backwardErrorComponentwise(PA, reconstruct(), 1e-10);
     }
 
     public double[] verifyOrthogonality(Matrix O) {
         Matrix I = Matrix.Identity(O.getRowCount());
         O = O.multiply(O.transpose());
-        double n = MatrixUtils.normResidual(I, O);
-        double e = MatrixUtils.backwardErrorComponentwise(I, O);
+        double n = MatrixUtils.normResidual(I, O, 1e-10);
+        double e = MatrixUtils.backwardErrorComponentwise(I, O, 1e-10);
         return new double[]{n, e};
     }
     
