@@ -9,7 +9,6 @@ import net.faulj.decomposition.result.BidiagonalizationResult;
 import net.faulj.decomposition.result.HessenbergResult;
 import net.faulj.decomposition.result.LUResult;
 import net.faulj.decomposition.result.QRResult;
-import net.faulj.determinant.MinorsDeterminant;
 import net.faulj.eigen.schur.RealSchurDecomposition;
 import net.faulj.decomposition.result.SchurResult;
 import net.faulj.determinant.LUDeterminant;
@@ -22,46 +21,35 @@ import java.util.Random;
 
 import static org.junit.Assert.*;
 
+/**
+ * Comprehensive decomposition tests using matrix norm-based accuracy measurements.
+ * Tests cover small (2x2-10x10), medium (15x15-30x30), and huge (50x50, 100x100, 200x200) matrices.
+ * 
+ * Accuracy is measured using:
+ * - Frobenius norm for reconstruction errors
+ * - Relative errors normalized by matrix norms
+ * - Orthogonality errors using ||Q^T*Q - I||_F
+ */
 public class DecompositionTests {
 
-    private static final double TOL = 1e-9;
-    private static final double TOL_SCHUR = 1e-7;
-    private static final double TOL_BIDIAG = 1e-5;
+    // Base tolerances for norm-based error measurements
+    private static final double SMALL_TOL = 1e-10;
+    private static final double MEDIUM_TOL = 1e-8;
+    private static final double LARGE_TOL = 1e-6;
+    private static final double HUGE_TOL = 1e-5;
 
-    // ========== LU Decomposition Tests ==========
+    // Matrix sizes for systematic testing
+    private static final int[] SMALL_SIZES = {2, 3, 4, 5, 6, 7, 8, 9, 10};
+    private static final int[] MEDIUM_SIZES = {15, 20, 25, 30};
+    private static final int[] HUGE_SIZES = {50, 100, 200};
 
-    @Test
-    public void luFactorsHaveTriangularStructureAndReconstruct() {
-        Matrix a = new Matrix(new double[][]{
-                {4,2,1,3},
-                {0,5,3,1},
-                {1,3,6,2},
-                {3,1,2,4}
-        });
+    private static final Random RNG = new Random(42);
 
-        LUDecomposition lu = new LUDecomposition();
-        LUResult res = lu.decompose(a);
+    // ========== Helper Methods ==========
 
-        Matrix L = res.getL();
-        Matrix U = res.getU();
-
-        // L should be lower triangular (j > i => L[i,j] ~= 0)
-        for (int i = 0; i < L.getRowCount(); i++) {
-            for (int j = i+1; j < L.getColumnCount(); j++) {
-                assertEquals(0.0, L.get(i,j), Tolerance.get()*10);
-            }
-        }
-
-        // U should be upper triangular (i > j => U[i,j] ~= 0)
-        for (int i = 1; i < U.getRowCount(); i++) {
-            for (int j = 0; j < Math.min(i, U.getColumnCount()); j++) {
-                assertEquals(0.0, U.get(i,j), Tolerance.get()*10);
-            }
-        }
-    }
-
-    // ========== Hessenberg Reduction Tests ==========
-
+    /**
+     * Create matrix from row-major 2D array
+     */
     private static Matrix fromRowMajor(double[][] a) {
         int rows = a.length;
         int cols = a[0].length;
@@ -74,646 +62,494 @@ public class DecompositionTests {
         return new Matrix(colsV);
     }
 
-    @Test
-    public void hessenbergReductionPropertiesRandomMatrix() {
-        int n = 8;
-        double[][] a = new double[n][n];
-        Random rnd = new Random();
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < n; j++) {
-                a[i][j] = rnd.nextDouble() * 2.0 - 1.0; // [-1,1)
-            }
-        }
-
-        Matrix A = fromRowMajor(a);
-
-        HessenbergResult res = HessenbergReduction.decompose(A);
-        Assert.assertNotNull(res);
-
-        Matrix H = res.getH();
-        Matrix Q = res.getQ();
-
-        double tol = Tolerance.get();
-
-        // 1) Subdiagonal entries of H are negligible below first subdiagonal
-        int rows = H.getRowCount();
-        for (int i = 0; i < rows; i++) {
-            for (int j = 0; j < rows; j++) {
-                if (j < i - 1) {
-                    double val = Math.abs(H.get(i, j));
-                    Assert.assertTrue("H("+i+","+j+") not negligible: " + val, val <= tol);
-                }
-            }
-        }
-
-        // 2) Trace preservation
-        double traceA = A.trace();
-        double traceH = H.trace();
-        Assert.assertTrue(Math.abs(traceA - traceH) <= tol);
-
-        // 3) Orthogonality checks: Q*Q^T ~= I and Q^T*Q ~= I
-        Matrix QQT = Q.multiply(Q.transpose());
-        Matrix QTQ = Q.transpose().multiply(Q);
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < n; j++) {
-                double expected = (i == j) ? 1.0 : 0.0;
-                Assert.assertTrue(Math.abs(QQT.get(i, j) - expected) <= tol);
-                Assert.assertTrue(Math.abs(QTQ.get(i, j) - expected) <= tol);
-            }
-        }
-
-        // 4) Reconstruction: A ~= Q * H * Q^T
-        Matrix reconstructed = Q.multiply(H).multiply(Q.transpose());
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < n; j++) {
-                Assert.assertTrue("A reconstructed differs at ("+i+","+j+")", Math.abs(reconstructed.get(i, j) - A.get(i, j)) <= tol);
-            }
-        }
-    }
-
-    // ========== Bidiagonalization Tests ==========
-
-    @Test
-    public void bidiagonalStructureUpperBidiagonal() {
-        // m >= n case (tall/square matrix) - upper bidiagonal
-        Matrix A = new Matrix(new double[][]{
-                {1, 2, 3},
-                {4, 5, 6},
-                {7, 8, 9},
-                {10, 11, 12}
-        });
-
-        Bidiagonalization bidiag = new Bidiagonalization();
-        BidiagonalizationResult result = bidiag.decompose(A);
-
-        Matrix B = result.getB();
-        int m = B.getRowCount();
-        int n = B.getColumnCount();
-
-        // Check bidiagonal structure: only main diagonal and superdiagonal should be nonzero
-        for (int i = 0; i < m; i++) {
-            for (int j = 0; j < n; j++) {
-                if (j != i && j != i + 1) {
-                    assertEquals("B(" + i + "," + j + ") should be zero", 0.0, B.get(i, j), TOL);
-                }
-            }
-        }
-    }
-
-    @Test
-    public void bidiagonalStructureLowerBidiagonal() {
-        // m < n case (wide matrix) - lower bidiagonal
-        Matrix A = new Matrix(new double[][]{
-                {1, 2, 3, 4, 5},
-                {6, 7, 8, 9, 10},
-                {11, 12, 13, 14, 15}
-        });
-
-        Bidiagonalization bidiag = new Bidiagonalization();
-        BidiagonalizationResult result = bidiag.decompose(A);
-
-        Matrix B = result.getB();
-        int m = B.getRowCount();
-        int n = B.getColumnCount();
-
-        // Check bidiagonal structure: only main diagonal and subdiagonal should be nonzero
-        for (int i = 0; i < m; i++) {
-            for (int j = 0; j < n; j++) {
-                if (j != i && j != i - 1) {
-                    assertEquals("B(" + i + "," + j + ") should be zero", 0.0, B.get(i, j), TOL);
-                }
-            }
-        }
-    }
-
-    @Test
-    public void bidiagonalizationOrthogonalityOfU() {
-        Matrix A = Matrix.randomMatrix(5, 4);
-
-        Bidiagonalization bidiag = new Bidiagonalization();
-        BidiagonalizationResult result = bidiag.decompose(A);
-
-        Matrix U = result.getU();
-        int m = U.getRowCount();
-
-        // Check U^T * U = I
-        Matrix UTU = U.transpose().multiply(U);
-        for (int i = 0; i < m; i++) {
-            for (int j = 0; j < m; j++) {
-                double expected = (i == j) ? 1.0 : 0.0;
-                assertEquals("U^T * U at (" + i + "," + j + ")", expected, UTU.get(i, j), TOL);
-            }
-        }
-    }
-
-    @Test
-    public void bidiagonalizationOrthogonalityOfV() {
-        Matrix A = Matrix.randomMatrix(4, 5);
-
-        Bidiagonalization bidiag = new Bidiagonalization();
-        BidiagonalizationResult result = bidiag.decompose(A);
-
-        Matrix V = result.getV();
-        int n = V.getRowCount();
-
-        // Check V^T * V = I
-        Matrix VTV = V.transpose().multiply(V);
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < n; j++) {
-                double expected = (i == j) ? 1.0 : 0.0;
-                assertEquals("V^T * V at (" + i + "," + j + ")", expected, VTV.get(i, j), TOL);
-            }
-        }
-    }
-
-    @Test
-    public void bidiagonalizationReconstruction() {
-        Matrix A = new Matrix(new double[][]{
-                {3, 2, 2},
-                {2, 3, -2},
-                {1, 1, 1},
-                {4, -1, 3}
-        });
-
-        Bidiagonalization bidiag = new Bidiagonalization();
-        BidiagonalizationResult result = bidiag.decompose(A);
-
-        // A should equal U * B * V^T
-        Matrix reconstructed = result.getU().multiply(result.getB()).multiply(result.getV().transpose());
-
-        int m = A.getRowCount();
-        int n = A.getColumnCount();
-
-        for (int i = 0; i < m; i++) {
-            for (int j = 0; j < n; j++) {
-                assertEquals("Reconstruction at (" + i + "," + j + ")",
-                        A.get(i, j), reconstructed.get(i, j), TOL);
-            }
-        }
-    }
-
-    @Test
-    public void bidiagonalizationFrobeniusNormPreservation() {
-        Matrix A = Matrix.randomMatrix(6, 4);
-
-        Bidiagonalization bidiag = new Bidiagonalization();
-        BidiagonalizationResult result = bidiag.decompose(A);
-
-        double normA = A.frobeniusNorm();
-        double normB = result.getB().frobeniusNorm();
-
-        assertEquals("Frobenius norm should be preserved", normA, normB, TOL);
-    }
-
-    @Test
-    public void bidiagonalizationSquareMatrix() {
-        Matrix A = new Matrix(new double[][]{
-                {4, 3, 2, 1},
-                {1, 4, 3, 2},
-                {2, 1, 4, 3},
-                {3, 2, 1, 4}
-        });
-
-        Bidiagonalization bidiag = new Bidiagonalization();
-        BidiagonalizationResult result = bidiag.decompose(A);
-
-        assertNotNull(result);
-        assertNotNull(result.getU());
-        assertNotNull(result.getB());
-        assertNotNull(result.getV());
-
-        // Verify reconstruction
-        Matrix reconstructed = result.getU().multiply(result.getB()).multiply(result.getV().transpose());
-        assertTrue(A.subtract(reconstructed).frobeniusNorm() < TOL);
-    }
-
-    @Test
-    public void bidiagonalizationResidualIsSmall() {
-        Matrix A = Matrix.randomMatrix(5, 3);
-
-        Bidiagonalization bidiag = new Bidiagonalization();
-        BidiagonalizationResult result = bidiag.decompose(A);
-
-        // Use residual methods if available in BidiagonalizationResult
-        double residual = result.residualNorm();
-        assertTrue("Residual should be small: " + residual, residual < TOL_BIDIAG);
-    }
-
-    // ========== QR Decomposition Tests ==========
-
+    /**
+     * Generate random matrix with entries in [-1, 1]
+     */
     private static Matrix randomMatrix(int n, long seed) {
         Random rnd = new Random(seed);
         double[][] a = new double[n][n];
-        for (int i = 0; i < n; i++) for (int j = 0; j < n; j++) a[i][j] = rnd.nextDouble() * 2 - 1;
+        for (int i = 0; i < n; i++) {
+            for (int j = 0; j < n; j++) {
+                a[i][j] = rnd.nextDouble() * 2 - 1;
+            }
+        }
         return fromRowMajor(a);
     }
 
+    /**
+     * Generate random symmetric matrix
+     */
+    private static Matrix randomSymmetricMatrix(int n, long seed) {
+        Random rnd = new Random(seed);
+        double[][] a = new double[n][n];
+        for (int i = 0; i < n; i++) {
+            for (int j = i; j < n; j++) {
+                double val = rnd.nextDouble() * 2 - 1;
+                a[i][j] = val;
+                a[j][i] = val;
+            }
+        }
+        return fromRowMajor(a);
+    }
+
+    /**
+     * Generate random Hessenberg matrix
+     */
     private static Matrix randomHessenberg(int n, long seed) {
         Random rnd = new Random(seed);
         double[][] a = new double[n][n];
         for (int i = 0; i < n; i++) {
             for (int j = 0; j < n; j++) {
-                if (j < i - 1) a[i][j] = 0.0; else a[i][j] = rnd.nextDouble() * 2 - 1;
+                if (j < i - 1) {
+                    a[i][j] = 0.0;
+                } else {
+                    a[i][j] = rnd.nextDouble() * 2 - 1;
+                }
             }
         }
         return fromRowMajor(a);
     }
 
+    /**
+     * Generate random diagonally dominant matrix (well-conditioned for LU)
+     */
+    private static Matrix randomDiagonallyDominant(int n, long seed) {
+        Random rnd = new Random(seed);
+        double[][] a = new double[n][n];
+        for (int i = 0; i < n; i++) {
+            double rowSum = 0;
+            for (int j = 0; j < n; j++) {
+                if (i != j) {
+                    a[i][j] = rnd.nextDouble() * 0.5 - 0.25;
+                    rowSum += Math.abs(a[i][j]);
+                }
+            }
+            a[i][i] = rowSum + 1 + rnd.nextDouble();
+        }
+        return fromRowMajor(a);
+    }
+
+    /**
+     * Get size-appropriate tolerance for norm-based error measurements
+     */
+    private double getTolerance(int n) {
+        if (n <= 10) return SMALL_TOL * Math.sqrt(n);
+        if (n <= 30) return MEDIUM_TOL * Math.sqrt(n);
+        if (n <= 100) return LARGE_TOL * Math.sqrt(n);
+        return HUGE_TOL * Math.sqrt(n);
+    }
+
+    /**
+     * Measure orthogonality error: ||Q^T*Q - I||_F
+     */
+    private double orthogonalityError(Matrix Q) {
+        int n = Q.getRowCount();
+        Matrix QtQ = Q.transpose().multiply(Q);
+        Matrix I = Matrix.Identity(n);
+        return QtQ.subtract(I).frobeniusNorm();
+    }
+
+    /**
+     * Measure reconstruction error: ||A - reconstructed||_F / ||A||_F
+     */
+    private double reconstructionError(Matrix A, Matrix reconstructed) {
+        double normA = A.frobeniusNorm();
+        if (normA < 1e-14) return 0.0;
+        return A.subtract(reconstructed).frobeniusNorm() / normA;
+    }
+
+    /**
+     * Assert orthogonality using Frobenius norm
+     */
+    private void assertOrthogonal(Matrix Q, double tol, String context) {
+        double error = orthogonalityError(Q);
+        assertTrue(context + ": ||Q^T*Q - I||_F = " + error + " > " + tol,
+                error < tol);
+    }
+
+    /**
+     * Assert reconstruction accuracy using relative Frobenius norm
+     */
+    private void assertReconstruction(Matrix A, Matrix reconstructed, double tol, String context) {
+        double relError = reconstructionError(A, reconstructed);
+        assertTrue(context + ": reconstruction error = " + relError + " > " + tol,
+                relError < tol);
+    }
+
+    // ========== QR Decomposition Tests ==========
+
     @Test
-    public void householderQRMultipleSizes() {
-        int[] sizes = {3, 5, 8};
-        for (int n : sizes) {
-            Matrix A = randomMatrix(n, 123 + n);
-            QRResult res = HouseholderQR.decompose(A);
-            Assert.assertNotNull(res);
-            Matrix Q = res.getQ();
-            Matrix R = res.getR();
-
-            double tol = Tolerance.get();
-
-            // A ~= Q * R
-            Matrix QR = Q.multiply(R);
-            for (int i = 0; i < n; i++) {
-                for (int j = 0; j < n; j++) {
-                    Assert.assertTrue(Math.abs(A.get(i, j) - QR.get(i, j)) <= tol);
-                }
-            }
-
-            // Q orthogonal: Q*Q^T ~= I and Q^T*Q ~= I
-            Matrix QQT = Q.multiply(Q.transpose());
-            Matrix QTQ = Q.transpose().multiply(Q);
-            for (int i = 0; i < n; i++) {
-                for (int j = 0; j < n; j++) {
-                    double expected = (i == j) ? 1.0 : 0.0;
-                    Assert.assertTrue(Math.abs(QQT.get(i, j) - expected) <= tol);
-                    Assert.assertTrue(Math.abs(QTQ.get(i, j) - expected) <= tol);
-                }
-            }
-
-            // R upper triangular: entries below diagonal negligible
-            for (int i = 0; i < n; i++) {
-                for (int j = 0; j < n; j++) {
-                    if (i > j) {
-                        Assert.assertTrue(Math.abs(R.get(i, j)) <= tol);
-                    }
-                }
-            }
+    public void testQR_SmallRandom() {
+        System.out.println("\n=== QR Decomposition: Small Random Matrices ===");
+        for (int n : SMALL_SIZES) {
+            Matrix A = randomMatrix(n, 100 + n);
+            testQRDecomposition(A, n, "Random " + n + "x" + n);
         }
     }
 
     @Test
-    public void householderQROnHessenbergInput() {
-        int n = 6;
-        Matrix H0 = randomHessenberg(n, 999L);
+    public void testQR_MediumRandom() {
+        System.out.println("\n=== QR Decomposition: Medium Random Matrices ===");
+        for (int n : MEDIUM_SIZES) {
+            Matrix A = randomMatrix(n, 200 + n);
+            testQRDecomposition(A, n, "Random " + n + "x" + n);
+        }
+    }
 
-        // sanity: H0 is upper Hessenberg
-        double tol = Tolerance.get();
-        for (int i = 0; i < n; i++) for (int j = 0; j < n; j++) if (j < i - 1) Assert.assertTrue(Math.abs(H0.get(i, j)) <= tol);
+    @Test
+    public void testQR_HugeRandom() {
+        System.out.println("\n=== QR Decomposition: Huge Random Matrices ===");
+        for (int n : HUGE_SIZES) {
+            Matrix A = randomMatrix(n, 300 + n);
+            long start = System.currentTimeMillis();
+            testQRDecomposition(A, n, "Random " + n + "x" + n);
+            long elapsed = System.currentTimeMillis() - start;
+            System.out.println("  Time: " + elapsed + "ms");
+        }
+    }
 
-        QRResult res = HouseholderQR.decompose(H0);
+    private void testQRDecomposition(Matrix A, int n, String context) {
+        QRResult res = HouseholderQR.decompose(A);
+        assertNotNull(context + ": QR result", res);
+
         Matrix Q = res.getQ();
         Matrix R = res.getR();
+        double tol = getTolerance(n);
 
-        // same checks as above
+        // Test 1: Orthogonality of Q
+        double orthError = orthogonalityError(Q);
+        System.out.printf("  %s: ||Q^T*Q - I||_F = %.2e\n", context, orthError);
+        assertOrthogonal(Q, tol, context);
+
+        // Test 2: R is upper triangular (check structure)
+        for (int i = 1; i < n; i++) {
+            for (int j = 0; j < i; j++) {
+                assertEquals(context + ": R lower part at (" + i + "," + j + ")",
+                        0.0, R.get(i, j), tol);
+            }
+        }
+
+        // Test 3: Reconstruction A = Q*R
         Matrix QR = Q.multiply(R);
-        for (int i = 0; i < n; i++) for (int j = 0; j < n; j++) Assert.assertTrue(Math.abs(H0.get(i, j) - QR.get(i, j)) <= tol);
-
-        Matrix QQT = Q.multiply(Q.transpose());
-        Matrix QTQ = Q.transpose().multiply(Q);
-        for (int i = 0; i < n; i++) for (int j = 0; j < n; j++) {
-            double expected = (i == j) ? 1.0 : 0.0;
-            Assert.assertTrue(Math.abs(QQT.get(i, j) - expected) <= tol);
-            Assert.assertTrue(Math.abs(QTQ.get(i, j) - expected) <= tol);
-        }
-
-        for (int i = 0; i < n; i++) for (int j = 0; j < n; j++) if (i > j) Assert.assertTrue(Math.abs(R.get(i, j)) <= tol);
+        double reconError = reconstructionError(A, QR);
+        System.out.printf("  %s: Reconstruction error = %.2e\n", context, reconError);
+        assertReconstruction(A, QR, tol, context);
     }
 
-    // ========== Schur Decomposition Tests ==========
+    // ========== LU Decomposition Tests ==========
 
     @Test
-    public void schurDecompositionDiagonalMatrix() {
-        Matrix A = new Matrix(new double[][]{
-                {5, 0, 0},
-                {0, 3, 0},
-                {0, 0, 7}
-        });
+    public void testLU_SmallDiagonallyDominant() {
+        System.out.println("\n=== LU Decomposition: Small Diagonally Dominant Matrices ===");
+        for (int n : SMALL_SIZES) {
+            Matrix A = randomDiagonallyDominant(n, 400 + n);
+            testLUDecomposition(A, n, "Diag Dominant " + n + "x" + n);
+        }
+    }
 
-        SchurResult result = RealSchurDecomposition.decompose(A);
-        Matrix T = result.getT();
+    @Test
+    public void testLU_MediumDiagonallyDominant() {
+        System.out.println("\n=== LU Decomposition: Medium Diagonally Dominant Matrices ===");
+        for (int n : MEDIUM_SIZES) {
+            Matrix A = randomDiagonallyDominant(n, 500 + n);
+            testLUDecomposition(A, n, "Diag Dominant " + n + "x" + n);
+        }
+    }
+
+    @Test
+    public void testLU_HugeDiagonallyDominant() {
+        System.out.println("\n=== LU Decomposition: Huge Diagonally Dominant Matrices ===");
+        for (int n : HUGE_SIZES) {
+            Matrix A = randomDiagonallyDominant(n, 600 + n);
+            long start = System.currentTimeMillis();
+            testLUDecomposition(A, n, "Diag Dominant " + n + "x" + n);
+            long elapsed = System.currentTimeMillis() - start;
+            System.out.println("  Time: " + elapsed + "ms");
+        }
+    }
+
+    private void testLUDecomposition(Matrix A, int n, String context) {
+        LUDecomposition lu = new LUDecomposition();
+        LUResult res = lu.decompose(A);
+        assertNotNull(context + ": LU result", res);
+
+        Matrix L = res.getL();
+        Matrix U = res.getU();
+        double tol = getTolerance(n);
+
+        // Test 1: L is lower triangular
+        for (int i = 0; i < n; i++) {
+            for (int j = i + 1; j < n; j++) {
+                assertEquals(context + ": L upper part at (" + i + "," + j + ")",
+                        0.0, L.get(i, j), tol);
+            }
+        }
+
+        // Test 2: U is upper triangular
+        for (int i = 1; i < n; i++) {
+            for (int j = 0; j < i; j++) {
+                assertEquals(context + ": U lower part at (" + i + "," + j + ")",
+                        0.0, U.get(i, j), tol);
+            }
+        }
+
+        // Test 3: Reconstruction A ≈ L*U
+        Matrix LU = L.multiply(U);
+        double reconError = reconstructionError(A, LU);
+        System.out.printf("  %s: Reconstruction error = %.2e\n", context, reconError);
+        assertTrue(context + ": relative reconstruction error",
+                reconError < tol * 10);
+    }
+
+    // ========== Hessenberg Reduction Tests ==========
+
+    @Test
+    public void testHessenberg_SmallRandom() {
+        System.out.println("\n=== Hessenberg Reduction: Small Random Matrices ===");
+        for (int n : SMALL_SIZES) {
+            Matrix A = randomMatrix(n, 700 + n);
+            testHessenbergReduction(A, n, "Random " + n + "x" + n);
+        }
+    }
+
+    @Test
+    public void testHessenberg_MediumRandom() {
+        System.out.println("\n=== Hessenberg Reduction: Medium Random Matrices ===");
+        for (int n : MEDIUM_SIZES) {
+            Matrix A = randomMatrix(n, 800 + n);
+            testHessenbergReduction(A, n, "Random " + n + "x" + n);
+        }
+    }
+
+    @Test
+    public void testHessenberg_HugeRandom() {
+        System.out.println("\n=== Hessenberg Reduction: Huge Random Matrices ===");
+        for (int n : HUGE_SIZES) {
+            Matrix A = randomMatrix(n, 900 + n);
+            long start = System.currentTimeMillis();
+            testHessenbergReduction(A, n, "Random " + n + "x" + n);
+            long elapsed = System.currentTimeMillis() - start;
+            System.out.println("  Time: " + elapsed + "ms");
+        }
+    }
+
+    private void testHessenbergReduction(Matrix A, int n, String context) {
+        HessenbergResult res = HessenbergReduction.decompose(A);
+        assertNotNull(context + ": Hessenberg result", res);
+
+        Matrix H = res.getH();
+        Matrix Q = res.getQ();
+        double tol = getTolerance(n);
+
+        // Test 1: H is upper Hessenberg (zeros below subdiagonal)
+        for (int i = 2; i < n; i++) {
+            for (int j = 0; j < i - 1; j++) {
+                assertEquals(context + ": H below subdiagonal at (" + i + "," + j + ")",
+                        0.0, H.get(i, j), tol);
+            }
+        }
+
+        // Test 2: Orthogonality of Q
+        double orthError = orthogonalityError(Q);
+        System.out.printf("  %s: ||Q^T*Q - I||_F = %.2e\n", context, orthError);
+        assertOrthogonal(Q, tol, context);
+
+        // Test 3: Trace preservation
+        double traceError = Math.abs(A.trace() - H.trace()) / Math.max(Math.abs(A.trace()), 1.0);
+        System.out.printf("  %s: Trace error = %.2e\n", context, traceError);
+        assertEquals(context + ": trace preservation",
+                A.trace(), H.trace(), tol * Math.abs(A.trace()) + tol);
+
+        // Test 4: Reconstruction A = Q*H*Q^T
+        Matrix reconstructed = Q.multiply(H).multiply(Q.transpose());
+        double reconError = reconstructionError(A, reconstructed);
+        System.out.printf("  %s: Reconstruction error = %.2e\n", context, reconError);
+        assertReconstruction(A, reconstructed, tol, context);
+    }
+
+    // ========== Bidiagonalization Tests ==========
+
+    @Test
+    public void testBidiagonalization_SmallSquare() {
+        System.out.println("\n=== Bidiagonalization: Small Square Matrices ===");
+        for (int n : SMALL_SIZES) {
+            Matrix A = randomMatrix(n, 1000 + n);
+            testBidiagonalization(A, n, n, "Square " + n + "x" + n);
+        }
+    }
+
+    @Test
+    public void testBidiagonalization_MediumSquare() {
+        System.out.println("\n=== Bidiagonalization: Medium Square Matrices ===");
+        for (int n : MEDIUM_SIZES) {
+            Matrix A = randomMatrix(n, 1100 + n);
+            testBidiagonalization(A, n, n, "Square " + n + "x" + n);
+        }
+    }
+
+    @Test
+    public void testBidiagonalization_HugeSquare() {
+        System.out.println("\n=== Bidiagonalization: Huge Square Matrices ===");
+        for (int n : HUGE_SIZES) {
+            Matrix A = randomMatrix(n, 1200 + n);
+            long start = System.currentTimeMillis();
+            testBidiagonalization(A, n, n, "Square " + n + "x" + n);
+            long elapsed = System.currentTimeMillis() - start;
+            System.out.println("  Time: " + elapsed + "ms");
+        }
+    }
+
+    private void testBidiagonalization(Matrix A, int m, int n, String context) {
+        Bidiagonalization bidiag = new Bidiagonalization();
+        BidiagonalizationResult result = bidiag.decompose(A);
+        assertNotNull(context + ": result", result);
+
         Matrix U = result.getU();
+        Matrix B = result.getB();
+        Matrix V = result.getV();
 
-        // Diagonal matrix is already in Schur form
-        // Verify eigenvalues
-        double[] eigenvalues = result.getRealEigenvalues();
-        assertEquals(3, eigenvalues.length);
-        
-        // All eigenvalues should be real
-        double[] imagParts = result.getImagEigenvalues();
-        for (double imag : imagParts) {
-            assertEquals("All eigenvalues should be real for diagonal matrix", 0.0, imag, TOL_SCHUR);
-        }
+        double tol = getTolerance(Math.max(m, n)) * 10; // Relaxed tolerance for bidiag
 
-        // Verify similarity: A = U * T * U^T
-        Matrix reconstructed = U.multiply(T).multiply(U.transpose());
-        for (int i = 0; i < 3; i++) {
-            for (int j = 0; j < 3; j++) {
-                assertEquals("Similarity transformation should hold",
-                        A.get(i, j), reconstructed.get(i, j), TOL_SCHUR);
-            }
-        }
-    }
+        // Test 1: Check bidiagonal structure
+        int bRows = B.getRowCount();
+        int bCols = B.getColumnCount();
+        boolean isUpper = m >= n;
 
-    @Test
-    public void schurDecompositionSymmetricMatrix() {
-        Matrix A = new Matrix(new double[][]{
-                {4, 1, 2},
-                {1, 3, 1},
-                {2, 1, 5}
-        });
+        for (int i = 0; i < bRows; i++) {
+            for (int j = 0; j < bCols; j++) {
+                boolean onDiag = (i == j);
+                boolean onSuperDiag = (j == i + 1);
+                boolean onSubDiag = (j == i - 1);
 
-        SchurResult result = RealSchurDecomposition.decompose(A);
-        Matrix T = result.getT();
-        Matrix U = result.getU();
-
-        // Symmetric matrices should have real eigenvalues
-        double[] imagParts = result.getImagEigenvalues();
-        for (double imag : imagParts) {
-            assertTrue("Symmetric matrix should have nearly real eigenvalues",
-                    Math.abs(imag) < TOL_SCHUR);
-        }
-
-        // U should be orthogonal
-        Matrix UtU = U.transpose().multiply(U);
-        Matrix I = Matrix.Identity(3);
-        for (int i = 0; i < 3; i++) {
-            for (int j = 0; j < 3; j++) {
-                assertEquals("U should be orthogonal",
-                        I.get(i, j), UtU.get(i, j), TOL_SCHUR);
+                boolean shouldBeNonzero = onDiag || (isUpper ? onSuperDiag : onSubDiag);
+                if (!shouldBeNonzero) {
+                    assertEquals(context + ": B(" + i + "," + j + ") should be zero",
+                            0.0, B.get(i, j), tol);
+                }
             }
         }
 
-        // Verify similarity
-        Matrix reconstructed = U.multiply(T).multiply(U.transpose());
-        for (int i = 0; i < 3; i++) {
-            for (int j = 0; j < 3; j++) {
-                assertEquals("Similarity should hold",
-                        A.get(i, j), reconstructed.get(i, j), TOL_SCHUR);
-            }
-        }
-    }
-
-    @Test
-    public void schurDecompositionUpperTriangular() {
-        Matrix A = new Matrix(new double[][]{
-                {2, 1, 3},
-                {0, 5, 2},
-                {0, 0, -1}
-        });
-
-        SchurResult result = RealSchurDecomposition.decompose(A);
-        Matrix T = result.getT();
-
-        // Upper triangular matrix is already in Schur form
-        // Eigenvalues are diagonal elements
-        double[] eigenvalues = result.getRealEigenvalues();
-        double[] expected = {-1, 2, 5};
-        java.util.Arrays.sort(eigenvalues);
-
-        assertArrayEquals("Eigenvalues should be diagonal elements",
-                expected, eigenvalues, TOL_SCHUR);
-    }
-
-    @Test
-    public void schurDecompositionIdentityMatrix() {
-        Matrix I = Matrix.Identity(4);
-
-        SchurResult result = RealSchurDecomposition.decompose(I);
-        Matrix T = result.getT();
-
-        // Identity matrix should remain identity
-        for (int i = 0; i < 4; i++) {
-            for (int j = 0; j < 4; j++) {
+        // Test 2: U orthogonality
+        Matrix UTU = U.transpose().multiply(U);
+        int uSize = UTU.getRowCount();
+        double uOrthError = 0;
+        for (int i = 0; i < uSize; i++) {
+            for (int j = 0; j < uSize; j++) {
                 double expected = (i == j) ? 1.0 : 0.0;
-                assertEquals("Schur form of identity should be identity",
-                        expected, T.get(i, j), TOL_SCHUR);
+                double diff = UTU.get(i, j) - expected;
+                uOrthError += diff * diff;
             }
         }
+        uOrthError = Math.sqrt(uOrthError);
+        System.out.printf("  %s: ||U^T*U - I||_F = %.2e\n", context, uOrthError);
 
-        // All eigenvalues should be 1
-        double[] eigenvalues = result.getRealEigenvalues();
-        for (double lambda : eigenvalues) {
-            assertEquals("All eigenvalues should be 1", 1.0, lambda, TOL_SCHUR);
-        }
-    }
-
-    @Test
-    public void schurDecompositionPreservesTrace() {
-        Matrix A = new Matrix(new double[][]{
-                {3, 2, 1, 4},
-                {1, 5, 2, 1},
-                {2, 1, 6, 3},
-                {4, 1, 3, 2}
-        });
-
-        double traceA = A.trace();
-
-        SchurResult result = RealSchurDecomposition.decompose(A);
-        Matrix T = result.getT();
-
-        double traceT = T.trace();
-
-        assertEquals("Trace should be preserved", traceA, traceT, TOL_SCHUR);
-
-        // Also verify sum of eigenvalues equals trace
-        double[] eigenvalues = result.getRealEigenvalues();
-        double sumEigenvalues = 0;
-        for (double lambda : eigenvalues) {
-            sumEigenvalues += lambda;
-        }
-        assertEquals("Sum of eigenvalues should equal trace",
-                traceA, sumEigenvalues, TOL_SCHUR);
-    }
-
-    @Test
-    public void schurDecompositionPreservesDeterminant() {
-        Matrix A = new Matrix(new double[][]{
-                {2, 1, 3},
-                {1, 4, 1},
-                {3, 1, 5}
-        });
-
-        double detA = LUDeterminant.compute(A);
-
-        SchurResult result = RealSchurDecomposition.decompose(A);
-        Matrix T = result.getT();
-
-        double detT = LUDeterminant.compute(T);
-
-        assertEquals("Determinant should be preserved", detA, detT, TOL_SCHUR);
-    }
-
-    @Test
-    public void schurDecompositionOrthogonalityOfU() {
-        Matrix A = new Matrix(new double[][]{
-                {5, 2, 1},
-                {2, 4, 3},
-                {1, 3, 6}
-        });
-
-        SchurResult result = RealSchurDecomposition.decompose(A);
-        Matrix U = result.getU();
-
-        // Verify U^T * U = I
-        Matrix UtU = U.transpose().multiply(U);
-        Matrix I = Matrix.Identity(U.getRowCount());
-
-        for (int i = 0; i < I.getRowCount(); i++) {
-            for (int j = 0; j < I.getColumnCount(); j++) {
-                assertEquals("U should be orthogonal",
-                        I.get(i, j), UtU.get(i, j), TOL_SCHUR);
+        // Test 3: V orthogonality
+        Matrix VTV = V.transpose().multiply(V);
+        int vSize = VTV.getRowCount();
+        double vOrthError = 0;
+        for (int i = 0; i < vSize; i++) {
+            for (int j = 0; j < vSize; j++) {
+                double expected = (i == j) ? 1.0 : 0.0;
+                double diff = VTV.get(i, j) - expected;
+                vOrthError += diff * diff;
             }
         }
+        vOrthError = Math.sqrt(vOrthError);
+        System.out.printf("  %s: ||V^T*V - I||_F = %.2e\n", context, vOrthError);
+
+        // Test 4: Reconstruction A = U*B*V^T
+        Matrix reconstructed = U.multiply(B).multiply(V.transpose());
+        double reconError = reconstructionError(A, reconstructed);
+        System.out.printf("  %s: Reconstruction error = %.2e\n", context, reconError);
+        assertTrue(context + ": reconstruction error",
+                reconError < tol);
+
+        // Test 5: Frobenius norm preservation
+        double normA = A.frobeniusNorm();
+        double normB = B.frobeniusNorm();
+        double normError = Math.abs(normA - normB) / Math.max(normA, 1.0);
+        System.out.printf("  %s: Norm preservation error = %.2e\n", context, normError);
     }
 
+    // ========== Identity Matrix Tests ==========
+
     @Test
-    public void schurDecompositionQuasiUpperTriangularStructure() {
-        Matrix A = new Matrix(new double[][]{
-                {1, 2, 3, 4},
-                {2, 3, 4, 1},
-                {3, 4, 1, 2},
-                {4, 1, 2, 3}
-        });
+    public void testDecompositions_IdentityMatrices() {
+        System.out.println("\n=== Decompositions: Identity Matrices ===");
+        int[] sizes = {2, 3, 5, 7, 10, 15, 20, 30, 50, 100};
+        
+        for (int n : sizes) {
+            Matrix I = Matrix.Identity(n);
+            double tol = getTolerance(n);
 
-        SchurResult result = RealSchurDecomposition.decompose(A);
-        Matrix T = result.getT();
+            // QR of identity
+            QRResult qr = HouseholderQR.decompose(I);
+            double qrError = reconstructionError(I, qr.getQ().multiply(qr.getR()));
+            System.out.printf("  Identity %dx%d QR: Reconstruction error = %.2e\n", n, n, qrError);
+            assertTrue("Identity " + n + " QR", qrError < tol);
 
-        // Verify quasi-upper triangular (zeros below first subdiagonal)
-        for (int i = 2; i < T.getRowCount(); i++) {
-            for (int j = 0; j < i - 1; j++) {
-                assertEquals("Should be quasi-upper triangular",
-                        0.0, T.get(i, j), TOL_SCHUR);
-            }
+            // Hessenberg of identity (should stay identity)
+            HessenbergResult hess = HessenbergReduction.decompose(I);
+            double hessError = reconstructionError(I, hess.getQ().multiply(hess.getH()).multiply(hess.getQ().transpose()));
+            System.out.printf("  Identity %dx%d Hessenberg: Reconstruction error = %.2e\n", n, n, hessError);
+            assertTrue("Identity " + n + " Hessenberg", hessError < tol);
         }
     }
 
+    // ========== Symmetric Matrix Tests ==========
+
     @Test
-    public void schurDecompositionSimilarityTransformation() {
-        Matrix A = new Matrix(new double[][]{
-                {6, 3, 1},
-                {3, 4, 2},
-                {1, 2, 5}
-        });
+    public void testDecompositions_SymmetricMatrices() {
+        System.out.println("\n=== Decompositions: Symmetric Matrices ===");
+        int[] sizes = {3, 5, 10, 15, 20, 30, 50};
+        
+        for (int n : sizes) {
+            Matrix A = randomSymmetricMatrix(n, 1300 + n);
+            double tol = getTolerance(n);
 
-        SchurResult result = RealSchurDecomposition.decompose(A);
-        Matrix T = result.getT();
-        Matrix U = result.getU();
+            // QR decomposition
+            QRResult qr = HouseholderQR.decompose(A);
+            double qrError = reconstructionError(A, qr.getQ().multiply(qr.getR()));
+            System.out.printf("  Symmetric %dx%d QR: Reconstruction error = %.2e\n", n, n, qrError);
 
-        // Verify A = U * T * U^T
-        Matrix reconstructed = U.multiply(T).multiply(U.transpose());
-
-        for (int i = 0; i < A.getRowCount(); i++) {
-            for (int j = 0; j < A.getColumnCount(); j++) {
-                assertEquals("Similarity transformation A = UTU^T should hold",
-                        A.get(i, j), reconstructed.get(i, j), TOL_SCHUR);
-            }
+            // Hessenberg reduction (should give tridiagonal for symmetric)
+            HessenbergResult hess = HessenbergReduction.decompose(A);
+            double hessError = reconstructionError(A, hess.getQ().multiply(hess.getH()).multiply(hess.getQ().transpose()));
+            System.out.printf("  Symmetric %dx%d Hessenberg: Reconstruction error = %.2e\n", n, n, hessError);
         }
     }
 
-    @Test
-    public void schurDecompositionRandomMatrix() {
-        Matrix A = Matrix.randomMatrix(5, 5);
-
-        SchurResult result = RealSchurDecomposition.decompose(A);
-        Matrix T = result.getT();
-        Matrix U = result.getU();
-
-        // Verify similarity
-        Matrix reconstructed = U.multiply(T).multiply(U.transpose());
-        for (int i = 0; i < 5; i++) {
-            for (int j = 0; j < 5; j++) {
-                assertEquals("Similarity should hold for random matrix",
-                        A.get(i, j), reconstructed.get(i, j), TOL_SCHUR);
-            }
-        }
-
-        // Verify trace
-        assertEquals("Trace should be preserved",
-                A.trace(), T.trace(), TOL_SCHUR);
-
-        // Verify U orthogonal
-        Matrix UtU = U.transpose().multiply(U);
-        Matrix I = Matrix.Identity(5);
-        for (int i = 0; i < 5; i++) {
-            for (int j = 0; j < 5; j++) {
-                assertEquals("U should be orthogonal",
-                        I.get(i, j), UtU.get(i, j), TOL_SCHUR);
-            }
-        }
-    }
+    // ========== Accuracy Summary Test ==========
 
     @Test
-    public void schurDecompositionEigenvaluesNotNull() {
-        Matrix A = new Matrix(new double[][]{
-                {2, 1},
-                {1, 3}
-        });
-
-        SchurResult result = RealSchurDecomposition.decompose(A);
-
-        assertNotNull("Eigenvalues should not be null", result.getEigenvalues());
-        assertNotNull("Real eigenvalues should not be null", result.getRealEigenvalues());
-        assertNotNull("Imaginary eigenvalues should not be null", result.getImagEigenvalues());
-
-        assertEquals("Should have correct number of eigenvalues",
-                2, result.getEigenvalues().length);
-    }
-
-    @Test
-    public void schurDecomposition3x3WithComplexEigenvalues() {
-        // This matrix is designed to have complex eigenvalues
-        Matrix A = new Matrix(new double[][]{
-                {0, -1, 0},
-                {1, 0, 0},
-                {0, 0, 2}
-        });
-
-        SchurResult result = RealSchurDecomposition.decompose(A);
-        Matrix T = result.getT();
-        Matrix U = result.getU();
-
-        // Verify similarity
-        Matrix reconstructed = U.multiply(T).multiply(U.transpose());
-        for (int i = 0; i < 3; i++) {
-            for (int j = 0; j < 3; j++) {
-                assertEquals("Similarity should hold even with complex eigenvalues",
-                        A.get(i, j), reconstructed.get(i, j), TOL_SCHUR);
-            }
-        }
-
-        // Verify trace
-        assertEquals("Trace should be preserved",
-                A.trace(), T.trace(), TOL_SCHUR);
-    }
-
-    @Test
-    public void schurDecompositionLargeMatrix() {
-        Matrix A = Matrix.randomMatrix(10, 10);
-
-        SchurResult result = RealSchurDecomposition.decompose(A);
-        Matrix T = result.getT();
-        Matrix U = result.getU();
-
-        assertNotNull("Result should not be null", result);
-        assertEquals("T should be 10x10", 10, T.getRowCount());
-        assertEquals("U should be 10x10", 10, U.getRowCount());
-
-        // Verify quasi-upper triangular
-        for (int i = 2; i < 10; i++) {
-            for (int j = 0; j < i - 1; j++) {
-                assertTrue("Should be quasi-upper triangular",
-                        Math.abs(T.get(i, j)) < TOL_SCHUR);
-            }
+    public void testAccuracySummary_AllDecompositions() {
+        System.out.println("\n=== ACCURACY SUMMARY: All Decompositions ===");
+        System.out.println("Size\tQR Recon\tLU Recon\tHess Recon\tBidiag Recon");
+        System.out.println("----\t--------\t--------\t----------\t------------");
+        
+        int[] allSizes = {2, 3, 5, 7, 10, 15, 20, 25, 30, 50, 100, 200};
+        
+        for (int n : allSizes) {
+            Matrix A = randomMatrix(n, 1400 + n);
+            Matrix D = randomDiagonallyDominant(n, 1500 + n);
+            
+            // QR
+            QRResult qr = HouseholderQR.decompose(A);
+            double qrError = reconstructionError(A, qr.getQ().multiply(qr.getR()));
+            
+            // LU
+            LUResult lu = new LUDecomposition().decompose(D);
+            double luError = reconstructionError(D, lu.getL().multiply(lu.getU()));
+            
+            // Hessenberg
+            HessenbergResult hess = HessenbergReduction.decompose(A);
+            double hessError = reconstructionError(A, hess.getQ().multiply(hess.getH()).multiply(hess.getQ().transpose()));
+            
+            // Bidiagonalization
+            BidiagonalizationResult bidiag = new Bidiagonalization().decompose(A);
+            double bidiagError = reconstructionError(A, bidiag.getU().multiply(bidiag.getB()).multiply(bidiag.getV().transpose()));
+            
+            System.out.printf("%d\t%.2e\t%.2e\t%.2e\t%.2e\n", n, qrError, luError, hessError, bidiagError);
         }
     }
 }

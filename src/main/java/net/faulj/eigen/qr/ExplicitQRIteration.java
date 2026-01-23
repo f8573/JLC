@@ -2,6 +2,7 @@ package net.faulj.eigen.qr;
 
 import net.faulj.decomposition.qr.HouseholderQR;
 import net.faulj.decomposition.result.QRResult;
+import net.faulj.decomposition.result.HessenbergResult;
 import net.faulj.matrix.Matrix;
 import net.faulj.scalar.Complex;
 
@@ -63,8 +64,12 @@ public class ExplicitQRIteration {
 
         int n = A.getRowCount();
         boolean symmetric = isSymmetric(A, EPSILON);
-        Matrix T = A.copy();
-        Matrix Q = Matrix.Identity(n);
+        
+        // Step 1: Reduce to Hessenberg form
+        HessenbergResult hessResult = BlockedHessenbergQR.decompose(A);
+        Matrix T = hessResult.getH();
+        Matrix Q = hessResult.getQ();
+        
         int maxIterations = MAX_ITERATIONS * n;
 
         for (int iter = 0; iter < maxIterations; iter++) {

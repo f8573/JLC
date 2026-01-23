@@ -103,6 +103,23 @@ public class ImplicitQRFrancis {
             totalIter++;
         }
 
+        // Final cleanup: explicitly zero out elements below quasi-upper triangular band
+        for (int i = 2; i < n; i++) {
+            for (int j = 0; j < i - 1; j++) {
+                if (Math.abs(H.get(i, j)) < EPSILON * Math.sqrt(n)) {
+                    H.set(i, j, 0.0);
+                }
+            }
+        }
+        // Also clean up subdiagonal elements that should be zero
+        for (int i = 1; i < n; i++) {
+            double subdiag = Math.abs(H.get(i, i - 1));
+            double diagSum = Math.abs(H.get(i - 1, i - 1)) + Math.abs(H.get(i, i));
+            if (subdiag < EPSILON * (diagSum + EPSILON)) {
+                H.set(i, i - 1, 0.0);
+            }
+        }
+
         // Extract eigenvalues
         SchurEigenExtractor extractor = new SchurEigenExtractor(H, U);
         return new SchurResult(A, H, U, extractor.getEigenvalues(), extractor.getEigenvectors());

@@ -187,18 +187,18 @@ public class SchurResult {
     }
 
     public double residualNorm() {
-        return MatrixUtils.normResidual(A, U.multiply(T).multiply(U.transpose()));
+        return MatrixUtils.normResidual(A, U.multiply(T).multiply(U.transpose()), 1e-10);
     }
 
     public double residualElement() {
-        return MatrixUtils.backwardErrorComponentwise(A, U.multiply(T).multiply(U.transpose()));
+        return MatrixUtils.backwardErrorComponentwise(A, U.multiply(T).multiply(U.transpose()), 1e-10);
     }
 
     public double[] verifyOrthogonality(Matrix O) {
         Matrix I = Matrix.Identity(O.getRowCount());
         O = O.multiply(O.transpose());
-        double n = MatrixUtils.normResidual(I, O);
-        double e = MatrixUtils.backwardErrorComponentwise(I, O);
+        double n = MatrixUtils.normResidual(I, O, 1e-10);
+        double e = MatrixUtils.backwardErrorComponentwise(I, O, 1e-10);
         return new double[]{n, e};
     }
 }
