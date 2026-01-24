@@ -50,6 +50,251 @@ package net.faulj.svd;
  */
 public class BidiagonalQR {
 	public BidiagonalQR() {
-		throw new RuntimeException("Class unfinished");
+	}
+
+	private static final double EPS = 2.220446049250313e-16;
+
+	/**
+	 * Computes the SVD of a bidiagonal matrix using implicit QR iterations.
+	 *
+	 * @param B bidiagonal matrix
+	 * @return SVD of B
+	 */
+	public static BidiagonalSVDResult decompose(net.faulj.matrix.Matrix B) {
+		if (B == null) {
+			throw new IllegalArgumentException("Matrix must not be null");
+		}
+		int m = B.getRowCount();
+		int n = B.getColumnCount();
+		if (m == 0 || n == 0) {
+			return new BidiagonalSVDResult(
+					net.faulj.matrix.Matrix.Identity(m),
+					net.faulj.matrix.Matrix.Identity(n),
+					new double[0]
+			);
+		}
+		if (m < n) {
+			BidiagonalSVDResult t = decomposeUpper(B.transpose());
+			return new BidiagonalSVDResult(t.V, t.U, t.singularValues);
+		}
+		return decomposeUpper(B);
+	}
+
+	private static BidiagonalSVDResult decomposeUpper(net.faulj.matrix.Matrix B) {
+		int m = B.getRowCount();
+		int n = B.getColumnCount();
+		int p = Math.min(m, n);
+		double[] s = new double[p];
+		double[] e = new double[p];
+		for (int i = 0; i < p; i++) {
+			s[i] = B.get(i, i);
+			if (i < p - 1) {
+				e[i] = B.get(i, i + 1);
+			}
+		}
+		e[p - 1] = 0.0;
+
+		net.faulj.matrix.Matrix U = net.faulj.matrix.Matrix.Identity(m);
+		net.faulj.matrix.Matrix V = net.faulj.matrix.Matrix.Identity(n);
+
+		int maxIter = Math.max(1, 1000 * p);
+		int iter = 0;
+		int pp = p;
+		while (pp > 0) {
+			if (iter++ > maxIter) {
+				break;
+			}
+			int k;
+			int kase;
+			for (k = pp - 2; k >= -1; k--) {
+				if (k == -1) {
+					break;
+				}
+				double threshold = EPS * (Math.abs(s[k]) + Math.abs(s[k + 1]));
+				if (Math.abs(e[k]) <= threshold) {
+					e[k] = 0.0;
+					break;
+				}
+			}
+			if (k == pp - 2) {
+				kase = 4;
+			} else {
+				int ks;
+				for (ks = pp - 1; ks >= k; ks--) {
+					if (ks == k) {
+						break;
+					}
+					double t = (ks != pp ? Math.abs(e[ks]) : 0.0) +
+							(ks != k + 1 ? Math.abs(e[ks - 1]) : 0.0);
+					if (Math.abs(s[ks]) <= EPS * t) {
+						s[ks] = 0.0;
+						break;
+					}
+				}
+				if (ks == k) {
+					kase = 3;
+				} else if (ks == pp - 1) {
+					kase = 1;
+				} else {
+					kase = 2;
+					k = ks;
+				}
+			}
+			k++;
+
+			switch (kase) {
+				case 1 -> {
+					double f = e[pp - 2];
+					e[pp - 2] = 0.0;
+					for (int j = pp - 2; j >= k; j--) {
+						double t = hypot(s[j], f);
+						double cs = s[j] / t;
+						double sn = f / t;
+						s[j] = t;
+						if (j != k) {
+							f = -sn * e[j - 1];
+							e[j - 1] = cs * e[j - 1];
+						}
+						applyRotationToColumns(V, j, pp - 1, cs, sn);
+					}
+				}
+				case 2 -> {
+					double f = e[k - 1];
+					e[k - 1] = 0.0;
+					for (int j = k; j < pp; j++) {
+						double t = hypot(s[j], f);
+						double cs = s[j] / t;
+						double sn = f / t;
+						s[j] = t;
+						f = -sn * e[j];
+						e[j] = cs * e[j];
+						applyRotationToColumns(U, j, k - 1, cs, sn);
+					}
+				}
+				case 3 -> {
+					double scale = 0.0;
+					scale = Math.max(scale, Math.abs(s[pp - 1]));
+					scale = Math.max(scale, Math.abs(s[pp - 2]));
+					scale = Math.max(scale, Math.abs(e[pp - 2]));
+					scale = Math.max(scale, Math.abs(s[k]));
+					scale = Math.max(scale, Math.abs(e[k]));
+					if (scale == 0.0) {
+						scale = 1.0;
+					}
+					double sp = s[pp - 1] / scale;
+					double spm1 = s[pp - 2] / scale;
+					double epm1 = e[pp - 2] / scale;
+					double sk = s[k] / scale;
+					double ek = e[k] / scale;
+					double b = ((spm1 + sp) * (spm1 - sp) + epm1 * epm1) / 2.0;
+					double c = (sp * epm1) * (sp * epm1);
+					double shift = 0.0;
+					if (b != 0.0 || c != 0.0) {
+						shift = Math.sqrt(b * b + c);
+						if (b < 0.0) {
+							shift = -shift;
+						}
+						shift = c / (b + shift);
+					}
+					double f = (sk + sp) * (sk - sp) + shift;
+					double g = sk * ek;
+					for (int j = k; j < pp - 1; j++) {
+						double t = hypot(f, g);
+						double cs = f / t;
+						double sn = g / t;
+						if (j != k) {
+							e[j - 1] = t;
+						}
+						f = cs * s[j] + sn * e[j];
+						e[j] = cs * e[j] - sn * s[j];
+						g = sn * s[j + 1];
+						s[j + 1] = cs * s[j + 1];
+						applyRotationToColumns(V, j, j + 1, cs, sn);
+
+						t = hypot(f, g);
+						cs = f / t;
+						sn = g / t;
+						s[j] = t;
+						f = cs * e[j] + sn * s[j + 1];
+						s[j + 1] = -sn * e[j] + cs * s[j + 1];
+						g = sn * e[j + 1];
+						e[j + 1] = cs * e[j + 1];
+						applyRotationToColumns(U, j, j + 1, cs, sn);
+					}
+					e[pp - 2] = f;
+				}
+				case 4 -> {
+					if (s[k] <= 0.0) {
+						s[k] = s[k] < 0.0 ? -s[k] : 0.0;
+						for (int i = 0; i < n; i++) {
+							V.set(i, k, -V.get(i, k));
+						}
+					}
+					while (k < pp - 1) {
+						if (s[k] >= s[k + 1]) {
+							break;
+						}
+						double t = s[k];
+						s[k] = s[k + 1];
+						s[k + 1] = t;
+						swapColumns(V, k, k + 1);
+						swapColumns(U, k, k + 1);
+						k++;
+					}
+					pp--;
+				}
+				default -> {
+				}
+			}
+		}
+
+		return new BidiagonalSVDResult(U, V, s);
+	}
+
+	private static double hypot(double a, double b) {
+		return Math.hypot(a, b);
+	}
+
+	private static void applyRotationToColumns(net.faulj.matrix.Matrix M, int col1, int col2, double c, double s) {
+		int rows = M.getRowCount();
+		for (int i = 0; i < rows; i++) {
+			double x = M.get(i, col1);
+			double y = M.get(i, col2);
+			M.set(i, col1, c * x + s * y);
+			M.set(i, col2, -s * x + c * y);
+		}
+	}
+
+	private static void swapColumns(net.faulj.matrix.Matrix M, int col1, int col2) {
+		int rows = M.getRowCount();
+		for (int i = 0; i < rows; i++) {
+			double tmp = M.get(i, col1);
+			M.set(i, col1, M.get(i, col2));
+			M.set(i, col2, tmp);
+		}
+	}
+
+	public static final class BidiagonalSVDResult {
+		private final net.faulj.matrix.Matrix U;
+		private final net.faulj.matrix.Matrix V;
+		private final double[] singularValues;
+
+		private BidiagonalSVDResult(net.faulj.matrix.Matrix U, net.faulj.matrix.Matrix V, double[] singularValues) {
+			this.U = U;
+			this.V = V;
+			this.singularValues = singularValues;
+		}
+
+		public net.faulj.matrix.Matrix getU() {
+			return U;
+		}
+
+		public net.faulj.matrix.Matrix getV() {
+			return V;
+		}
+
+		public double[] getSingularValues() {
+			return singularValues;
+		}
 	}
 }

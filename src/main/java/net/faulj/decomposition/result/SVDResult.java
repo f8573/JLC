@@ -197,8 +197,8 @@ public class SVDResult {
      * @return diagonal matrix with singular values
      */
     public Matrix getSigma() {
-        int m = U.getRowCount();
-        int n = V.getRowCount();
+        int m = U.getColumnCount();
+        int n = V.getColumnCount();
         Matrix sigma = new Matrix(m, n);
         for (int i = 0; i < Math.min(singularValues.length, Math.min(m, n)); i++) {
             sigma.set(i, i, singularValues[i]);

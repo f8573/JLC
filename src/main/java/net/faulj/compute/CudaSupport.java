@@ -13,6 +13,7 @@ final class CudaSupport {
     private static final String[] CUDA_CLASSES = {
             "jcuda.runtime.JCuda",
             "jcuda.driver.JCudaDriver",
+            "jcuda.jcublas.JCublas2",
             "org.bytedeco.cuda.global.cudart",
             "ai.djl.cuda.CudaUtils"
     };

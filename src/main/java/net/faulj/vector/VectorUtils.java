@@ -53,7 +53,7 @@ public class VectorUtils {
             Vector projection = null;
             if (!orthogonalBasis.isEmpty()) {
                 for (Vector basisVector : orthogonalBasis) {
-                    projection = basisVector.project(vector);
+                    projection = vector.project(basisVector);
                     vector = vector.subtract(projection);
                 }
             }
@@ -63,15 +63,39 @@ public class VectorUtils {
     }
 
     public static Matrix projectOnto(List<Vector> projectors, List<Vector> sourceVectors) {
-        if (projectors.size() != sourceVectors.size()) {
-            throw new IllegalArgumentException("Number of projectors must match the number of source vectors");
+        if (projectors == null || sourceVectors == null) {
+            throw new IllegalArgumentException("Projectors and source vectors must not be null");
+        }
+        if (projectors.isEmpty()) {
+            throw new IllegalArgumentException("Projector basis must not be empty");
+        }
+        if (sourceVectors.isEmpty()) {
+            throw new IllegalArgumentException("Source vectors must not be empty");
         }
 
         List<Vector> orthogonalBasis = gramSchmidt(projectors);
 
-        Matrix resultMatrix = new Matrix(sourceVectors.getFirst().dimension(), sourceVectors.size());
+        int dimension = sourceVectors.getFirst().dimension();
+        for (Vector v : orthogonalBasis) {
+            if (v.dimension() != dimension) {
+                throw new IllegalArgumentException("Projector basis dimension mismatch");
+            }
+        }
+        for (Vector v : sourceVectors) {
+            if (v.dimension() != dimension) {
+                throw new IllegalArgumentException("Source vector dimension mismatch");
+            }
+        }
+
+        Matrix resultMatrix = new Matrix(dimension, sourceVectors.size());
         for (int i = 0; i < sourceVectors.size(); i++) {
-            resultMatrix.setColumn(i, orthogonalBasis.get(i).project(sourceVectors.get(i)));
+            Vector source = sourceVectors.get(i);
+            Vector projection = new Vector(new double[dimension]);
+            for (Vector basisVector : orthogonalBasis) {
+                double coeff = source.dot(basisVector);
+                projection = projection.add(basisVector.multiplyScalar(coeff));
+            }
+            resultMatrix.setColumn(i, projection);
         }
         return resultMatrix;
     }

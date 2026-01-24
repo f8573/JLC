@@ -1,5 +1,9 @@
 package net.faulj.decomposition.qr;
 
+import net.faulj.matrix.Matrix;
+import net.faulj.vector.Vector;
+import net.faulj.decomposition.result.QRResult;
+
 /**
  * Computes QR decomposition using classical Gram-Schmidt orthogonalization.
  * <p>
@@ -128,4 +132,67 @@ package net.faulj.decomposition.qr;
  * @see net.faulj.decomposition.result.QRResult
  */
 public class GramSchmidt {
+    
+    /**
+     * Computes QR decomposition using classical Gram-Schmidt.
+     *
+     * @param A The matrix to decompose (m×n)
+     * @return QRResult containing Q and R matrices
+     * @throws IllegalArgumentException if A is null
+     */
+    public static QRResult decompose(Matrix A) {
+        if (A == null) {
+            throw new IllegalArgumentException("Matrix must not be null");
+        }
+        if (!A.isReal()) {
+            throw new UnsupportedOperationException("Classical Gram-Schmidt requires a real-valued matrix");
+        }
+        
+        int m = A.getRowCount();
+        int n = A.getColumnCount();
+        int k = Math.min(m, n);
+        
+        Matrix Q = new Matrix(m, k);
+        Matrix R = new Matrix(k, n);
+        
+        Vector[] aCols = A.getData();
+        
+        // Process each column
+        for (int j = 0; j < n; j++) {
+            // Start with original column
+            Vector v = aCols[j].copy();
+            
+            // Project out all previous Q columns (classical approach)
+            for (int i = 0; i < Math.min(j, k); i++) {
+                Vector q_i = new Vector(Q, i);
+                double r_ij = q_i.dot(aCols[j]);  // Use original column!
+                R.set(i, j, r_ij);
+                
+                // Subtract projection
+                for (int row = 0; row < m; row++) {
+                    v.set(row, v.get(row) - r_ij * q_i.get(row));
+                }
+            }
+            
+            // Normalize
+            double norm = v.norm2();
+            
+            if (j < k) {
+                R.set(j, j, norm);
+                
+                if (norm > 1e-14) {
+                    for (int row = 0; row < m; row++) {
+                        Q.set(row, j, v.get(row) / norm);
+                    }
+                } else {
+                    // Linearly dependent column - set to zero
+                    for (int row = 0; row < m; row++) {
+                        Q.set(row, j, 0.0);
+                    }
+                }
+            }
+        }
+        
+        return new QRResult(A, Q, R);
+    }
 }

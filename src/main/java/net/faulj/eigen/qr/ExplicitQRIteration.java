@@ -85,12 +85,9 @@ public class ExplicitQRIteration {
 
             QRResult qr = HouseholderQR.decompose(shifted);
             Matrix qStep = qr.getQ();
-            Matrix rStep = qr.getR();
 
-            T = rStep.multiply(qStep);
-            for (int i = 0; i < n; i++) {
-                T.set(i, i, T.get(i, i) + shift);
-            }
+            // Similarity update: T_{k+1} = Q^T T Q
+            T = qStep.transpose().multiply(T).multiply(qStep);
 
             Q = Q.multiply(qStep);
 

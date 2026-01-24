@@ -471,86 +471,90 @@ public class Matrix {
     public void toRowEchelonForm() {
         ensureReal("Row echelon form");
         exchanges = 0;
+        pivotColumns.clear();
         int pivotRow = 0;
 
-        for (int col = 0; col < columns; col++) {
-            int nonZeroRow = -1;
+        for (int col = 0; col < columns && pivotRow < rows; col++) {
+            int pivotIndex = -1;
+            double maxAbs = tol;
             for (int row = pivotRow; row < rows; row++) {
-                if (Math.abs(get(row, col)) > tol) {
-                    nonZeroRow = row;
-                    break;
+                double val = Math.abs(get(row, col));
+                if (val > maxAbs) {
+                    maxAbs = val;
+                    pivotIndex = row;
                 }
             }
 
-            if (nonZeroRow == -1) {
+            if (pivotIndex == -1) {
                 continue;
             }
 
-            if (nonZeroRow != pivotRow) {
-                exchangeRows(pivotRow, nonZeroRow);
+            if (pivotIndex != pivotRow) {
+                exchangeRows(pivotRow, pivotIndex);
                 exchanges++;
             }
 
+            double pivot = get(pivotRow, col);
+            if (Math.abs(pivot) <= tol) {
+                continue;
+            }
+
             for (int row = pivotRow + 1; row < rows; row++) {
-                if (Math.abs(get(row, col)) > tol) {
-                    double multiplier = -get(row, col) / get(pivotRow, col);
+                double val = get(row, col);
+                if (Math.abs(val) > tol) {
+                    double multiplier = -val / pivot;
                     addMultipleOfRow(pivotRow, row, multiplier);
                 }
             }
 
             pivotRow++;
-            if (pivotRow >= rows) {
-                break;
-            }
         }
     }
 
     public void toReducedRowEchelonForm() {
         ensureReal("Reduced row echelon form");
-        int pivotRow = 0;
-        int pivotCol = 0;
         pivotColumns.clear();
+        Matrix original = this.copy();
+        int pivotRow = 0;
 
-        while (pivotCol < columns && pivotRow < rows) {
-            int nonZeroRow = -1;
+        for (int col = 0; col < columns && pivotRow < rows; col++) {
+            int pivotIndex = -1;
+            double maxAbs = tol;
             for (int row = pivotRow; row < rows; row++) {
-                if (Math.abs(get(row, pivotCol)) > tol) {
-                    nonZeroRow = row;
-                    break;
+                double val = Math.abs(get(row, col));
+                if (val > maxAbs) {
+                    maxAbs = val;
+                    pivotIndex = row;
                 }
             }
 
-            if (nonZeroRow == -1) {
-                pivotCol++;
+            if (pivotIndex == -1) {
                 continue;
             }
 
-            if (nonZeroRow != pivotRow) {
-                exchangeRows(pivotRow, nonZeroRow);
+            if (pivotIndex != pivotRow) {
+                exchangeRows(pivotRow, pivotIndex);
             }
 
-            double pivotValue = get(pivotRow, pivotCol);
-            pivotColumns.add(getData()[pivotCol]);
-            if (Math.abs(pivotValue) > tol) {
-                multiplyRow(pivotRow, 1.0 / pivotValue);
+            double pivot = get(pivotRow, col);
+            if (Math.abs(pivot) <= tol) {
+                continue;
             }
 
-            for (int row = 0; row < pivotRow; row++) {
-                if (Math.abs(get(row, pivotCol)) > tol) {
-                    double multiplier = -get(row, pivotCol);
-                    addMultipleOfRow(pivotRow, row, multiplier);
+            multiplyRow(pivotRow, 1.0 / pivot);
+
+            for (int row = 0; row < rows; row++) {
+                if (row == pivotRow) {
+                    continue;
+                }
+                double val = get(row, col);
+                if (Math.abs(val) > tol) {
+                    addMultipleOfRow(pivotRow, row, -val);
                 }
             }
 
-            for (int row = pivotRow + 1; row < rows; row++) {
-                if (Math.abs(get(row, pivotCol)) > tol) {
-                    double multiplier = -get(row, pivotCol);
-                    addMultipleOfRow(pivotRow, row, multiplier);
-                }
-            }
-
+            pivotColumns.add(original.getData()[col].copy());
             pivotRow++;
-            pivotCol++;
         }
     }
 

@@ -115,3 +115,11 @@ bootRun {
     implementation group: 'org.jcuda', name: 'jcusolver-natives', classifier: classifier, version: jCudaVersion
     implementation group: 'org.jcuda', name: 'jcudnn-natives', classifier: classifier, version: jCudaVersion
 }
+
+// Enable CUDA system property for test JVMs so local verification can be performed.
+test {
+    systemProperty 'faulj.cuda.enabled', 'true'
+    testLogging {
+        showStandardStreams = true
+    }
+}

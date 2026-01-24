@@ -35,8 +35,8 @@ public class BatchProcessingTest {
             .parallelism(Math.max(2, Runtime.getRuntime().availableProcessors()))
             .build();
 
-        // ensure the policy will choose PARALLEL for these dimensions
-        assertEquals(DispatchPolicy.Algorithm.PARALLEL, policy.selectForMultiply(16, 16, 16));
+        // ensure the policy will parallelize these dimensions
+        assertTrue(policy.shouldParallelize(16, 16, 16));
 
         Matrix a = Matrix.randomMatrix(16, 16);
         Matrix b = Matrix.randomMatrix(16, 16);

@@ -2,8 +2,6 @@ package net.faulj.decomposition.hessenberg;
 
 import net.faulj.decomposition.result.HessenbergResult;
 import net.faulj.matrix.Matrix;
-import net.faulj.vector.Vector;
-import net.faulj.vector.VectorUtils;
 
 /**
  * Reduces a square matrix to upper Hessenberg form using orthogonal Householder transformations.
@@ -152,35 +150,109 @@ import net.faulj.vector.VectorUtils;
  * @see net.faulj.decomposition.qr.HouseholderQR
  */
 public class HessenbergReduction {
+	private static final double EPS = 1e-12;
 
 
 	public static HessenbergResult decompose(Matrix A) {
+		if (A == null) {
+			throw new IllegalArgumentException("Matrix must not be null");
+		}
+		if (!A.isReal()) {
+			throw new UnsupportedOperationException("Hessenberg reduction requires a real-valued matrix");
+		}
 		if (!A.isSquare()) {
 			throw new ArithmeticException("Matrix must be square to compute Hessenberg form");
 		}
-		Matrix M = A.copy();
-		java.util.ArrayList<Vector> vVectors = new java.util.ArrayList<>();
-		// Accumulate orthogonal transformations into Q (start as identity)
-		int n = M.getRowCount();
+		Matrix H = A.copy();
+		int n = H.getRowCount();
+		if (n <= 2) {
+			return new HessenbergResult(A, H, Matrix.Identity(n));
+		}
+
 		Matrix Q = Matrix.Identity(n);
-		for(int i = 0; i < M.getRowCount() - 2; i++) {
-			Vector a = M.getData()[i];
-			int j = i+2;
-			Vector x = new Vector(java.util.Arrays.copyOfRange(a.getData(), j - 1, a.dimension()));
-			double mag = x.norm2();
-			if (mag > 1e-10) {
-				Vector hh = VectorUtils.householder(x);
-				double tau = hh.get(hh.dimension() - 1);
-				Vector v = hh.resize(hh.dimension() - 1);
-				vVectors.add(v);
-				Matrix P = Matrix.Identity(v.dimension()).subtract(v.multiply(v.transpose()).multiplyScalar(tau));
-				Matrix PHat = Matrix.diag(M.getColumnCount()-P.getColumnCount(), P);
-				M = PHat.multiply(M.multiply(PHat));
-				// accumulate Q: Q = Q * PHat
-				Q = Q.multiply(PHat);
+		double[] h = H.getRawData();
+		double[] q = Q.getRawData();
+		double[] v = new double[n];
+
+		for (int k = 0; k < n - 2; k++) {
+			int len = n - k - 1;
+			int colIndex = k;
+			int base = (k + 1) * n + colIndex;
+			double x0 = h[base];
+			double sigma = 0.0;
+			for (int i = 1; i < len; i++) {
+				double val = h[(k + 1 + i) * n + colIndex];
+				sigma += val * val;
+			}
+			if (sigma <= EPS) {
+				continue;
+			}
+			double mu = Math.sqrt(x0 * x0 + sigma);
+			double beta = -Math.copySign(mu, x0);
+			double v0 = x0 - beta;
+			double v0sq = v0 * v0;
+			if (v0sq <= EPS) {
+				continue;
+			}
+			double tau = 2.0 * v0sq / (sigma + v0sq);
+
+			v[0] = 1.0;
+			for (int i = 1; i < len; i++) {
+				v[i] = h[(k + 1 + i) * n + colIndex] / v0;
+			}
+
+			h[base] = beta;
+			for (int i = 1; i < len; i++) {
+				h[(k + 1 + i) * n + colIndex] = 0.0;
+			}
+
+			applyHouseholderLeft(h, n, k + 1, k + 1, v, len, tau);
+			applyHouseholderRight(h, n, 0, k + 1, v, len, tau);
+			applyHouseholderRight(q, n, 0, k + 1, v, len, tau);
+		}
+
+		return new HessenbergResult(A, H, Q);
+	}
+
+	private static void applyHouseholderLeft(double[] data, int size, int startRow, int startCol,
+											 double[] v, int len, double tau) {
+		if (tau == 0.0 || len <= 1) {
+			return;
+		}
+		for (int col = startCol; col < size; col++) {
+			int idx = startRow * size + col;
+			double dot = data[idx];
+			int rowIdx = idx + size;
+			for (int i = 1; i < len; i++) {
+				dot += v[i] * data[rowIdx];
+				rowIdx += size;
+			}
+			dot *= tau;
+			data[idx] -= dot;
+			rowIdx = idx + size;
+			for (int i = 1; i < len; i++) {
+				data[rowIdx] -= dot * v[i];
+				rowIdx += size;
 			}
 		}
-		Matrix H = M;
-		return new HessenbergResult(A, H, Q);
+	}
+
+	private static void applyHouseholderRight(double[] data, int size, int startRow, int startCol,
+											  double[] v, int len, double tau) {
+		if (tau == 0.0 || len <= 1) {
+			return;
+		}
+		for (int row = startRow; row < size; row++) {
+			int idx = row * size + startCol;
+			double dot = data[idx];
+			for (int j = 1; j < len; j++) {
+				dot += data[idx + j] * v[j];
+			}
+			dot *= tau;
+			data[idx] -= dot;
+			for (int j = 1; j < len; j++) {
+				data[idx + j] -= dot * v[j];
+			}
+		}
 	}
 }
