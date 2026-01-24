@@ -1,12 +1,14 @@
 package net.faulj.spaces;
 
 import net.faulj.matrix.Matrix;
+import net.faulj.core.Tolerance;
 import net.faulj.vector.Vector;
-import net.faulj.vector.VectorUtils;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -33,12 +35,13 @@ import java.util.Set;
  *
  * <h2>Algorithms:</h2>
  * <p>
- * Computations rely on Gaussian elimination to Reduced Row Echelon Form (RREF):
+ * Computations use numerically stable orthonormalization for row/column spaces and
+ * RREF-based construction for null space:
  * </p>
  * <ol>
- * <li><b>Row Basis:</b> Non-zero rows of the RREF (since row operations preserve row space).</li>
- * <li><b>Column Basis:</b> Columns of the <i>original</i> matrix corresponding to pivot columns in the RREF.</li>
- * <li><b>Null Basis:</b> Derived from the free variables in the solution to \( Ax = 0 \).</li>
+ * <li><b>Row Basis:</b> Orthonormalize the matrix rows (Modified Gram-Schmidt).</li>
+ * <li><b>Column Basis:</b> Orthonormalize the matrix columns (Modified Gram-Schmidt).</li>
+ * <li><b>Null Basis:</b> Build a basis from the RREF free variables, then orthonormalize.</li>
  * </ol>
  *
  * <h2>Usage Example:</h2>
@@ -66,9 +69,7 @@ public class SubspaceBasis {
 	 * Computes a basis for the row space of the given matrix.
 	 * <p>
 	 * The row space is the subspace spanned by the rows of the matrix. This method
-	 * performs Gaussian elimination to transform the matrix into Reduced Row Echelon
-	 * Form (RREF). The non-zero rows of the RREF form a basis for the row space
-	 * of the original matrix.
+	 * orthonormalizes the matrix rows to produce a numerically stable basis.
 	 * </p>
 	 *
 	 * <h3>Mathematical Properties:</h3>
@@ -82,25 +83,22 @@ public class SubspaceBasis {
 	 * @return A set of linearly independent {@link Vector} objects spanning the row space.
 	 */
 	public static Set<Vector> rowSpaceBasis(Matrix m) {
-		Matrix copy = m.copy();
-		copy.toReducedRowEchelonForm();
-		copy = copy.transpose();
-		Set<Vector> vectors = new HashSet<>();
-		for (Vector v : copy.getData()) {
-			if (!v.isZero()) {
-				vectors.add(v);
-			}
+		Objects.requireNonNull(m, "Matrix must not be null");
+		if (!m.isReal()) {
+			throw new UnsupportedOperationException("Row space basis requires a real-valued matrix");
 		}
-		return vectors;
+		List<Vector> rows = new ArrayList<>();
+		for (int r = 0; r < m.getRowCount(); r++) {
+			rows.add(new Vector(m.getRow(r)));
+		}
+		return orthonormalize(rows, Tolerance.get());
 	}
 
 	/**
 	 * Computes a basis for the column space (range) of the given matrix.
 	 * <p>
 	 * The column space is the subspace spanned by the columns of the matrix.
-	 * This method identifies the pivot columns in the Reduced Row Echelon Form (RREF)
-	 * of the matrix. The corresponding columns from the <b>original</b> matrix form
-	 * the basis.
+	 * This method orthonormalizes the matrix columns to produce a numerically stable basis.
 	 * </p>
 	 *
 	 * <h3>Relation to Linear Systems:</h3>
@@ -112,9 +110,15 @@ public class SubspaceBasis {
 	 * @return A set of linearly independent {@link Vector} objects spanning the column space.
 	 */
 	public static Set<Vector> columnSpaceBasis(Matrix m) {
-		Matrix copy = m.copy();
-		copy.toReducedRowEchelonForm();
-		return new HashSet<>(copy.getPivotColumns());
+		Objects.requireNonNull(m, "Matrix must not be null");
+		if (!m.isReal()) {
+			throw new UnsupportedOperationException("Column space basis requires a real-valued matrix");
+		}
+		List<Vector> cols = new ArrayList<>();
+		for (Vector col : m.getData()) {
+			cols.add(new Vector(col.getData()));
+		}
+		return orthonormalize(cols, Tolerance.get());
 	}
 
 	/**
@@ -137,50 +141,102 @@ public class SubspaceBasis {
 	 * Returns an empty set if the null space is trivial (contains only the zero vector).
 	 */
 	public static Set<Vector> nullSpaceBasis(Matrix m) {
-		Set<Vector> set = new HashSet<>();
+		Objects.requireNonNull(m, "Matrix must not be null");
+		if (!m.isReal()) {
+			throw new UnsupportedOperationException("Null space basis requires a real-valued matrix");
+		}
+		if (m.getColumnCount() == 0) {
+			return new LinkedHashSet<>();
+		}
 
-		Matrix mm = m.copy();
-		mm.toReducedRowEchelonForm();
+		Matrix rref = m.copy();
+		rref.toReducedRowEchelonForm();
+		int rows = rref.getRowCount();
+		int cols = rref.getColumnCount();
+		double tol = Tolerance.get();
 
-		ArrayList<Integer> e = new ArrayList<>();
-		ArrayList<Integer> free = new ArrayList<>();
+		boolean[] pivotCols = new boolean[cols];
+		int[] pivotRows = new int[cols];
+		Arrays.fill(pivotRows, -1);
 
-		Matrix I = Matrix.Identity(mm.getData()[0].dimension());
-		Vector[] mData = mm.getData();
-
-		for (int i = 0; i < mm.getColumnCount(); i++) {
-			if (mData[i].isUnitVector()) {
-				e.add(i);
-			} else {
-				free.add(i);
+		for (int row = 0; row < rows; row++) {
+			int lead = -1;
+			for (int col = 0; col < cols; col++) {
+				if (Math.abs(rref.get(row, col)) > tol) {
+					lead = col;
+					break;
+				}
+			}
+			if (lead != -1) {
+				pivotCols[lead] = true;
+				pivotRows[lead] = row;
 			}
 		}
 
-		ArrayList<Vector> fList = new ArrayList<>();
-		for (int i : free) {
-			fList.add(mData[i]);
+		List<Vector> basis = new ArrayList<>();
+		for (int freeCol = 0; freeCol < cols; freeCol++) {
+			if (pivotCols[freeCol]) {
+				continue;
+			}
+			double[] vec = new double[cols];
+			vec[freeCol] = 1.0;
+			for (int pivotCol = 0; pivotCol < cols; pivotCol++) {
+				int prow = pivotRows[pivotCol];
+				if (prow == -1) {
+					continue;
+				}
+				double val = rref.get(prow, freeCol);
+				if (Math.abs(val) > tol) {
+					vec[pivotCol] = -val;
+				}
+			}
+			basis.add(new Vector(vec));
 		}
 
-		Matrix temp = new Matrix(fList.toArray(new Vector[0]));
-		temp = temp.transpose();
-		Vector[] tempData = Arrays.copyOf(temp.getData(), e.size());
-		Matrix F = new Matrix(tempData);
-		Vector[] fData = F.getData();
-		for (int i = 0; i < fData.length; i++) {
-			fData[i] = fData[i].negate();
-		}
-		F = F.transpose();
-		Matrix B = F.AppendMatrix(Matrix.Identity(free.size()), "DOWN");
-		ArrayList<Integer> permutation = new ArrayList<>();
-		permutation.addAll(e);
-		permutation.addAll(free);
-		for (Vector v : B.getData()) {
-			Vector vec = VectorUtils.zero(permutation.size());
-			for (int i = 0; i < permutation.size(); i++) {
-				vec.set(permutation.get(i), v.get(i));
+		return orthonormalize(basis, tol);
+	}
+
+	private static Set<Vector> orthonormalize(List<Vector> vectors, double tol) {
+		LinkedHashSet<Vector> result = new LinkedHashSet<>();
+		List<double[]> basis = new ArrayList<>();
+		for (Vector vector : vectors) {
+			if (vector == null || vector.dimension() == 0) {
+				continue;
 			}
-			set.add(vec);
+			double[] w = Arrays.copyOf(vector.getData(), vector.dimension());
+			for (double[] q : basis) {
+				double proj = dot(q, w);
+				if (proj != 0.0) {
+					for (int i = 0; i < w.length; i++) {
+						w[i] -= proj * q[i];
+					}
+				}
+			}
+			double norm = norm2(w);
+			if (norm > tol) {
+				for (int i = 0; i < w.length; i++) {
+					w[i] /= norm;
+				}
+				basis.add(w);
+				result.add(new Vector(w));
+			}
 		}
-		return set;
+		return result;
+	}
+
+	private static double dot(double[] a, double[] b) {
+		double sum = 0.0;
+		for (int i = 0; i < a.length; i++) {
+			sum += a[i] * b[i];
+		}
+		return sum;
+	}
+
+	private static double norm2(double[] a) {
+		double sum = 0.0;
+		for (double v : a) {
+			sum += v * v;
+		}
+		return Math.sqrt(sum);
 	}
 }

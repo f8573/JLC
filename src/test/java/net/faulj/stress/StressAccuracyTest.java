@@ -1,5 +1,6 @@
 package net.faulj.stress;
 
+import net.faulj.compute.DispatchPolicy;
 import net.faulj.decomposition.hessenberg.HessenbergReduction;
 import net.faulj.decomposition.qr.HouseholderQR;
 import net.faulj.decomposition.result.HessenbergResult;
@@ -8,7 +9,6 @@ import net.faulj.decomposition.result.SchurResult;
 import net.faulj.eigen.schur.RealSchurDecomposition;
 import net.faulj.matrix.Matrix;
 import net.faulj.scalar.Complex;
-import org.junit.Assume;
 import org.junit.Test;
 
 import java.util.Random;
@@ -21,8 +21,7 @@ public class StressAccuracyTest {
     private static final int TRIALS = 2000;
     private static final int MIN_SIZE = 2;
     private static final int MAX_SIZE = 8;
-    private static final int[] LARGE_SIZES = {50, 100, 200, 500, 1000};
-    private static final boolean RUN_LARGE = Boolean.getBoolean("stressLarge");
+    private static final int[] LARGE_SIZES = {50, 100, 200, 2000};
     private static final double QR_RESIDUAL_LIMIT = 1e-2;
     private static final double HESS_RESIDUAL_LIMIT = 1e-2;
     private static final double SCHUR_RESIDUAL_LIMIT = 5e-2;
@@ -80,25 +79,136 @@ public class StressAccuracyTest {
 
     @Test
     public void stressLargeMatrixDecompositions() {
-        //Assume.assumeTrue("Run with -DstressLarge=true to enable large-matrix stress test", RUN_LARGE);
         Random rnd = new Random(7654321L);
+
+        // System information
+        System.out.printf("[large] Processor count: %d%n", Runtime.getRuntime().availableProcessors());
+        System.out.printf("[large] CUDA system property: %s%n", System.getProperty("faulj.cuda.enabled", "not set"));
 
         for (int size : LARGE_SIZES) {
             System.out.printf("[large] starting size=%d%n", size);
+            
+            // Configure dispatch policy based on matrix size
+            DispatchPolicy policy = configurePolicy(size);
+            DispatchPolicy.setGlobalPolicy(policy);
+            DispatchPolicy.Algorithm algorithm = policy.selectForMultiply(size, size, size);
+            String algoLabel = algorithmLabel(algorithm);
+            
+            System.out.printf("[large] size=%d using: parallel=%s, cuda=%s, blockThreshold=%d, parallelThreshold=%d%n",
+                size, policy.isParallelEnabled(), policy.isCudaEnabled(), 
+                policy.getBlockedThreshold(), policy.getParallelThreshold());
+            
             Matrix A = randomMatrix(rnd, size);
 
+            // QR decomposition with timing
+            long qrStart = System.nanoTime();
             QRResult qr = HouseholderQR.decompose(A);
+            long qrTime = System.nanoTime() - qrStart;
             double qrRes = qr.residualNorm();
-            System.out.printf("[large] size=%d QR=%.3e%n", size, qrRes);
+            System.out.printf("[large] Performed %s QR on %dx%d matrix in %.3fs (residual=%.3e, throughput=%.2fMFlops/s)%n", 
+                algoLabel, size, size, qrTime / 1e9, qrRes, computeThroughput(size, qrTime));
             assertTrue("QR residual too large at size " + size + ": " + qrRes,
                 qrRes < LARGE_QR_RESIDUAL_LIMIT);
 
+            // Hessenberg reduction with timing
+            long hessStart = System.nanoTime();
             HessenbergResult hess = HessenbergReduction.decompose(A);
+            long hessTime = System.nanoTime() - hessStart;
             double hessRes = hess.residualNorm();
-            System.out.printf("[large] size=%d HESS=%.3e%n", size, hessRes);
+            System.out.printf("[large] Performed %s HESS on %dx%d matrix in %.3fs (residual=%.3e, throughput=%.2fMFlops/s)%n", 
+                algoLabel, size, size, hessTime / 1e9, hessRes, computeThroughput(size, hessTime));
             assertTrue("Hessenberg residual too large at size " + size + ": " + hessRes,
                 hessRes < LARGE_HESS_RESIDUAL_LIMIT);
         }
+        
+        // Reset to default policy
+        DispatchPolicy.resetGlobalPolicy();
+    }
+
+    /**
+     * Configure DispatchPolicy based on matrix size and hardware capabilities.
+     * 
+     * Size-based strategy:
+     * - < 100: Standard multiply, no parallelism
+     * - 100-200: Enable parallelism with lower thresholds
+     * - 200-500: Blocked multiply with parallel disabled
+     * - >= 500: CUDA if available, otherwise BLAS3 kernels
+     */
+    private static DispatchPolicy configurePolicy(int size) {
+        DispatchPolicy.Builder builder = DispatchPolicy.builder();
+        
+        if (size < 100) {
+            // Small matrices: use standard multiply, disable parallelism overhead
+            builder.naiveThreshold(128)
+                   .parallelThreshold(Integer.MAX_VALUE)
+                   .enableParallel(false)
+                   .enableCuda(false)
+                   .enableBlas3(false);
+        } else if (size < 1000) {
+            // Medium matrices: enable parallelism with lower threshold
+            builder.blockedThreshold(64)
+                   .parallelThreshold(100)
+                   .enableParallel(true)
+                   .parallelism(Runtime.getRuntime().availableProcessors())
+                   .enableCuda(false)
+                   .enableBlas3(false);
+        } else if (size < 3000) {
+            // Large matrices: blocked multiply without parallelism overhead
+            builder.blockedThreshold(64)
+                   .parallelThreshold(Integer.MAX_VALUE)
+                   .parallelism(Runtime.getRuntime().availableProcessors())
+                   .enableParallel(true)
+                   .enableCuda(false)
+                   .enableBlas3(true)
+                   .blas3Threshold(256);
+        } else {
+            // Very large matrices: CUDA if available, otherwise BLAS3
+            builder.blockedThreshold(64)
+                   .parallelThreshold(Integer.MAX_VALUE)
+                   .enableParallel(true)
+                   .parallelism(Runtime.getRuntime().availableProcessors())
+                   .enableCuda(true)
+                   .cudaMinDim(300)
+                   .cudaMinElements(500_000L)
+                   .enableBlas3(true)
+                   .blas3Threshold(256);
+        }
+        
+        return builder.build();
+    }
+
+    private static String algorithmLabel(DispatchPolicy.Algorithm algorithm) {
+        if (algorithm == null) {
+            return "STANDARD";
+        }
+        switch (algorithm) {
+            case CUDA:
+                return "CUDA";
+            case PARALLEL:
+                return "PARALLEL";
+            case BLOCKED:
+                return "BLOCK";
+            case BLAS3:
+                return "BLAS3";
+            case STRASSEN:
+                return "STRASSEN";
+            case NAIVE:
+            case SPECIALIZED:
+            default:
+                return "STANDARD";
+        }
+    }
+
+    /**
+     * Compute throughput in MFlops/s.
+     * QR decomposition: ~(4/3)mn^2 - (2/3)n^3 flops ≈ (2/3)n^3 for square matrices
+     * Hessenberg reduction: ~(10/3)n^3 flops
+     */
+    private static double computeThroughput(int n, long nanos) {
+        if (nanos == 0) return 0.0;
+        // Conservative estimate: 2n^3 flops for decomposition operations
+        double flops = 2.0 * n * n * n;
+        return (flops / 1e6) / (nanos / 1e9);
     }
 
     private static Matrix randomMatrix(Random rnd, int n) {

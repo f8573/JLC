@@ -1,14 +1,14 @@
 package net.faulj.decomposition.qr;
 
 import net.faulj.matrix.Matrix;
-import net.faulj.vector.Vector;
-import net.faulj.vector.VectorUtils;
 import net.faulj.decomposition.result.QRResult;
 
 /**
  * Computes QR decomposition using Householder reflections, the gold standard for dense matrices.
  */
 public class HouseholderQR {
+	private static final double EPS = 1e-12;
+
 	public static QRResult decompose(Matrix A) {
 		return decompose(A, false);
 	}
@@ -29,62 +29,111 @@ public class HouseholderQR {
 		int kMax = Math.min(m, n);
 
 		Matrix R = A.copy();
-		Matrix Q = Matrix.Identity(m);
+		double[] rData = R.getRawData();
+		double[] tau = new double[kMax];
 
 		for (int k = 0; k < kMax; k++) {
 			int len = m - k;
 			if (len <= 1) {
+				tau[k] = 0.0;
 				continue;
 			}
-			double[] x = new double[len];
-			for (int i = 0; i < len; i++) {
-				x[i] = R.get(k + i, k);
+			int colIndex = k;
+			int base = k * n + colIndex;
+			double x0 = rData[base];
+			double sigma = 0.0;
+			for (int i = 1; i < len; i++) {
+				double v = rData[(k + i) * n + colIndex];
+				sigma += v * v;
+			}
+			if (sigma <= EPS) {
+				tau[k] = 0.0;
+				continue;
+			}
+			double mu = Math.sqrt(x0 * x0 + sigma);
+			double beta = -Math.copySign(mu, x0);
+			double v0 = x0 - beta;
+			double v0sq = v0 * v0;
+			if (v0sq <= EPS) {
+				tau[k] = 0.0;
+				continue;
+			}
+			double tauK = 2.0 * v0sq / (sigma + v0sq);
+			tau[k] = tauK;
+
+			rData[base] = beta;
+			for (int i = 1; i < len; i++) {
+				int idx = (k + i) * n + colIndex;
+				rData[idx] /= v0;
 			}
 
-			double normX = 0.0;
-			for (double xi : x) normX += xi * xi;
-			normX = Math.sqrt(normX);
-
-			boolean tailAllZero = true;
-			for (int i = 1; i < len; i++) {
-				if (Math.abs(x[i]) > 1e-12) {
-					tailAllZero = false;
-					break;
+			for (int col = k + 1; col < n; col++) {
+				int rowIndex = k * n + col;
+				double dot = rData[rowIndex];
+				int rIdx = rowIndex + n;
+				int vIdx = (k + 1) * n + colIndex;
+				for (int i = 1; i < len; i++) {
+					dot += rData[vIdx] * rData[rIdx];
+					rIdx += n;
+					vIdx += n;
+				}
+				dot *= tauK;
+				rData[rowIndex] -= dot;
+				rIdx = rowIndex + n;
+				vIdx = (k + 1) * n + colIndex;
+				for (int i = 1; i < len; i++) {
+					rData[rIdx] -= dot * rData[vIdx];
+					rIdx += n;
+					vIdx += n;
 				}
 			}
-			if (tailAllZero && Math.abs(x[0] - normX) < 1e-12) {
-				continue;
-			}
-
-			if (normX <= 1e-10) {
-				continue;
-			}
-
-			Vector xVec = new net.faulj.vector.Vector(x);
-			Vector hh = VectorUtils.householder(xVec);
-			double tau = hh.get(hh.dimension() - 1);
-			Vector v = hh.resize(hh.dimension() - 1);
-
-			Matrix H = Matrix.Identity(m);
-			for (int i = 0; i < len; i++) {
-				for (int j = 0; j < len; j++) {
-					double val = (i == j ? 1.0 : 0.0) - tau * v.get(i) * v.get(j);
-					H.set(k + i, k + j, val);
-				}
-			}
-
-			R = H.multiply(R);
-			for (int i = 1; i < len; i++) {
-				R.set(k + i, k, 0.0);
-			}
-			Q = Q.multiply(H);
 		}
 
-		for (int c = 0; c < Math.min(m, n); c++) {
+		int qCols = thin ? kMax : m;
+		Matrix Q = new Matrix(m, qCols);
+		double[] q = Q.getRawData();
+		int diag = Math.min(m, qCols);
+		for (int i = 0; i < diag; i++) {
+			q[i * qCols + i] = 1.0;
+		}
+
+		for (int k = kMax - 1; k >= 0; k--) {
+			double tauK = tau[k];
+			if (tauK == 0.0) {
+				continue;
+			}
+			int len = m - k;
+			int vBase = (k + 1) * n + k;
+			int qRowStart = k * qCols;
+			for (int col = 0; col < qCols; col++) {
+				int idx = qRowStart + col;
+				double dot = q[idx];
+				int qIdx = idx + qCols;
+				int vIdx = vBase;
+				for (int i = 1; i < len; i++) {
+					dot += rData[vIdx] * q[qIdx];
+					qIdx += qCols;
+					vIdx += n;
+				}
+				dot *= tauK;
+				q[idx] -= dot;
+				qIdx = idx + qCols;
+				vIdx = vBase;
+				for (int i = 1; i < len; i++) {
+					q[qIdx] -= dot * rData[vIdx];
+					qIdx += qCols;
+					vIdx += n;
+				}
+			}
+		}
+
+		int limit = Math.min(m, n);
+		for (int c = 0; c < limit; c++) {
+			boolean zeroAll = c < tau.length && tau[c] != 0.0;
 			for (int r = c + 1; r < m; r++) {
-				double val = R.get(r, c);
-				if (Math.abs(val) < 1e-12) {
-					R.set(r, c, 0.0);
+				int idx = r * n + c;
+				if (zeroAll || Math.abs(rData[idx]) < EPS) {
+					rData[idx] = 0.0;
 				}
 			}
 		}
@@ -93,9 +142,8 @@ public class HouseholderQR {
 			if (kMax == 0) {
 				return new QRResult(A, Q, R);
 			}
-			Matrix Qthin = Q.crop(0, m - 1, 0, kMax - 1);
 			Matrix Rthin = R.crop(0, kMax - 1, 0, n - 1);
-			return new QRResult(A, Qthin, Rthin);
+			return new QRResult(A, Q, Rthin);
 		}
 
 		return new QRResult(A, Q, R);

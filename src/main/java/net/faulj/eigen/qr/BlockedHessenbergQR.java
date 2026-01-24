@@ -12,8 +12,8 @@ import net.faulj.decomposition.result.HessenbergResult;
  *
  * <h2>Algorithm:</h2>
  * <p>
- * This implementation uses a blocked algorithm (BLAS Level 3 rich) to maximize
- * data locality and cache reuse.
+ * This implementation uses blocked, cache-friendly Householder updates (BLAS2-style)
+ * to improve data locality and cache reuse.
  * </p>
  * <ul>
  * <li><b>Panel Factorization:</b> Decomposes a block of columns using Householder reflectors.</li>
@@ -22,8 +22,8 @@ import net.faulj.decomposition.result.HessenbergResult;
  *
  * <h2>Performance:</h2>
  * <p>
- * For large matrices (N &gt; 128), this is significantly faster than the unblocked
- * algorithm due to matrix-matrix multiplication dominance.
+ * For large matrices (N &gt; 128), this reduces memory traffic compared to a
+ * naive element-by-element implementation.
  * </p>
  *
  * <h2>Structure:</h2>
@@ -41,6 +41,7 @@ import net.faulj.decomposition.result.HessenbergResult;
  */
 public class BlockedHessenbergQR {
 
+    private static final double EPS = 1e-12;
     private static final int BLOCK_SIZE = 32; // Tunable parameter
 
     /**
@@ -50,103 +51,109 @@ public class BlockedHessenbergQR {
      * @return The HessenbergResult (H, Q).
      */
     public static HessenbergResult decompose(Matrix A) {
+        if (A == null) {
+            throw new IllegalArgumentException("Matrix must not be null");
+        }
+        if (!A.isReal()) {
+            throw new UnsupportedOperationException("Hessenberg reduction requires a real-valued matrix");
+        }
         Matrix H = A.copy();
         int n = H.getRowCount();
+        if (n <= 2) {
+            return new HessenbergResult(A, H, Matrix.Identity(n));
+        }
         Matrix Q = Matrix.Identity(n);
 
-        // Simple unblocked implementation for the prototype.
-        // In a full production version, this would be blocked.
-        // We use the unblocked version here to ensure correctness within the constraints
-        // of the provided Matrix class API which lacks efficient submatrix views.
+        double[] h = H.getRawData();
+        double[] q = Q.getRawData();
+        double[] v = new double[n];
 
         for (int k = 0; k < n - 2; k++) {
-            // Compute Householder vector for column k, below diagonal
-            // We want to zero out H[k+2...n-1, k]
+            int len = n - k - 1;
+            int colIndex = k;
+            int base = (k + 1) * n + colIndex;
+            double x0 = h[base];
+            double sigma = 0.0;
+            for (int i = 1; i < len; i++) {
+                double val = h[(k + 1 + i) * n + colIndex];
+                sigma += val * val;
+            }
+            if (sigma <= EPS) {
+                continue;
+            }
+            double mu = Math.sqrt(x0 * x0 + sigma);
+            double beta = -Math.copySign(mu, x0);
+            double v0 = x0 - beta;
+            double v0sq = v0 * v0;
+            if (v0sq <= EPS) {
+                continue;
+            }
+            double tau = 2.0 * v0sq / (sigma + v0sq);
 
-            // Extract vector x = H[k+1...n-1, k]
-            double[] x = new double[n - 1 - k];
-            for (int i = 0; i < x.length; i++) {
-                x[i] = H.get(k + 1 + i, k);
+            v[0] = 1.0;
+            for (int i = 1; i < len; i++) {
+                v[i] = h[(k + 1 + i) * n + colIndex] / v0;
             }
 
-            double norm = 0;
-            for (double v : x) norm += v * v;
-            norm = Math.sqrt(norm);
-
-            if (norm == 0) continue;
-
-            // v = x +/- ||x|| * e1
-            double alpha = (x[0] > 0) ? -norm : norm;
-            double f = Math.sqrt(2 * (norm * norm - x[0] * alpha)); // scaling factor
-
-            // Re-using x array for v
-            x[0] -= alpha;
-            for(int i=0; i<x.length; i++) x[i] /= f; // Normalize v
-
-            // Apply P = I - 2vv^T to H from left and right
-            // Left: H = P * H -> H - v(v^T H)
-            // Only affects rows k+1 to n-1
-            applyHouseholderLeft(H, x, k + 1);
-
-            // Right: H = H * P -> H - (H v)v^T
-            // Only affects cols k+1 to n-1
-            applyHouseholderRight(H, x, k + 1);
-
-            // Accumulate Q: Q = Q * P
-            applyHouseholderRight(Q, x, k + 1);
-
-            // Enforce zeros (clean up numerical noise)
-            H.set(k + 1, k, alpha);
-            for (int i = k + 2; i < n; i++) {
-                H.set(i, k, 0.0);
+            h[base] = beta;
+            for (int i = 1; i < len; i++) {
+                h[(k + 1 + i) * n + colIndex] = 0.0;
             }
+
+            applyHouseholderLeft(h, n, k + 1, k + 1, v, len, tau);
+            applyHouseholderRight(h, n, 0, k + 1, v, len, tau);
+            applyHouseholderRight(q, n, 0, k + 1, v, len, tau);
         }
 
         return new HessenbergResult(A, H, Q);
     }
 
-    private static void applyHouseholderLeft(Matrix A, double[] v, int startRow) {
-        int n = A.getColumnCount();
-        int m = v.length;
-
-        // w = v^T * A (row vector)
-        double[] w = new double[n];
-        for (int j = 0; j < n; j++) {
-            double sum = 0;
-            for (int i = 0; i < m; i++) {
-                sum += v[i] * A.get(startRow + i, j);
-            }
-            w[j] = sum;
+    private static void applyHouseholderLeft(double[] data, int size, int startRow, int startCol,
+                                             double[] v, int len, double tau) {
+        if (tau == 0.0 || len <= 1) {
+            return;
         }
-
-        // A = A - 2 * v * w
-        for (int i = 0; i < m; i++) {
-            for (int j = 0; j < n; j++) {
-                double val = A.get(startRow + i, j) - 2 * v[i] * w[j];
-                A.set(startRow + i, j, val);
+        int block = Math.max(1, BLOCK_SIZE);
+        for (int colBlock = startCol; colBlock < size; colBlock += block) {
+            int colMax = Math.min(size, colBlock + block);
+            for (int col = colBlock; col < colMax; col++) {
+                int idx = startRow * size + col;
+                double dot = data[idx];
+                int rowIdx = idx + size;
+                for (int i = 1; i < len; i++) {
+                    dot += v[i] * data[rowIdx];
+                    rowIdx += size;
+                }
+                dot *= tau;
+                data[idx] -= dot;
+                rowIdx = idx + size;
+                for (int i = 1; i < len; i++) {
+                    data[rowIdx] -= dot * v[i];
+                    rowIdx += size;
+                }
             }
         }
     }
 
-    private static void applyHouseholderRight(Matrix A, double[] v, int startCol) {
-        int n = A.getRowCount();
-        int m = v.length;
-
-        // w = A * v (column vector)
-        double[] w = new double[n];
-        for (int i = 0; i < n; i++) {
-            double sum = 0;
-            for (int j = 0; j < m; j++) {
-                sum += A.get(i, startCol + j) * v[j];
-            }
-            w[i] = sum;
+    private static void applyHouseholderRight(double[] data, int size, int startRow, int startCol,
+                                              double[] v, int len, double tau) {
+        if (tau == 0.0 || len <= 1) {
+            return;
         }
-
-        // A = A - 2 * w * v^T
-        for (int i = 0; i < n; i++) {
-            for (int j = 0; j < m; j++) {
-                double val = A.get(i, startCol + j) - 2 * w[i] * v[j];
-                A.set(i, startCol + j, val);
+        int block = Math.max(1, BLOCK_SIZE);
+        for (int rowBlock = startRow; rowBlock < size; rowBlock += block) {
+            int rowMax = Math.min(size, rowBlock + block);
+            for (int row = rowBlock; row < rowMax; row++) {
+                int idx = row * size + startCol;
+                double dot = data[idx];
+                for (int j = 1; j < len; j++) {
+                    dot += data[idx + j] * v[j];
+                }
+                dot *= tau;
+                data[idx] -= dot;
+                for (int j = 1; j < len; j++) {
+                    data[idx + j] -= dot * v[j];
+                }
             }
         }
     }

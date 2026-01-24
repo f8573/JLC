@@ -22,8 +22,9 @@ package net.faulj.compute;
  * <ul>
  *   <li><b>NAIVE:</b> Direct implementation, used for small matrices (&lt; 64×64)</li>
  *   <li><b>BLOCKED:</b> Cache-optimized blocked algorithms for medium/large matrices</li>
+ *   <li><b>BLAS3:</b> Level-3 BLAS-style GEMM kernels for large dense matrices</li>
  *   <li><b>STRASSEN:</b> Strassen's algorithm for very large dense matrices (n &gt; 1024)</li>
- *   <li><b>PARALLEL:</b> Multi-threaded implementation for matrices exceeding parallelization threshold</li>
+ *   <li><b>PARALLEL:</b> Multi-threaded execution applied as a modifier when enabled</li>
  *   <li><b>SPECIALIZED:</b> Structure-aware algorithms (triangular, symmetric, banded)</li>
  * </ul>
  *
@@ -57,6 +58,7 @@ public class DispatchPolicy {
     public enum Algorithm {
         NAIVE,
         BLOCKED,
+        BLAS3,
         CUDA,
         PARALLEL,
         STRASSEN,
@@ -79,6 +81,8 @@ public class DispatchPolicy {
     private final int maxBlockSize;
     private final int parallelism;
     private final boolean enableParallel;
+    private final boolean enableBlas3;
+    private final int blas3Threshold;
     private final boolean enableStrassen;
     private final boolean enableCuda;
     private final int cudaMinDim;
@@ -96,6 +100,8 @@ public class DispatchPolicy {
         this.maxBlockSize = builder.maxBlockSize;
         this.parallelism = builder.parallelism;
         this.enableParallel = builder.enableParallel;
+        this.enableBlas3 = builder.enableBlas3;
+        this.blas3Threshold = builder.blas3Threshold;
         this.enableStrassen = builder.enableStrassen;
         this.enableCuda = builder.enableCuda;
         this.cudaMinDim = builder.cudaMinDim;
@@ -128,24 +134,19 @@ public class DispatchPolicy {
     }
 
     public Algorithm selectForMultiply(int m, int n, int k) {
+        return selectBaseAlgorithm(m, n, k, true);
+    }
+
+    public Algorithm selectCpuAlgorithm(int m, int n, int k) {
+        return selectBaseAlgorithm(m, n, k, false);
+    }
+
+    public boolean shouldParallelize(int m, int n, int k) {
+        if (!enableParallel || parallelism <= 1) {
+            return false;
+        }
         int maxDim = Math.max(m, Math.max(n, k));
-        if (maxDim <= naiveThreshold) {
-            return Algorithm.NAIVE;
-        }
-        if (shouldOffloadToCuda(m, n, k)) {
-            return Algorithm.CUDA;
-        }
-        boolean square = (m == n && n == k);
-        if (enableStrassen && square && maxDim >= strassenThreshold) {
-            return Algorithm.STRASSEN;
-        }
-        if (enableParallel && maxDim >= parallelThreshold && parallelism > 1) {
-            return Algorithm.PARALLEL;
-        }
-        if (maxDim >= blockedThreshold) {
-            return Algorithm.BLOCKED;
-        }
-        return Algorithm.NAIVE;
+        return maxDim >= parallelThreshold;
     }
 
     public boolean shouldOffloadToCuda(int m, int n, int k) {
@@ -165,6 +166,27 @@ public class DispatchPolicy {
         }
         long flops = 2L * m * n * k;
         return flops >= cudaMinFlops;
+    }
+
+    private Algorithm selectBaseAlgorithm(int m, int n, int k, boolean allowCuda) {
+        int maxDim = Math.max(m, Math.max(n, k));
+        if (maxDim <= naiveThreshold) {
+            return Algorithm.NAIVE;
+        }
+        if (allowCuda && shouldOffloadToCuda(m, n, k)) {
+            return Algorithm.CUDA;
+        }
+        boolean square = (m == n && n == k);
+        if (enableStrassen && square && maxDim >= strassenThreshold) {
+            return Algorithm.STRASSEN;
+        }
+        if (enableBlas3 && maxDim >= blas3Threshold) {
+            return Algorithm.BLAS3;
+        }
+        if (maxDim >= blockedThreshold) {
+            return Algorithm.BLOCKED;
+        }
+        return Algorithm.NAIVE;
     }
 
     public int blockSize(int m, int n, int k) {
@@ -208,6 +230,14 @@ public class DispatchPolicy {
         return enableParallel;
     }
 
+    public boolean isBlas3Enabled() {
+        return enableBlas3;
+    }
+
+    public int getBlas3Threshold() {
+        return blas3Threshold;
+    }
+
     public boolean isStrassenEnabled() {
         return enableStrassen;
     }
@@ -238,6 +268,8 @@ public class DispatchPolicy {
         private int maxBlockSize = 256;
         private int parallelism = Math.max(1, Runtime.getRuntime().availableProcessors());
         private boolean enableParallel = true;
+        private boolean enableBlas3 = false;
+        private int blas3Threshold = 512;
         private boolean enableStrassen = false;
         private boolean enableCuda = true;
         private int cudaMinDim = 256;
@@ -287,6 +319,16 @@ public class DispatchPolicy {
 
         public Builder enableParallel(boolean enableParallel) {
             this.enableParallel = enableParallel;
+            return this;
+        }
+
+        public Builder enableBlas3(boolean enableBlas3) {
+            this.enableBlas3 = enableBlas3;
+            return this;
+        }
+
+        public Builder blas3Threshold(int blas3Threshold) {
+            this.blas3Threshold = Math.max(1, blas3Threshold);
             return this;
         }
 

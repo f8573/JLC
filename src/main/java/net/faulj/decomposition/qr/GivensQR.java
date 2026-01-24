@@ -1,5 +1,9 @@
 package net.faulj.decomposition.qr;
 
+import net.faulj.matrix.Matrix;
+import net.faulj.givens.GivensRotation;
+import net.faulj.decomposition.result.QRResult;
+
 /**
  * Computes QR decomposition using Givens rotations for selective element elimination.
  * <p>
@@ -148,4 +152,60 @@ package net.faulj.decomposition.qr;
  * @see net.faulj.decomposition.result.QRResult
  */
 public class GivensQR {
+    
+    public static QRResult decompose(Matrix A) {
+        if (A == null) throw new IllegalArgumentException("Matrix must not be null");
+        if (!A.isReal()) throw new UnsupportedOperationException("Givens QR requires a real-valued matrix");
+        
+        int m = A.getRowCount();
+        int n = A.getColumnCount();
+        Matrix R = A.copy();
+        Matrix Q = Matrix.Identity(m);
+        
+        for (int k = 0; k < Math.min(m - 1, n); k++) {
+            for (int i = m - 1; i > k; i--) {
+                double a = R.get(i - 1, k);
+                double b = R.get(i, k);
+                if (Math.abs(b) > 1e-14) {
+                    GivensRotation G = GivensRotation.compute(a, b);
+                    G.applyLeft(R, i - 1, i, k, n - 1);
+                    applyGivensTransposeRight(Q, G, i - 1, i);
+                }
+            }
+        }
+        
+        cleanupSmallValues(R, 1e-12);
+        return new QRResult(A, Q, R);
+    }
+    
+    public static QRResult decomposeThin(Matrix A) {
+        if (A == null) throw new IllegalArgumentException("Matrix must not be null");
+        int m = A.getRowCount();
+        int n = A.getColumnCount();
+        if (m < n) throw new IllegalArgumentException("Thin QR requires m >= n");
+        QRResult full = decompose(A);
+        Matrix Q_thin = full.getQ().crop(0, m - 1, 0, n - 1);
+        Matrix R_thin = full.getR().crop(0, n - 1, 0, n - 1);
+        return new QRResult(A, Q_thin, R_thin);
+    }
+    
+    private static void applyGivensTransposeRight(Matrix M, GivensRotation G, int i, int k) {
+        int m = M.getRowCount();
+        for (int row = 0; row < m; row++) {
+            double valI = M.get(row, i);
+            double valK = M.get(row, k);
+            M.set(row, i, G.c * valI - G.s * valK);
+            M.set(row, k, G.s * valI + G.c * valK);
+        }
+    }
+    
+    private static void cleanupSmallValues(Matrix M, double tol) {
+        int m = M.getRowCount();
+        int n = M.getColumnCount();
+        for (int i = 0; i < m; i++) {
+            for (int j = 0; j < n; j++) {
+                if (Math.abs(M.get(i, j)) < tol) M.set(i, j, 0.0);
+            }
+        }
+    }
 }

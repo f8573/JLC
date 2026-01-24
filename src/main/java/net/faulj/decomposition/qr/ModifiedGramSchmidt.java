@@ -1,5 +1,9 @@
 package net.faulj.decomposition.qr;
 
+import net.faulj.matrix.Matrix;
+import net.faulj.vector.Vector;
+import net.faulj.decomposition.result.QRResult;
+
 /**
  * Computes QR decomposition using Modified Gram-Schmidt orthogonalization.
  * <p>
@@ -161,4 +165,76 @@ package net.faulj.decomposition.qr;
  * @see net.faulj.decomposition.result.QRResult
  */
 public class ModifiedGramSchmidt {
+    
+    /**
+     * Computes QR decomposition using Modified Gram-Schmidt.
+     *
+     * @param A The matrix to decompose (m×n)
+     * @return QRResult containing Q and R matrices
+     * @throws IllegalArgumentException if A is null
+     */
+    public static QRResult decompose(Matrix A) {
+        if (A == null) {
+            throw new IllegalArgumentException("Matrix must not be null");
+        }
+        if (!A.isReal()) {
+            throw new UnsupportedOperationException("Modified Gram-Schmidt requires a real-valued matrix");
+        }
+        
+        int m = A.getRowCount();
+        int n = A.getColumnCount();
+        int k = Math.min(m, n);
+        
+        Matrix Q = new Matrix(m, k);
+        Matrix R = new Matrix(k, n);
+        
+        // Work with copies of the columns
+        Vector[] v = new Vector[n];
+        for (int j = 0; j < n; j++) {
+            v[j] = new Vector(A, j).copy();
+        }
+        
+        // Modified Gram-Schmidt: process each column
+        for (int j = 0; j < k; j++) {
+            // Compute norm of current working vector
+            double norm = v[j].norm2();
+            R.set(j, j, norm);
+            
+            if (norm > 1e-14) {
+                // Normalize to get Q column
+                for (int row = 0; row < m; row++) {
+                    Q.set(row, j, v[j].get(row) / norm);
+                }
+                
+                // Update all remaining vectors (modified approach)
+                Vector q_j = new Vector(Q, j);
+                for (int i = j + 1; i < n; i++) {
+                    double r_ji = q_j.dot(v[i]);
+                    R.set(j, i, r_ji);
+                    
+                    // Immediately update v[i] with the new q_j
+                    for (int row = 0; row < m; row++) {
+                        v[i].set(row, v[i].get(row) - r_ji * q_j.get(row));
+                    }
+                }
+            } else {
+                // Linearly dependent column
+                for (int row = 0; row < m; row++) {
+                    Q.set(row, j, 0.0);
+                }
+            }
+        }
+        
+        // Fill remaining R entries for wide matrices
+        // Use original matrix columns since v[j] for j >= k are not orthogonalized
+        for (int j = k; j < n; j++) {
+            Vector a_j = new Vector(A, j);  // Use ORIGINAL column from A
+            for (int i = 0; i < k; i++) {
+                Vector q_i = new Vector(Q, i);
+                R.set(i, j, q_i.dot(a_j));
+            }
+        }
+        
+        return new QRResult(A, Q, R);
+    }
 }

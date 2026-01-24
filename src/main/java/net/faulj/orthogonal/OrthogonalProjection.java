@@ -1,6 +1,5 @@
 package net.faulj.orthogonal;
 
-import net.faulj.decomposition.qr.HouseholderQR;
 import net.faulj.matrix.Matrix;
 import net.faulj.vector.Vector;
 
@@ -71,7 +70,15 @@ import net.faulj.vector.Vector;
  */
 public class OrthogonalProjection {
 	public static Matrix createMatrix(Matrix A) {
-		Matrix Q = HouseholderQR.decompose(A).getQ();
-		return Q.multiply(Q.transpose());
+		if (A == null) {
+			throw new IllegalArgumentException("Matrix must not be null");
+		}
+		int rows = A.getRowCount();
+		if (A.getColumnCount() == 0 || rows == 0) {
+			return new Matrix(rows, rows);
+		}
+		Matrix At = A.transpose();
+		Matrix AtAInv = At.multiply(A).inverse();
+		return A.multiply(AtAInv).multiply(At);
 	}
 }

@@ -1,5 +1,7 @@
 package net.faulj.givens;
 
+import net.faulj.matrix.Matrix;
+
 /**
  * Provides algorithms for reducing a symmetric matrix to tridiagonal form using Givens rotations.
  * <p>
@@ -36,5 +38,86 @@ package net.faulj.givens;
  * @see GivensRotation
  */
 public class GivensTridiagonal {
-    // Implementation to be added
+    
+    /**
+     * Reduces a symmetric matrix to tridiagonal form using Givens rotations.
+     * Returns {T, Q} where T = Q^T * A * Q and Q is orthogonal.
+     *
+     * @param A Symmetric matrix to tridiagonalize
+     * @return Array of {T, Q} where T is tridiagonal and Q is orthogonal
+     * @throws IllegalArgumentException if A is not symmetric
+     */
+    public static Matrix[] tridiagonalize(Matrix A) {
+        if (A == null) {
+            throw new IllegalArgumentException("Matrix must not be null");
+        }
+        if (!A.isSquare()) {
+            throw new IllegalArgumentException("Matrix must be square");
+        }
+        if (!A.isReal()) {
+            throw new UnsupportedOperationException("Givens tridiagonalization requires a real-valued matrix");
+        }
+        
+        // Verify symmetry
+        int n = A.getRowCount();
+        for (int i = 0; i < n; i++) {
+            for (int j = i + 1; j < n; j++) {
+                if (Math.abs(A.get(i, j) - A.get(j, i)) > 1e-10) {
+                    throw new IllegalArgumentException("Matrix must be symmetric");
+                }
+            }
+        }
+        
+        Matrix T = A.copy();
+        Matrix Q = Matrix.Identity(n);
+        
+        // Process each column
+        for (int k = 0; k < n - 2; k++) {
+            // Zero out elements below first subdiagonal in column k
+            for (int i = n - 1; i > k + 1; i--) {
+                double a = T.get(i - 1, k);
+                double b = T.get(i, k);
+                
+                if (Math.abs(b) > 1e-14) {
+                    GivensRotation G = GivensRotation.compute(a, b);
+                    
+                    // Apply from left: G^T * T
+                    G.applyLeft(T, i - 1, i, k, n - 1);
+                    
+                    // Apply from right: T * G (maintains symmetry)
+                    G.applyRight(T, i - 1, i, 0, n - 1);
+                    
+                    // Accumulate Q: Q = Q * G (not G^T)
+                    applyGivensRight(Q, G, i - 1, i);
+                }
+            }
+        }
+        
+        // Clean up small values
+        cleanupSmallValues(T, 1e-12);
+        
+        return new Matrix[]{T, Q};
+    }
+    
+    private static void applyGivensRight(Matrix M, GivensRotation G, int i, int k) {
+        int m = M.getRowCount();
+        for (int row = 0; row < m; row++) {
+            double valI = M.get(row, i);
+            double valK = M.get(row, k);
+            M.set(row, i, G.c * valI - G.s * valK);
+            M.set(row, k, G.s * valI + G.c * valK);
+        }
+    }
+    
+    private static void cleanupSmallValues(Matrix M, double tol) {
+        int m = M.getRowCount();
+        int n = M.getColumnCount();
+        for (int i = 0; i < m; i++) {
+            for (int j = 0; j < n; j++) {
+                if (Math.abs(M.get(i, j)) < tol) {
+                    M.set(i, j, 0.0);
+                }
+            }
+        }
+    }
 }

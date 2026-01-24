@@ -55,20 +55,26 @@ import net.faulj.decomposition.result.SVDResult;
  * @see SVDecomposition
  */
 public class ThinSVD {
+	private final SVDAlgorithm algorithm;
+
 	public ThinSVD() {
+		this(SVDAlgorithm.DIVIDE_AND_CONQUER);
+	}
+
+	public ThinSVD(SVDAlgorithm algorithm) {
+		if (algorithm == null) {
+			throw new IllegalArgumentException("Algorithm must not be null");
+		}
+		this.algorithm = algorithm;
 	}
 
 	public SVDResult decompose(Matrix A) {
 		if (A == null) {
 			throw new IllegalArgumentException("Matrix must not be null");
 		}
-		SVDResult full = new SVDecomposition().decompose(A);
-		int m = A.getRowCount();
-		int n = A.getColumnCount();
-		int r = Math.min(m, n);
-		Matrix U = full.getU().crop(0, m - 1, 0, r - 1);
-		Matrix V = full.getV().crop(0, n - 1, 0, r - 1);
-		double[] sigma = java.util.Arrays.copyOf(full.getSingularValues(), r);
-		return new SVDResult(A, U, sigma, V);
+		return switch (algorithm) {
+			case GOLUB_KAHAN_QR -> new GolubKahanSVD().decomposeThin(A);
+			case DIVIDE_AND_CONQUER -> new DivideAndConquerSVD().decomposeThin(A);
+		};
 	}
 }
