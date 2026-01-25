@@ -1,13 +1,13 @@
 package net.faulj.eigen.qr;
 
-import net.faulj.decomposition.qr.HouseholderQR;
-import net.faulj.decomposition.result.QRResult;
-import net.faulj.decomposition.result.HessenbergResult;
-import net.faulj.matrix.Matrix;
-import net.faulj.scalar.Complex;
-
 import java.util.ArrayList;
 import java.util.List;
+
+import net.faulj.decomposition.qr.HouseholderQR;
+import net.faulj.decomposition.result.HessenbergResult;
+import net.faulj.decomposition.result.QRResult;
+import net.faulj.matrix.Matrix;
+import net.faulj.scalar.Complex;
 
 
 /**

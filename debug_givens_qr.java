@@ -1,7 +1,7 @@
-import net.faulj.matrix.Matrix;
-import net.faulj.vector.Vector;
 import net.faulj.decomposition.qr.GivensQR;
 import net.faulj.decomposition.result.QRResult;
+import net.faulj.matrix.Matrix;
+import net.faulj.vector.Vector;
 
 public class debug_givens_qr {
     

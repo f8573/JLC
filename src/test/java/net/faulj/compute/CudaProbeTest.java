@@ -1,20 +1,31 @@
 package net.faulj.compute;
 
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+import org.junit.Test;
+
 import jcuda.Pointer;
 import jcuda.Sizeof;
 import jcuda.driver.CUcontext;
 import jcuda.driver.CUdevice;
-import jcuda.driver.CUdeviceptr;
-import jcuda.driver.JCudaDriver;
-import jcuda.runtime.JCuda;
-import jcuda.runtime.cudaDeviceProp;
-import org.junit.Test;
-
 import static jcuda.driver.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR;
 import static jcuda.driver.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR;
-import static jcuda.driver.JCudaDriver.*;
-import static jcuda.runtime.JCuda.*;
-import static org.junit.Assert.*;
+import jcuda.driver.CUdeviceptr;
+import static jcuda.driver.JCudaDriver.cuCtxCreate;
+import static jcuda.driver.JCudaDriver.cuCtxDestroy;
+import static jcuda.driver.JCudaDriver.cuDeviceGet;
+import static jcuda.driver.JCudaDriver.cuDeviceGetAttribute;
+import static jcuda.driver.JCudaDriver.cuDeviceGetCount;
+import static jcuda.driver.JCudaDriver.cuDeviceGetName;
+import static jcuda.driver.JCudaDriver.cuInit;
+import static jcuda.driver.JCudaDriver.cuMemAlloc;
+import static jcuda.driver.JCudaDriver.cuMemFree;
+import static jcuda.driver.JCudaDriver.cuMemcpyDtoH;
+import static jcuda.driver.JCudaDriver.cuMemcpyHtoD;
+import static jcuda.runtime.JCuda.cudaGetDeviceCount;
+import static jcuda.runtime.JCuda.cudaGetDeviceProperties;
+import static jcuda.runtime.JCuda.cudaSetDevice;
+import jcuda.runtime.cudaDeviceProp;
 
 public class CudaProbeTest {
 

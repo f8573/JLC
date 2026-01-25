@@ -1,17 +1,19 @@
 package net.faulj.matrix;
 
+import java.util.Random;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
+import org.junit.Test;
+
 import net.faulj.decomposition.qr.HouseholderQR;
 import net.faulj.decomposition.result.QRResult;
-import net.faulj.eigen.schur.RealSchurDecomposition;
 import net.faulj.decomposition.result.SchurResult;
+import net.faulj.eigen.schur.RealSchurDecomposition;
 import net.faulj.matrix.MatrixAccuracyValidator.AccuracyLevel;
 import net.faulj.matrix.MatrixAccuracyValidator.ValidationResult;
 import net.faulj.vector.Vector;
-import org.junit.Test;
-
-import java.util.Random;
-
-import static org.junit.Assert.*;
 
 /**
  * Tests for MatrixAccuracyValidator demonstrating adaptive threshold validation

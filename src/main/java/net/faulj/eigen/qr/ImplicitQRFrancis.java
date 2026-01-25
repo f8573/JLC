@@ -1,9 +1,9 @@
 package net.faulj.eigen.qr;
 
-import net.faulj.matrix.Matrix;
-import net.faulj.decomposition.result.SchurResult;
 import net.faulj.decomposition.result.HessenbergResult;
+import net.faulj.decomposition.result.SchurResult;
 import net.faulj.eigen.schur.SchurEigenExtractor;
+import net.faulj.matrix.Matrix;
 
 /**
  * Implements the Francis Implicit QR Algorithm with adaptive size-based strategy.
