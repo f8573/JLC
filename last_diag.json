@@ -1,0 +1,892 @@
+﻿{
+    "basicProperties":  {
+                            "dimensionsAndDomain":  {
+                                                        "rows":  3,
+                                                        "cols":  3,
+                                                        "columns":  3,
+                                                        "square":  true,
+                                                        "real":  true,
+                                                        "domain":  "R"
+                                                    },
+                            "normsAndMagnitude":  {
+                                                      "norm1":  4.0,
+                                                      "normInf":  4.0,
+                                                      "frobeniusNorm":  3.3166247903554,
+                                                      "operatorNorm":  3.302775637732015,
+                                                      "density":  0.3333333333333333,
+                                                      "sparse":  false
+                                                  },
+                            "rankAndNullity":  {
+                                                   "rank":  2,
+                                                   "nullity":  1,
+                                                   "fullRank":  false,
+                                                   "rankDeficient":  true
+                                               },
+                            "invertibilityAndConditioning":  {
+                                                                 "invertible":  false,
+                                                                 "singular":  true,
+                                                                 "leftInvertible":  false,
+                                                                 "rightInvertible":  false,
+                                                                 "conditionNumber":  1E+16,
+                                                                 "reciprocalConditionNumber":  0.0,
+                                                                 "wellConditioned":  false,
+                                                                 "illConditioned":  true,
+                                                                 "nearlySingular":  true
+                                                             },
+                            "scalarInvariants":  {
+                                                     "trace":  2.0,
+                                                     "determinant":  0.0
+                                                 },
+                            "rowReduction":  {
+                                                 "rowEchelon":  true,
+                                                 "reducedRowEchelon":  false
+                                             },
+                            "rawData":  {
+                                            "matrixData":  [
+                                                               [
+                                                                   1.0,
+                                                                   3.0,
+                                                                   0.0
+                                                               ],
+                                                               [
+                                                                   0.0,
+                                                                   1.0,
+                                                                   0.0
+                                                               ],
+                                                               [
+                                                                   0.0,
+                                                                   0.0,
+                                                                   0.0
+                                                               ]
+                                                           ],
+                                            "matrixImagData":  null
+                                        }
+                        },
+    "spectralAnalysis":  {
+                             "eigenInformation":  {
+                                                      "eigenvalues":  [
+                                                                          {
+                                                                              "real":  1.0,
+                                                                              "imag":  0.0
+                                                                          },
+                                                                          {
+                                                                              "real":  1.0,
+                                                                              "imag":  0.0
+                                                                          },
+                                                                          {
+                                                                              "real":  0.0,
+                                                                              "imag":  0.0
+                                                                          }
+                                                                      ],
+                                                      "eigenvectors":  {
+                                                                           "rows":  3,
+                                                                           "cols":  3,
+                                                                           "data":  [
+                                                                                        [
+                                                                                            1.0,
+                                                                                            1.0,
+                                                                                            0.0
+                                                                                        ],
+                                                                                        [
+                                                                                            0.0,
+                                                                                            0.0,
+                                                                                            0.0
+                                                                                        ],
+                                                                                        [
+                                                                                            0.0,
+                                                                                            0.0,
+                                                                                            1.0
+                                                                                        ]
+                                                                                    ]
+                                                                       },
+                                                      "eigenspace":  {
+                                                                         "rows":  3,
+                                                                         "cols":  3,
+                                                                         "data":  [
+                                                                                      [
+                                                                                          1.0,
+                                                                                          1.0,
+                                                                                          0.0
+                                                                                      ],
+                                                                                      [
+                                                                                          0.0,
+                                                                                          0.0,
+                                                                                          0.0
+                                                                                      ],
+                                                                                      [
+                                                                                          0.0,
+                                                                                          0.0,
+                                                                                          1.0
+                                                                                      ]
+                                                                                  ]
+                                                                     },
+                                                      "eigenspacePerEigenvalue":  [
+                                                                                      {
+                                                                                          "status":  "OK",
+                                                                                          "message":  null,
+                                                                                          "vectors":  [
+                                                                                                          [
+                                                                                                              1.0,
+                                                                                                              0.0,
+                                                                                                              0.0
+                                                                                                          ]
+                                                                                                      ]
+                                                                                      },
+                                                                                      {
+                                                                                          "status":  "OK",
+                                                                                          "message":  null,
+                                                                                          "vectors":  [
+                                                                                                          [
+                                                                                                              0.0,
+                                                                                                              0.0,
+                                                                                                              1.0
+                                                                                                          ]
+                                                                                                      ]
+                                                                                      }
+                                                                                  ],
+                                                      "eigenbasisPerEigenvalue":  [
+                                                                                      {
+                                                                                          "status":  "OK",
+                                                                                          "message":  null,
+                                                                                          "vectors":  [
+                                                                                                          [
+                                                                                                              1.0,
+                                                                                                              0.0,
+                                                                                                              0.0
+                                                                                                          ]
+                                                                                                      ]
+                                                                                      },
+                                                                                      {
+                                                                                          "status":  "OK",
+                                                                                          "message":  null,
+                                                                                          "vectors":  [
+                                                                                                          [
+                                                                                                              0.0,
+                                                                                                              0.0,
+                                                                                                              1.0
+                                                                                                          ]
+                                                                                                      ]
+                                                                                      }
+                                                                                  ],
+                                                      "generalizedEigenbasisPerEigenvalue":  [
+                                                                                                 {
+                                                                                                     "status":  "OK",
+                                                                                                     "message":  null,
+                                                                                                     "vectors":  [
+                                                                                                                     [
+                                                                                                                         1.0,
+                                                                                                                         0.0,
+                                                                                                                         0.0
+                                                                                                                     ]
+                                                                                                                 ]
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "status":  "OK",
+                                                                                                     "message":  null,
+                                                                                                     "vectors":  [
+                                                                                                                     [
+                                                                                                                         0.0,
+                                                                                                                         0.0,
+                                                                                                                         1.0
+                                                                                                                     ]
+                                                                                                                 ]
+                                                                                                 }
+                                                                                             ]
+                                                  },
+                             "multiplicityAndPolynomials":  {
+                                                                "algebraicMultiplicity":  [
+                                                                                              2,
+                                                                                              2,
+                                                                                              1
+                                                                                          ],
+                                                                "geometricMultiplicity":  [
+                                                                                              1,
+                                                                                              1,
+                                                                                              1
+                                                                                          ],
+                                                                "characteristicPolynomial":  [
+                                                                                                 {
+                                                                                                     "real":  1.0,
+                                                                                                     "imag":  0.0
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "real":  -2.0,
+                                                                                                     "imag":  0.0
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "real":  1.0,
+                                                                                                     "imag":  0.0
+                                                                                                 },
+                                                                                                 {
+                                                                                                     "real":  0.0,
+                                                                                                     "imag":  0.0
+                                                                                                 }
+                                                                                             ],
+                                                                "characteristicPolynomials":  [
+                                                                                                  {
+                                                                                                      "real":  1.0,
+                                                                                                      "imag":  0.0
+                                                                                                  },
+                                                                                                  {
+                                                                                                      "real":  -2.0,
+                                                                                                      "imag":  0.0
+                                                                                                  },
+                                                                                                  {
+                                                                                                      "real":  1.0,
+                                                                                                      "imag":  0.0
+                                                                                                  },
+                                                                                                  {
+                                                                                                      "real":  0.0,
+                                                                                                      "imag":  0.0
+                                                                                                  }
+                                                                                              ]
+                                                            },
+                             "spectralRadiiAndValues":  {
+                                                            "singularValues":  [
+                                                                                   3.302775637732015,
+                                                                                   0.3027756377317278,
+                                                                                   0.0
+                                                                               ],
+                                                            "spectralRadius":  1.0
+                                                        },
+                             "diagonalizationAndDefectivity":  {
+                                                                   "defective":  true,
+                                                                   "diagonalizable":  false
+                                                               },
+                             "normalityAndOrthogonality":  {
+                                                               "normal":  false,
+                                                               "nonNormal":  true,
+                                                               "orthonormal":  false,
+                                                               "orthogonal":  false,
+                                                               "unitary":  false
+                                                           },
+                             "definiteness":  null,
+                             "spectralClass":  false
+                         },
+    "structuralProperties":  {
+                                 "shapeAndCanonicalForms":  {
+                                                                "zero":  false,
+                                                                "identity":  false,
+                                                                "scalar":  false,
+                                                                "diagonal":  false,
+                                                                "bidiagonal":  true,
+                                                                "tridiagonal":  true,
+                                                                "upperTriangular":  true,
+                                                                "lowerTriangular":  false,
+                                                                "upperHessenberg":  true,
+                                                                "lowerHessenberg":  true,
+                                                                "hessenberg":  true,
+                                                                "schur":  true,
+                                                                "block":  true,
+                                                                "companion":  false
+                                                            },
+                                 "symmetryAndPatterns":  {
+                                                             "symmetric":  false,
+                                                             "symmetryError":  4.242640687119285,
+                                                             "skewSymmetric":  false,
+                                                             "hermitian":  false,
+                                                             "persymmetric":  false,
+                                                             "antidiagonal":  false
+                                                         },
+                                 "algebraicBehavior":  {
+                                                           "idempotent":  false,
+                                                           "involutory":  false,
+                                                           "nilpotent":  false
+                                                       },
+                                 "geometricTransformations":  {
+                                                                  "rotation":  null,
+                                                                  "reflection":  null
+                                                              }
+                             },
+    "matrixDecompositions":  {
+                                 "primaryDecompositions":  {
+                                                               "qr":  {
+                                                                          "status":  "OK",
+                                                                          "message":  "QR [3x3, cond~1.00e+16]:\n  Norm residual: 0.00e+00 (EXCELLENT)\n  Elem residual: 0.00e+00 (EXCELLENT)\n  â Excellent numerical accuracy | Orthogonality check: QR orthogonality [3x3, cond~1.00e+00]:\n  Norm residual: 0.00e+00 (EXCELLENT)\n  Elem residual: 0.00e+00 (EXCELLENT)\n  â Excellent numerical accuracy",
+                                                                          "validation":  {
+                                                                                             "normLevel":  "EXCELLENT",
+                                                                                             "elementLevel":  "EXCELLENT",
+                                                                                             "normResidual":  0.0,
+                                                                                             "elementResidual":  0.0,
+                                                                                             "message":  "QR [3x3, cond~1.00e+16]:\n  Norm residual: 0.00e+00 (EXCELLENT)\n  Elem residual: 0.00e+00 (EXCELLENT)\n  â Excellent numerical accuracy",
+                                                                                             "passes":  true,
+                                                                                             "shouldWarn":  false
+                                                                                         },
+                                                                          "q":  {
+                                                                                    "rows":  3,
+                                                                                    "cols":  3,
+                                                                                    "data":  [
+                                                                                                 [
+                                                                                                     1.0,
+                                                                                                     0.0,
+                                                                                                     0.0
+                                                                                                 ],
+                                                                                                 [
+                                                                                                     0.0,
+                                                                                                     1.0,
+                                                                                                     0.0
+                                                                                                 ],
+                                                                                                 [
+                                                                                                     0.0,
+                                                                                                     0.0,
+                                                                                                     1.0
+                                                                                                 ]
+                                                                                             ]
+                                                                                },
+                                                                          "r":  {
+                                                                                    "rows":  3,
+                                                                                    "cols":  3,
+                                                                                    "data":  [
+                                                                                                 [
+                                                                                                     1.0,
+                                                                                                     3.0,
+                                                                                                     0.0
+                                                                                                 ],
+                                                                                                 [
+                                                                                                     0.0,
+                                                                                                     1.0,
+                                                                                                     0.0
+                                                                                                 ],
+                                                                                                 [
+                                                                                                     0.0,
+                                                                                                     0.0,
+                                                                                                     0.0
+                                                                                                 ]
+                                                                                             ]
+                                                                                }
+                                                                      },
+                                                               "lu":  {
+                                                                          "status":  "WARNING",
+                                                                          "message":  "LU [3x3, cond~1.00e+16]:\n  Norm residual: 0.00e+00 (EXCELLENT)\n  Elem residual: 0.00e+00 (EXCELLENT)\n  â Excellent numerical accuracy | Matrix is singular or nearly singular",
+                                                                          "validation":  {
+                                                                                             "normLevel":  "EXCELLENT",
+                                                                                             "elementLevel":  "EXCELLENT",
+                                                                                             "normResidual":  0.0,
+                                                                                             "elementResidual":  0.0,
+                                                                                             "message":  "LU [3x3, cond~1.00e+16]:\n  Norm residual: 0.00e+00 (EXCELLENT)\n  Elem residual: 0.00e+00 (EXCELLENT)\n  â Excellent numerical accuracy",
+                                                                                             "passes":  true,
+                                                                                             "shouldWarn":  false
+                                                                                         },
+                                                                          "l":  {
+                                                                                    "rows":  3,
+                                                                                    "cols":  3,
+                                                                                    "data":  [
+                                                                                                 [
+                                                                                                     1.0,
+                                                                                                     0.0,
+                                                                                                     0.0
+                                                                                                 ],
+                                                                                                 [
+                                                                                                     0.0,
+                                                                                                     1.0,
+                                                                                                     0.0
+                                                                                                 ],
+                                                                                                 [
+                                                                                                     0.0,
+                                                                                                     0.0,
+                                                                                                     1.0
+                                                                                                 ]
+                                                                                             ]
+                                                                                },
+                                                                          "u":  {
+                                                                                    "rows":  3,
+                                                                                    "cols":  3,
+                                                                                    "data":  [
+                                                                                                 [
+                                                                                                     1.0,
+                                                                                                     3.0,
+                                                                                                     0.0
+                                                                                                 ],
+                                                                                                 [
+                                                                                                     0.0,
+                                                                                                     1.0,
+                                                                                                     0.0
+                                                                                                 ],
+                                                                                                 [
+                                                                                                     0.0,
+                                                                                                     0.0,
+                                                                                                     0.0
+                                                                                                 ]
+                                                                                             ]
+                                                                                },
+                                                                          "p":  {
+                                                                                    "rows":  3,
+                                                                                    "cols":  3,
+                                                                                    "data":  [
+                                                                                                 [
+                                                                                                     1.0,
+                                                                                                     0.0,
+                                                                                                     0.0
+                                                                                                 ],
+                                                                                                 [
+                                                                                                     0.0,
+                                                                                                     1.0,
+                                                                                                     0.0
+                                                                                                 ],
+                                                                                                 [
+                                                                                                     0.0,
+                                                                                                     0.0,
+                                                                                                     1.0
+                                                                                                 ]
+                                                                                             ]
+                                                                                },
+                                                                          "singular":  true,
+                                                                          "determinant":  0.0
+                                                                      },
+                                                               "cholesky":  {
+                                                                                "status":  "ERROR",
+                                                                                "message":  "Cholesky decomposition requires a symmetric positive definite matrix",
+                                                                                "validation":  null
+                                                                            },
+                                                               "svd":  {
+                                                                           "status":  "ERROR",
+                                                                           "message":  "SVD [3x3, cond~1.00e+16]:\n  Norm residual: 3.47e-14 (GOOD)\n  Elem residual: 1.00e+00 (CRITICAL)\n  â CRITICAL: Severe accuracy loss - results unreliable!\n  â Check for singular/near-singular matrices\n  â Consider higher precision or regularization",
+                                                                           "validation":  {
+                                                                                              "normLevel":  "GOOD",
+                                                                                              "elementLevel":  "CRITICAL",
+                                                                                              "normResidual":  3.4670882308885692E-14,
+                                                                                              "elementResidual":  1.0,
+                                                                                              "message":  "SVD [3x3, cond~1.00e+16]:\n  Norm residual: 3.47e-14 (GOOD)\n  Elem residual: 1.00e+00 (CRITICAL)\n  â CRITICAL: Severe accuracy loss - results unreliable!\n  â Check for singular/near-singular matrices\n  â Consider higher precision or regularization",
+                                                                                              "passes":  false,
+                                                                                              "shouldWarn":  true
+                                                                                          },
+                                                                           "u":  {
+                                                                                     "rows":  3,
+                                                                                     "cols":  3,
+                                                                                     "data":  [
+                                                                                                  [
+                                                                                                      -0.9570920264890471,
+                                                                                                      -0.2897841486889768,
+                                                                                                      0.0
+                                                                                                  ],
+                                                                                                  [
+                                                                                                      -0.2897841486884277,
+                                                                                                      0.9570920264898083,
+                                                                                                      0.0
+                                                                                                  ],
+                                                                                                  [
+                                                                                                      0.0,
+                                                                                                      0.0,
+                                                                                                      0.0
+                                                                                                  ]
+                                                                                              ]
+                                                                                 },
+                                                                           "sigma":  {
+                                                                                         "rows":  3,
+                                                                                         "cols":  3,
+                                                                                         "data":  [
+                                                                                                      [
+                                                                                                          3.302775637732015,
+                                                                                                          0.0,
+                                                                                                          0.0
+                                                                                                      ],
+                                                                                                      [
+                                                                                                          0.0,
+                                                                                                          0.3027756377317278,
+                                                                                                          0.0
+                                                                                                      ],
+                                                                                                      [
+                                                                                                          0.0,
+                                                                                                          0.0,
+                                                                                                          0.0
+                                                                                                      ]
+                                                                                                  ]
+                                                                                     },
+                                                                           "v":  {
+                                                                                     "rows":  3,
+                                                                                     "cols":  3,
+                                                                                     "data":  [
+                                                                                                  [
+                                                                                                      -0.28978414868843655,
+                                                                                                      -0.957092026489061,
+                                                                                                      0.0
+                                                                                                  ],
+                                                                                                  [
+                                                                                                      -0.9570920264890509,
+                                                                                                      0.2897841486884034,
+                                                                                                      0.0
+                                                                                                  ],
+                                                                                                  [
+                                                                                                      0.0,
+                                                                                                      0.0,
+                                                                                                      1.0
+                                                                                                  ]
+                                                                                              ]
+                                                                                 },
+                                                                           "singularValues":  [
+                                                                                                  3.302775637732015,
+                                                                                                  0.3027756377317278,
+                                                                                                  0.0
+                                                                                              ],
+                                                                           "rank":  2,
+                                                                           "conditionNumber":  "Infinity"
+                                                                       },
+                                                               "polar":  {
+                                                                             "status":  "OK",
+                                                                             "message":  "Polar [3x3, cond~1.00e+16]:\n  Norm residual: 0.00e+00 (EXCELLENT)\n  Elem residual: 0.00e+00 (EXCELLENT)\n  â Excellent numerical accuracy | Orthogonality check: Polar U orthogonality [3x3, cond~1.00e+00]:\n  Norm residual: 0.00e+00 (EXCELLENT)\n  Elem residual: 0.00e+00 (EXCELLENT)\n  â Excellent numerical accuracy",
+                                                                             "validation":  {
+                                                                                                "normLevel":  "EXCELLENT",
+                                                                                                "elementLevel":  "EXCELLENT",
+                                                                                                "normResidual":  0.0,
+                                                                                                "elementResidual":  0.0,
+                                                                                                "message":  "Polar [3x3, cond~1.00e+16]:\n  Norm residual: 0.00e+00 (EXCELLENT)\n  Elem residual: 0.00e+00 (EXCELLENT)\n  â Excellent numerical accuracy",
+                                                                                                "passes":  true,
+                                                                                                "shouldWarn":  false
+                                                                                            },
+                                                                             "u":  {
+                                                                                       "rows":  3,
+                                                                                       "cols":  3,
+                                                                                       "data":  [
+                                                                                                    [
+                                                                                                        1.0,
+                                                                                                        0.0,
+                                                                                                        0.0
+                                                                                                    ],
+                                                                                                    [
+                                                                                                        0.0,
+                                                                                                        1.0,
+                                                                                                        0.0
+                                                                                                    ],
+                                                                                                    [
+                                                                                                        0.0,
+                                                                                                        0.0,
+                                                                                                        1.0
+                                                                                                    ]
+                                                                                                ]
+                                                                                   },
+                                                                             "p":  {
+                                                                                       "rows":  3,
+                                                                                       "cols":  3,
+                                                                                       "data":  [
+                                                                                                    [
+                                                                                                        1.0,
+                                                                                                        3.0,
+                                                                                                        0.0
+                                                                                                    ],
+                                                                                                    [
+                                                                                                        0.0,
+                                                                                                        1.0,
+                                                                                                        0.0
+                                                                                                    ],
+                                                                                                    [
+                                                                                                        0.0,
+                                                                                                        0.0,
+                                                                                                        0.0
+                                                                                                    ]
+                                                                                                ]
+                                                                                   }
+                                                                         }
+                                                           },
+                                 "similarityAndSpectral":  {
+                                                               "hessenbergDecomposition":  {
+                                                                                               "status":  "OK",
+                                                                                               "message":  "Hessenberg [3x3, cond~1.00e+16]:\n  Norm residual: 0.00e+00 (EXCELLENT)\n  Elem residual: 0.00e+00 (EXCELLENT)\n  â Excellent numerical accuracy | Orthogonality check: Hessenberg orthogonality [3x3, cond~1.00e+00]:\n  Norm residual: 0.00e+00 (EXCELLENT)\n  Elem residual: 0.00e+00 (EXCELLENT)\n  â Excellent numerical accuracy",
+                                                                                               "validation":  {
+                                                                                                                  "normLevel":  "EXCELLENT",
+                                                                                                                  "elementLevel":  "EXCELLENT",
+                                                                                                                  "normResidual":  0.0,
+                                                                                                                  "elementResidual":  0.0,
+                                                                                                                  "message":  "Hessenberg [3x3, cond~1.00e+16]:\n  Norm residual: 0.00e+00 (EXCELLENT)\n  Elem residual: 0.00e+00 (EXCELLENT)\n  â Excellent numerical accuracy",
+                                                                                                                  "passes":  true,
+                                                                                                                  "shouldWarn":  false
+                                                                                                              },
+                                                                                               "h":  {
+                                                                                                         "rows":  3,
+                                                                                                         "cols":  3,
+                                                                                                         "data":  [
+                                                                                                                      [
+                                                                                                                          1.0,
+                                                                                                                          3.0,
+                                                                                                                          0.0
+                                                                                                                      ],
+                                                                                                                      [
+                                                                                                                          0.0,
+                                                                                                                          1.0,
+                                                                                                                          0.0
+                                                                                                                      ],
+                                                                                                                      [
+                                                                                                                          0.0,
+                                                                                                                          0.0,
+                                                                                                                          0.0
+                                                                                                                      ]
+                                                                                                                  ]
+                                                                                                     },
+                                                                                               "q":  {
+                                                                                                         "rows":  3,
+                                                                                                         "cols":  3,
+                                                                                                         "data":  [
+                                                                                                                      [
+                                                                                                                          1.0,
+                                                                                                                          0.0,
+                                                                                                                          0.0
+                                                                                                                      ],
+                                                                                                                      [
+                                                                                                                          0.0,
+                                                                                                                          1.0,
+                                                                                                                          0.0
+                                                                                                                      ],
+                                                                                                                      [
+                                                                                                                          0.0,
+                                                                                                                          0.0,
+                                                                                                                          1.0
+                                                                                                                      ]
+                                                                                                                  ]
+                                                                                                     }
+                                                                                           },
+                                                               "schurDecomposition":  {
+                                                                                          "status":  "OK",
+                                                                                          "message":  "Schur [3x3, cond~1.00e+16]:\n  Norm residual: 0.00e+00 (EXCELLENT)\n  Elem residual: 0.00e+00 (EXCELLENT)\n  â Excellent numerical accuracy | Orthogonality check: Schur orthogonality [3x3, cond~1.00e+00]:\n  Norm residual: 0.00e+00 (EXCELLENT)\n  Elem residual: 0.00e+00 (EXCELLENT)\n  â Excellent numerical accuracy",
+                                                                                          "validation":  {
+                                                                                                             "normLevel":  "EXCELLENT",
+                                                                                                             "elementLevel":  "EXCELLENT",
+                                                                                                             "normResidual":  0.0,
+                                                                                                             "elementResidual":  0.0,
+                                                                                                             "message":  "Schur [3x3, cond~1.00e+16]:\n  Norm residual: 0.00e+00 (EXCELLENT)\n  Elem residual: 0.00e+00 (EXCELLENT)\n  â Excellent numerical accuracy",
+                                                                                                             "passes":  true,
+                                                                                                             "shouldWarn":  false
+                                                                                                         },
+                                                                                          "t":  {
+                                                                                                    "rows":  3,
+                                                                                                    "cols":  3,
+                                                                                                    "data":  [
+                                                                                                                 [
+                                                                                                                     1.0,
+                                                                                                                     3.0,
+                                                                                                                     0.0
+                                                                                                                 ],
+                                                                                                                 [
+                                                                                                                     0.0,
+                                                                                                                     1.0,
+                                                                                                                     0.0
+                                                                                                                 ],
+                                                                                                                 [
+                                                                                                                     0.0,
+                                                                                                                     0.0,
+                                                                                                                     0.0
+                                                                                                                 ]
+                                                                                                             ]
+                                                                                                },
+                                                                                          "u":  {
+                                                                                                    "rows":  3,
+                                                                                                    "cols":  3,
+                                                                                                    "data":  [
+                                                                                                                 [
+                                                                                                                     1.0,
+                                                                                                                     0.0,
+                                                                                                                     0.0
+                                                                                                                 ],
+                                                                                                                 [
+                                                                                                                     0.0,
+                                                                                                                     1.0,
+                                                                                                                     0.0
+                                                                                                                 ],
+                                                                                                                 [
+                                                                                                                     0.0,
+                                                                                                                     0.0,
+                                                                                                                     1.0
+                                                                                                                 ]
+                                                                                                             ]
+                                                                                                },
+                                                                                          "eigenvalues":  [
+                                                                                                              {
+                                                                                                                  "real":  1.0,
+                                                                                                                  "imag":  0.0
+                                                                                                              },
+                                                                                                              {
+                                                                                                                  "real":  1.0,
+                                                                                                                  "imag":  0.0
+                                                                                                              },
+                                                                                                              {
+                                                                                                                  "real":  0.0,
+                                                                                                                  "imag":  0.0
+                                                                                                              }
+                                                                                                          ],
+                                                                                          "eigenvectors":  {
+                                                                                                               "rows":  3,
+                                                                                                               "cols":  3,
+                                                                                                               "data":  [
+                                                                                                                            [
+                                                                                                                                1.0,
+                                                                                                                                1.0,
+                                                                                                                                0.0
+                                                                                                                            ],
+                                                                                                                            [
+                                                                                                                                0.0,
+                                                                                                                                0.0,
+                                                                                                                                0.0
+                                                                                                                            ],
+                                                                                                                            [
+                                                                                                                                0.0,
+                                                                                                                                0.0,
+                                                                                                                                1.0
+                                                                                                                            ]
+                                                                                                                        ]
+                                                                                                           }
+                                                                                      },
+                                                               "diagonalization":  {
+                                                                                       "status":  "ERROR",
+                                                                                       "message":  "Eigenvector matrix is singular; matrix is not diagonalizable | Matrix is not invertible",
+                                                                                       "validation":  null
+                                                                                   },
+                                                               "symmetricSpectral":  {
+                                                                                         "status":  "ERROR",
+                                                                                         "message":  "Matrix is not symmetric",
+                                                                                         "validation":  null
+                                                                                     },
+                                                               "bidiagonalization":  {
+                                                                                         "status":  "OK",
+                                                                                         "message":  "Bidiagonalization [3x3, cond~1.00e+16]:\n  Norm residual: 0.00e+00 (EXCELLENT)\n  Elem residual: 0.00e+00 (EXCELLENT)\n  â Excellent numerical accuracy | Orthogonality check: Bidiagonal U orthogonality [3x3, cond~1.00e+00]:\n  Norm residual: 0.00e+00 (EXCELLENT)\n  Elem residual: 0.00e+00 (EXCELLENT)\n  â Excellent numerical accuracy | Orthogonality check: Bidiagonal V orthogonality [3x3, cond~1.00e+00]:\n  Norm residual: 0.00e+00 (EXCELLENT)\n  Elem residual: 0.00e+00 (EXCELLENT)\n  â Excellent numerical accuracy",
+                                                                                         "validation":  {
+                                                                                                            "normLevel":  "EXCELLENT",
+                                                                                                            "elementLevel":  "EXCELLENT",
+                                                                                                            "normResidual":  0.0,
+                                                                                                            "elementResidual":  0.0,
+                                                                                                            "message":  "Bidiagonalization [3x3, cond~1.00e+16]:\n  Norm residual: 0.00e+00 (EXCELLENT)\n  Elem residual: 0.00e+00 (EXCELLENT)\n  â Excellent numerical accuracy",
+                                                                                                            "passes":  true,
+                                                                                                            "shouldWarn":  false
+                                                                                                        },
+                                                                                         "u":  {
+                                                                                                   "rows":  3,
+                                                                                                   "cols":  3,
+                                                                                                   "data":  [
+                                                                                                                [
+                                                                                                                    1.0,
+                                                                                                                    0.0,
+                                                                                                                    0.0
+                                                                                                                ],
+                                                                                                                [
+                                                                                                                    0.0,
+                                                                                                                    1.0,
+                                                                                                                    0.0
+                                                                                                                ],
+                                                                                                                [
+                                                                                                                    0.0,
+                                                                                                                    0.0,
+                                                                                                                    1.0
+                                                                                                                ]
+                                                                                                            ]
+                                                                                               },
+                                                                                         "b":  {
+                                                                                                   "rows":  3,
+                                                                                                   "cols":  3,
+                                                                                                   "data":  [
+                                                                                                                [
+                                                                                                                    1.0,
+                                                                                                                    3.0,
+                                                                                                                    0.0
+                                                                                                                ],
+                                                                                                                [
+                                                                                                                    0.0,
+                                                                                                                    1.0,
+                                                                                                                    0.0
+                                                                                                                ],
+                                                                                                                [
+                                                                                                                    0.0,
+                                                                                                                    0.0,
+                                                                                                                    0.0
+                                                                                                                ]
+                                                                                                            ]
+                                                                                               },
+                                                                                         "v":  {
+                                                                                                   "rows":  3,
+                                                                                                   "cols":  3,
+                                                                                                   "data":  [
+                                                                                                                [
+                                                                                                                    1.0,
+                                                                                                                    0.0,
+                                                                                                                    0.0
+                                                                                                                ],
+                                                                                                                [
+                                                                                                                    0.0,
+                                                                                                                    1.0,
+                                                                                                                    0.0
+                                                                                                                ],
+                                                                                                                [
+                                                                                                                    0.0,
+                                                                                                                    0.0,
+                                                                                                                    1.0
+                                                                                                                ]
+                                                                                                            ]
+                                                                                               }
+                                                                                     }
+                                                           },
+                                 "derivedMatrices":  {
+                                                         "inverse":  {
+                                                                         "status":  "ERROR",
+                                                                         "message":  "Matrix inversion failed | Matrix is singular (determinant is 0) and cannot be inverted",
+                                                                         "validation":  null
+                                                                     },
+                                                         "rref":  {
+                                                                      "status":  "OK",
+                                                                      "message":  "Computed reduced row echelon form",
+                                                                      "validation":  null
+                                                                  },
+                                                         "rrefMatrix":  {
+                                                                            "rows":  3,
+                                                                            "cols":  3,
+                                                                            "data":  [
+                                                                                         [
+                                                                                             1.0,
+                                                                                             0.0,
+                                                                                             0.0
+                                                                                         ],
+                                                                                         [
+                                                                                             0.0,
+                                                                                             1.0,
+                                                                                             0.0
+                                                                                         ],
+                                                                                         [
+                                                                                             0.0,
+                                                                                             0.0,
+                                                                                             0.0
+                                                                                         ]
+                                                                                     ]
+                                                                        }
+                                                     },
+                                 "subspaceBases":  {
+                                                       "rowSpaceBasis":  {
+                                                                             "status":  "OK",
+                                                                             "message":  null,
+                                                                             "vectors":  [
+                                                                                             [
+                                                                                                 0.31622776601683794,
+                                                                                                 0.9486832980505138,
+                                                                                                 0.0
+                                                                                             ],
+                                                                                             [
+                                                                                                 -0.9486832980505138,
+                                                                                                 0.3162277660168382,
+                                                                                                 0.0
+                                                                                             ]
+                                                                                         ]
+                                                                         },
+                                                       "columnSpaceBasis":  {
+                                                                                "status":  "OK",
+                                                                                "message":  null,
+                                                                                "vectors":  [
+                                                                                                [
+                                                                                                    1.0,
+                                                                                                    0.0,
+                                                                                                    0.0
+                                                                                                ],
+                                                                                                [
+                                                                                                    0.0,
+                                                                                                    1.0,
+                                                                                                    0.0
+                                                                                                ]
+                                                                                            ]
+                                                                            },
+                                                       "nullSpaceBasis":  {
+                                                                              "status":  "OK",
+                                                                              "message":  null,
+                                                                              "vectors":  [
+                                                                                              [
+                                                                                                  0.0,
+                                                                                                  0.0,
+                                                                                                  1.0
+                                                                                              ]
+                                                                                          ]
+                                                                          }
+                                                   }
+                             }
+}

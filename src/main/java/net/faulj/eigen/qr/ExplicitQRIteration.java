@@ -48,7 +48,10 @@ import java.util.List;
  */
 public class ExplicitQRIteration {
     private static final int MAX_ITERATIONS = 1000;
-    private static final double EPSILON = 1e-12;
+    // Use a slightly looser deflation/convergence tolerance to avoid
+    // losing very small but genuine eigenvalues (e.g., 1e-10) in medium-sized
+    // explicit QR runs. This aligns with the global Tolerance default.
+    private static final double EPSILON = 1e-10;
 
     /**
      * Computes the Real Schur Form T and unitary matrix Q such that A = Q * T * Q^T.

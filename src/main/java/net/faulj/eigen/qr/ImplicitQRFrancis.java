@@ -36,7 +36,8 @@ public class ImplicitQRFrancis {
 
     private static final double EPSILON = 1e-12;
     private static final int MAX_ITERATIONS_PER_EIGENVALUE = 30;
-    private static final int SMALL_MATRIX_THRESHOLD = 10;
+    // Prefer implicit Francis for n >= 10; treat strictly smaller sizes as "small"
+    private static final int SMALL_MATRIX_THRESHOLD = 9;
     private static final int MEDIUM_MATRIX_THRESHOLD = 30;
 
     /**

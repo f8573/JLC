@@ -1,0 +1,135 @@
+import React from 'react'
+
+function focusCell(r, c) {
+  const el = document.querySelector(`[data-cell][data-row="${r}"][data-col="${c}"]`)
+  if (el) {
+    el.focus()
+    return el
+  }
+  return null
+}
+
+export default function MatrixCell({ value, onChange, rowIndex, colIndex, rows, cols, onAnalyze }) {
+  const allowed = /[0-9.\-]/
+
+  function sanitizeValue(raw) {
+    let val = (raw || '').split('').filter((ch) => allowed.test(ch)).join('')
+    if (val.startsWith('-')) {
+      val = '-' + val.slice(1).replace(/-/g, '')
+    } else {
+      val = val.replace(/-/g, '')
+    }
+    return val
+  }
+
+  function handleChange(e) {
+    const cleaned = sanitizeValue(e.target.value)
+    if (cleaned !== e.target.value) {
+      e.target.value = cleaned
+    }
+    onChange(rowIndex, colIndex, cleaned)
+  }
+
+  function handleKeyDown(e) {
+    const key = e.key
+    const el = e.target
+    const selStart = el.selectionStart ?? 0
+    const selEnd = el.selectionEnd ?? 0
+    const len = (el.value || '').length
+
+    if (key === 'Enter') {
+      e.preventDefault()
+      if (onAnalyze) onAnalyze()
+      return
+    }
+
+    if (key === '-') {
+      // only allow inserting '-' at leading position if not already present
+      if (!(selStart === 0 && selEnd === 0 && !(el.value || '').startsWith('-'))) {
+        e.preventDefault()
+      }
+      return
+    }
+
+    if (key === 'ArrowLeft') {
+      if (selStart === 0 && selEnd === 0) {
+        e.preventDefault()
+        if (colIndex > 0) {
+          const target = focusCell(rowIndex, colIndex - 1)
+          if (target) target.setSelectionRange((target.value||'').length, (target.value||'').length)
+        } else if (rowIndex > 0) {
+          const target = focusCell(rowIndex - 1, cols - 1)
+          if (target) target.setSelectionRange((target.value||'').length, (target.value||'').length)
+        }
+      }
+      return
+    }
+
+    if (key === 'ArrowRight') {
+      if (selStart === len && selEnd === len) {
+        e.preventDefault()
+        if (colIndex < cols - 1) {
+          const target = focusCell(rowIndex, colIndex + 1)
+          if (target) target.setSelectionRange(0, 0)
+        } else if (rowIndex < rows - 1) {
+          const target = focusCell(rowIndex + 1, 0)
+          if (target) target.setSelectionRange(0, 0)
+        }
+      }
+      return
+    }
+
+    if (key === 'ArrowUp') {
+      e.preventDefault()
+      if (rowIndex > 0) {
+        const target = focusCell(rowIndex - 1, Math.min(colIndex, cols - 1))
+        if (target) {
+          const pos = Math.min(selStart, (target.value||'').length)
+          target.setSelectionRange(pos, pos)
+        }
+      }
+      return
+    }
+
+    if (key === 'ArrowDown') {
+      e.preventDefault()
+      if (rowIndex < rows - 1) {
+        const target = focusCell(rowIndex + 1, Math.min(colIndex, cols - 1))
+        if (target) {
+          const pos = Math.min(selStart, (target.value||'').length)
+          target.setSelectionRange(pos, pos)
+        }
+      }
+      return
+    }
+
+    // filter other printable characters
+    if (key.length === 1 && !allowed.test(key) && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault()
+      return
+    }
+  }
+
+  function handlePaste(e) {
+    e.preventDefault()
+    const text = e.clipboardData.getData('text') || ''
+    const newValRaw = (value || '').slice(0, (e.target.selectionStart||0)) + text + (value || '').slice((e.target.selectionEnd||0))
+    const newVal = sanitizeValue(newValRaw)
+    onChange(rowIndex, colIndex, newVal)
+  }
+
+  return (
+    <input
+      data-cell
+      data-row={rowIndex}
+      data-col={colIndex}
+      className="w-20 h-20 bg-white border border-border-color rounded-lg text-center text-2xl font-mono text-slate-900 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all shadow-sm"
+      type="text"
+      inputMode="decimal"
+      value={value}
+      onChange={handleChange}
+      onKeyDown={handleKeyDown}
+      onPaste={handlePaste}
+    />
+  )
+}

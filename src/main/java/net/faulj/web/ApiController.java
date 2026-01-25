@@ -1,19 +1,39 @@
 package net.faulj.web;
 
-import net.faulj.matrix.Matrix;
-import net.faulj.visualizer.MatrixLatexExporter;
-import net.faulj.eigen.qr.ExplicitQRIteration;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.bind.annotation.CrossOrigin;
-
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import net.faulj.core.DiagnosticMetrics;
+import net.faulj.core.DiagnosticMetrics.DiagnosticItem;
+import net.faulj.core.DiagnosticMetrics.MatrixDiagnostics;
+import net.faulj.eigen.qr.ExplicitQRIteration;
+import net.faulj.eigen.schur.RealSchurDecomposition;
+import net.faulj.eigen.schur.SchurEigenExtractor;
+import net.faulj.matrix.Matrix;
+import net.faulj.matrix.MatrixAccuracyValidator;
+import net.faulj.scalar.Complex;
+import net.faulj.vector.Vector;
+import net.faulj.visualizer.MatrixLatexExporter;
 
 @RestController
 @CrossOrigin(origins = "http://localhost:5173")
 public class ApiController {
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @GetMapping("/api/ping")
     public Map<String, String> ping() {
@@ -47,4 +67,590 @@ public class ApiController {
         );
     }
 
+    @PostMapping("/api/diagnostics")
+    public ResponseEntity<Map<String, Object>> diagnostics(@RequestBody Map<String, Object> payload) {
+        Object matrixObj = payload == null ? null : payload.get("matrix");
+        if (matrixObj == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "matrix field is required"));
+        }
+        double[][] data = objectMapper.convertValue(matrixObj, double[][].class);
+        Matrix A = new Matrix(data);
+        MatrixDiagnostics diagnostics = DiagnosticMetrics.analyze(A);
+        return ResponseEntity.ok(buildDiagnosticsResponse(diagnostics));
+    }
+
+    @GetMapping("/api/diagnostics")
+    public ResponseEntity<Map<String, Object>> diagnosticsGet(@RequestParam("matrix") String matrixJson) {
+        if (matrixJson == null || matrixJson.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "matrix query param is required"));
+        }
+        try {
+            double[][] data = objectMapper.readValue(matrixJson, double[][].class);
+            Matrix A = new Matrix(data);
+            MatrixDiagnostics diagnostics = DiagnosticMetrics.analyze(A);
+            return ResponseEntity.ok(buildDiagnosticsResponse(diagnostics));
+        } catch (JsonProcessingException ex) {
+            return ResponseEntity.badRequest().body(Map.of("error", "invalid matrix JSON", "details", ex.getMessage()));
+        }
+    }
+
+    @PostMapping("/api/debug/schur")
+    public ResponseEntity<Map<String, Object>> debugSchur(@RequestBody Map<String, Object> payload) {
+        Object matrixObj = payload == null ? null : payload.get("matrix");
+        if (matrixObj == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "matrix field is required"));
+        }
+        double[][] data = objectMapper.convertValue(matrixObj, double[][].class);
+        Matrix A = new Matrix(data);
+
+        try {
+            net.faulj.decomposition.result.SchurResult schur = RealSchurDecomposition.decompose(A);
+
+            // Re-run extractor on returned T/U to obtain eigenvectors and eigenvalues via same codepath
+            SchurEigenExtractor extractor = new SchurEigenExtractor(schur.getT(), schur.getU());
+
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("t", matrixToMap(schur.getT()));
+            out.put("u", matrixToMap(schur.getU()));
+            out.put("eigenvalues", toComplexList(extractor.getEigenvalues()));
+
+            // Also provide primitive arrays (real/imag) and block detection
+            net.faulj.scalar.Complex[] ev = extractor.getEigenvalues();
+            double[] re = new double[ev.length];
+            double[] im = new double[ev.length];
+            for (int i = 0; i < ev.length; i++) {
+                re[i] = ev[i].real;
+                im[i] = ev[i].imag;
+            }
+            out.put("eigenvaluesReal", re);
+            out.put("eigenvaluesImag", im);
+
+            // Block detection on T (bottom-up) to show 1x1 vs 2x2 blocks
+            Matrix T = schur.getT();
+            int n = T.getRowCount();
+            double tol = net.faulj.core.Tolerance.get();
+            List<Map<String, Object>> blocks = new ArrayList<>();
+            int j = n - 1;
+            while (j >= 0) {
+                if (j == 0 || Math.abs(T.get(j, j - 1)) <= tol) {
+                    Map<String, Object> b = new LinkedHashMap<>();
+                    b.put("start", j);
+                    b.put("end", j);
+                    b.put("size", 1);
+                    b.put("type", "1x1");
+                    blocks.add(0, b);
+                    j--;
+                } else {
+                    int i0 = j - 1;
+                    Map<String, Object> b = new LinkedHashMap<>();
+                    b.put("start", i0);
+                    b.put("end", j);
+                    b.put("size", 2);
+                    b.put("type", "2x2");
+                    blocks.add(0, b);
+                    j -= 2;
+                }
+            }
+            out.put("blocks", blocks);
+
+            return ResponseEntity.ok(out);
+        } catch (Exception ex) {
+            return ResponseEntity.status(500).body(Map.of("error", "exception during schur debug", "details", ex.getMessage()));
+        }
+    }
+
+    private Map<String, Object> buildDiagnosticsResponse(MatrixDiagnostics diagnostics) {
+        LinkedHashMap<String, Object> out = new LinkedHashMap<>();
+
+        // 1. Basic Properties
+        LinkedHashMap<String, Object> basic = new LinkedHashMap<>();
+
+        LinkedHashMap<String, Object> dimensions = new LinkedHashMap<>();
+        dimensions.put("rows", diagnostics.getRows());
+        dimensions.put("cols", diagnostics.getCols());
+        dimensions.put("columns", diagnostics.getColumns());
+        dimensions.put("square", diagnostics.isSquare());
+        dimensions.put("real", diagnostics.isReal());
+        dimensions.put("domain", diagnostics.getDomain());
+        basic.put("dimensionsAndDomain", dimensions);
+
+        LinkedHashMap<String, Object> norms = new LinkedHashMap<>();
+        norms.put("norm1", diagnostics.getNorm1());
+        norms.put("normInf", diagnostics.getNormInf());
+        norms.put("frobeniusNorm", diagnostics.getFrobeniusNorm());
+        norms.put("operatorNorm", diagnostics.getOperatorNorm());
+        norms.put("density", diagnostics.getDensity());
+        norms.put("sparse", diagnostics.getSparse());
+        basic.put("normsAndMagnitude", norms);
+
+        LinkedHashMap<String, Object> rank = new LinkedHashMap<>();
+        rank.put("rank", diagnostics.getRank());
+        rank.put("nullity", diagnostics.getNullity());
+        rank.put("fullRank", diagnostics.getFullRank());
+        rank.put("rankDeficient", diagnostics.getRankDeficient());
+        basic.put("rankAndNullity", rank);
+
+        LinkedHashMap<String, Object> conditioning = new LinkedHashMap<>();
+        conditioning.put("invertible", diagnostics.getInvertible());
+        conditioning.put("singular", diagnostics.getSingular());
+        conditioning.put("leftInvertible", diagnostics.getLeftInvertible());
+        conditioning.put("rightInvertible", diagnostics.getRightInvertible());
+        conditioning.put("conditionNumber", diagnostics.getConditionNumber());
+        conditioning.put("reciprocalConditionNumber", diagnostics.getReciprocalConditionNumber());
+        conditioning.put("wellConditioned", diagnostics.getWellConditioned());
+        conditioning.put("illConditioned", diagnostics.getIllConditioned());
+        conditioning.put("nearlySingular", diagnostics.getNearlySingular());
+        basic.put("invertibilityAndConditioning", conditioning);
+
+        LinkedHashMap<String, Object> scalar = new LinkedHashMap<>();
+        scalar.put("trace", diagnostics.getTrace());
+        scalar.put("determinant", diagnostics.getDeterminant());
+        basic.put("scalarInvariants", scalar);
+
+        LinkedHashMap<String, Object> rowred = new LinkedHashMap<>();
+        rowred.put("rowEchelon", diagnostics.getRowEchelon());
+        rowred.put("reducedRowEchelon", diagnostics.getReducedRowEchelon());
+        basic.put("rowReduction", rowred);
+
+        LinkedHashMap<String, Object> raw = new LinkedHashMap<>();
+        raw.put("matrixData", diagnostics.getMatrixData());
+        raw.put("matrixImagData", diagnostics.getMatrixImagData());
+        basic.put("rawData", raw);
+
+        out.put("basicProperties", basic);
+
+        // 2. Spectral Analysis
+        LinkedHashMap<String, Object> spectral = new LinkedHashMap<>();
+
+        LinkedHashMap<String, Object> eigenInfo = new LinkedHashMap<>();
+        eigenInfo.put("eigenvalues", toComplexList(diagnostics.getEigenvalues()));
+        eigenInfo.put("eigenvectors", matrixToMap(diagnostics.getEigenvectors()));
+        eigenInfo.put("eigenspace", matrixToMap(diagnostics.getEigenspace()));
+
+        // Per-eigenvalue aggregated information: value, algebraicMultiplicity, geometricMultiplicity,
+        // eigenspace (basis + dimension), representative eigenvector
+        List<Map<String, Object>> perEigen = new ArrayList<>();
+        List<DiagnosticItem<Set<Vector>>> spaceList = diagnostics.getEigenspaceList();
+        List<DiagnosticItem<Set<Vector>>> basisList = diagnostics.getEigenbasisList();
+        Complex[] ev = diagnostics.getEigenvalues();
+        int[] alg = diagnostics.getAlgebraicMultiplicity();
+        int[] geom = diagnostics.getGeometricMultiplicity();
+        int groups = spaceList == null ? 0 : spaceList.size();
+        for (int i = 0; i < groups; i++) {
+            Map<String, Object> info = new LinkedHashMap<>();
+            DiagnosticItem<Set<Vector>> spaceItem = spaceList.get(i);
+            // determine original eigenvalue index from diagnostic item name (e.g. "eigenspace-2")
+            int origIndex = -1;
+            if (spaceItem != null && spaceItem.getName() != null && spaceItem.getName().contains("-")) {
+                try {
+                    String[] parts = spaceItem.getName().split("-");
+                    origIndex = Integer.parseInt(parts[parts.length - 1]);
+                } catch (Exception ex) {
+                    origIndex = -1;
+                }
+            }
+            // eigenvalue
+            if (ev != null && origIndex >= 0 && origIndex < ev.length) {
+                LinkedHashMap<String, Object> v = new LinkedHashMap<>();
+                v.put("real", ev[origIndex].real);
+                v.put("imag", ev[origIndex].imag);
+                info.put("eigenvalue", v);
+            }
+            // multiplicities
+            info.put("algebraicMultiplicity", alg != null && origIndex >= 0 && origIndex < alg.length ? alg[origIndex] : null);
+            info.put("geometricMultiplicity", geom != null && origIndex >= 0 && origIndex < geom.length ? geom[origIndex] : null);
+            // dimension is the geometric multiplicity (dimension of eigenspace)
+            info.put("dimension", geom != null && origIndex >= 0 && origIndex < geom.length ? geom[origIndex] : null);
+
+            // eigenspace basis and dimension
+            Map<String, Object> spaceMap = new LinkedHashMap<>();
+            if (spaceItem != null && spaceItem.getValue() != null) {
+                List<double[]> vectors = new ArrayList<>();
+                for (Vector v : spaceItem.getValue()) {
+                    vectors.add(v.getData());
+                }
+                spaceMap.put("vectors", vectors);
+                spaceMap.put("dimension", spaceItem.getValue().size());
+            } else {
+                spaceMap.put("vectors", null);
+                spaceMap.put("dimension", 0);
+            }
+            info.put("eigenspace", spaceMap);
+
+            // eigenbasis (set of eigenvectors) and representative eigenvector
+            if (basisList != null && i < basisList.size()) {
+                DiagnosticItem<Set<Vector>> basisItem = basisList.get(i);
+                if (basisItem != null && basisItem.getValue() != null && !basisItem.getValue().isEmpty()) {
+                    List<double[]> basisVectors = new ArrayList<>();
+                    for (Vector v : basisItem.getValue()) basisVectors.add(v.getData());
+                    info.put("eigenbasis", Map.of("vectors", basisVectors, "dimension", basisVectors.size()));
+                    // representative is first vector
+                    info.put("representativeEigenvector", basisVectors.get(0));
+                } else {
+                    info.put("eigenbasis", null);
+                    info.put("representativeEigenvector", null);
+                }
+            } else {
+                info.put("eigenbasis", null);
+                info.put("representativeEigenvector", null);
+            }
+
+            perEigen.add(info);
+        }
+        eigenInfo.put("eigenInformationPerValue", perEigen);
+        spectral.put("eigenInformation", eigenInfo);
+
+        LinkedHashMap<String, Object> multiplicity = new LinkedHashMap<>();
+        multiplicity.put("algebraicMultiplicity", diagnostics.getAlgebraicMultiplicity());
+        multiplicity.put("geometricMultiplicity", diagnostics.getGeometricMultiplicity());
+        multiplicity.put("characteristicPolynomial", toComplexList(diagnostics.getCharacteristicPolynomial()));
+        multiplicity.put("characteristicPolynomials", toComplexList(diagnostics.getCharacteristicPolynomials()));
+        spectral.put("multiplicityAndPolynomials", multiplicity);
+
+        LinkedHashMap<String, Object> spectralVals = new LinkedHashMap<>();
+        spectralVals.put("singularValues", diagnostics.getSingularValues());
+        spectralVals.put("spectralRadius", diagnostics.getSpectralRadius());
+        spectral.put("spectralRadiiAndValues", spectralVals);
+
+        LinkedHashMap<String, Object> diagInfo = new LinkedHashMap<>();
+        diagInfo.put("defective", diagnostics.getDefective());
+        diagInfo.put("diagonalizable", diagnostics.getDiagonalizable());
+        spectral.put("diagonalizationAndDefectivity", diagInfo);
+
+        LinkedHashMap<String, Object> normality = new LinkedHashMap<>();
+        normality.put("normal", diagnostics.getNormal());
+        normality.put("nonNormal", diagnostics.getNonNormal());
+        normality.put("orthonormal", diagnostics.getOrthonormal());
+        normality.put("orthogonal", diagnostics.getOrthogonal());
+        normality.put("unitary", diagnostics.getUnitary());
+        spectral.put("normalityAndOrthogonality", normality);
+
+        spectral.put("definiteness", diagnostics.getDefiniteness());
+        spectral.put("spectralClass", diagnostics.getSpectral());
+
+        out.put("spectralAnalysis", spectral);
+
+        // 3. Structural Properties
+        LinkedHashMap<String, Object> structural = new LinkedHashMap<>();
+
+        LinkedHashMap<String, Object> shape = new LinkedHashMap<>();
+        shape.put("zero", diagnostics.getZero());
+        shape.put("identity", diagnostics.getIdentity());
+        shape.put("scalar", diagnostics.getScalar());
+        shape.put("diagonal", diagnostics.getDiagonal());
+        shape.put("bidiagonal", diagnostics.getBidiagonal());
+        shape.put("tridiagonal", diagnostics.getTridiagonal());
+        shape.put("upperTriangular", diagnostics.getUpperTriangular());
+        shape.put("lowerTriangular", diagnostics.getLowerTriangular());
+        shape.put("upperHessenberg", diagnostics.getUpperHessenberg());
+        shape.put("lowerHessenberg", diagnostics.getLowerHessenberg());
+        shape.put("hessenberg", diagnostics.getHessenberg());
+        shape.put("schur", diagnostics.getSchur());
+        shape.put("block", diagnostics.getBlock());
+        shape.put("companion", diagnostics.getCompanion());
+        structural.put("shapeAndCanonicalForms", shape);
+
+        LinkedHashMap<String, Object> symmetry = new LinkedHashMap<>();
+        symmetry.put("symmetric", diagnostics.isSymmetric());
+        symmetry.put("symmetryError", diagnostics.getSymmetryError());
+        symmetry.put("skewSymmetric", diagnostics.getSkewSymmetric());
+        symmetry.put("hermitian", diagnostics.getHermitian());
+        symmetry.put("persymmetric", diagnostics.getPersymmetric());
+        symmetry.put("antidiagonal", diagnostics.getAntidiagonal());
+        structural.put("symmetryAndPatterns", symmetry);
+
+        LinkedHashMap<String, Object> algebraic = new LinkedHashMap<>();
+        algebraic.put("idempotent", diagnostics.getIdempotent());
+        algebraic.put("involutory", diagnostics.getInvolutory());
+        algebraic.put("nilpotent", diagnostics.getNilpotent());
+        structural.put("algebraicBehavior", algebraic);
+
+        LinkedHashMap<String, Object> geomTransform = new LinkedHashMap<>();
+        geomTransform.put("rotation", diagnostics.getRotation());
+        geomTransform.put("reflection", diagnostics.getReflection());
+        structural.put("geometricTransformations", geomTransform);
+
+        out.put("structuralProperties", structural);
+
+        // 4. Matrix Decompositions
+        LinkedHashMap<String, Object> decomp = new LinkedHashMap<>();
+
+        LinkedHashMap<String, Object> primary = new LinkedHashMap<>();
+        primary.put("qr", qrToMap(diagnostics.getQr()));
+        primary.put("lu", luToMap(diagnostics.getLu()));
+        primary.put("cholesky", choleskyToMap(diagnostics.getCholesky()));
+        primary.put("svd", svdToMap(diagnostics.getSvd()));
+        primary.put("polar", polarToMap(diagnostics.getPolar()));
+        decomp.put("primaryDecompositions", primary);
+
+        LinkedHashMap<String, Object> similarity = new LinkedHashMap<>();
+        similarity.put("hessenbergDecomposition", hessenbergToMap(diagnostics.getHessenbergDecomposition()));
+        similarity.put("schurDecomposition", schurToMap(diagnostics.getSchurDecomposition()));
+        similarity.put("diagonalization", diagonalizationToMap(diagnostics.getDiagonalization()));
+        similarity.put("symmetricSpectral", spectralToMap(diagnostics.getSymmetricSpectral()));
+        similarity.put("bidiagonalization", bidiagonalizationToMap(diagnostics.getBidiagonalization()));
+        decomp.put("similarityAndSpectral", similarity);
+
+        LinkedHashMap<String, Object> derived = new LinkedHashMap<>();
+        derived.put("inverse", diagnosticItemToMap(diagnostics.getInverse()));
+        if (diagnostics.getInverse() != null && diagnostics.getInverse().getValue() != null) {
+            derived.put("inverseMatrix", matrixToMap((Matrix) diagnostics.getInverse().getValue()));
+        }
+        derived.put("rref", diagnosticItemToMap(diagnostics.getRref()));
+        if (diagnostics.getRref() != null && diagnostics.getRref().getValue() != null) {
+            derived.put("rrefMatrix", matrixToMap((Matrix) diagnostics.getRref().getValue()));
+        }
+        decomp.put("derivedMatrices", derived);
+
+        LinkedHashMap<String, Object> subspaces = new LinkedHashMap<>();
+        subspaces.put("rowSpaceBasis", basisToMap(diagnostics.getRowSpaceBasis()));
+        subspaces.put("columnSpaceBasis", basisToMap(diagnostics.getColumnSpaceBasis()));
+        subspaces.put("nullSpaceBasis", basisToMap(diagnostics.getNullSpaceBasis()));
+        decomp.put("subspaceBases", subspaces);
+
+        out.put("matrixDecompositions", decomp);
+
+        return out;
+    }
+
+    private Map<String, Object> diagnosticItemToMap(DiagnosticItem<?> item) {
+        if (item == null) {
+            return null;
+        }
+        LinkedHashMap<String, Object> out = new LinkedHashMap<>();
+        out.put("status", item.getStatus().name());
+        out.put("message", item.getMessage());
+        out.put("validation", validationToMap(item.getValidation()));
+        return out;
+    }
+
+    private Map<String, Object> validationToMap(MatrixAccuracyValidator.ValidationResult validation) {
+        if (validation == null) {
+            return null;
+        }
+        LinkedHashMap<String, Object> out = new LinkedHashMap<>();
+        out.put("normLevel", validation.normLevel.name());
+        out.put("elementLevel", validation.elementLevel.name());
+        out.put("normResidual", validation.normResidual);
+        out.put("elementResidual", validation.elementResidual);
+        out.put("message", validation.message);
+        out.put("passes", validation.passes);
+        out.put("shouldWarn", validation.shouldWarn);
+        return out;
+    }
+
+    private Map<String, Object> basisToMap(DiagnosticItem<Set<Vector>> item) {
+        if (item == null) {
+            return null;
+        }
+        LinkedHashMap<String, Object> out = new LinkedHashMap<>();
+        out.put("status", item.getStatus().name());
+        out.put("message", item.getMessage());
+        if (item.getValue() != null) {
+            List<double[]> vectors = new ArrayList<>();
+            for (Vector v : item.getValue()) {
+                vectors.add(v.getData());
+            }
+            out.put("vectors", vectors);
+        }
+        return out;
+    }
+
+    private Map<String, Object> qrToMap(DiagnosticItem<?> item) {
+        if (item == null) {
+            return null;
+        }
+        LinkedHashMap<String, Object> out = new LinkedHashMap<>(diagnosticItemToMap(item));
+        Object value = item.getValue();
+        if (value instanceof net.faulj.decomposition.result.QRResult qr) {
+            out.put("q", matrixToMap(qr.getQ()));
+            out.put("r", matrixToMap(qr.getR()));
+        }
+        return out;
+    }
+
+    private Map<String, Object> luToMap(DiagnosticItem<?> item) {
+        if (item == null) {
+            return null;
+        }
+        LinkedHashMap<String, Object> out = new LinkedHashMap<>(diagnosticItemToMap(item));
+        Object value = item.getValue();
+        if (value instanceof net.faulj.decomposition.result.LUResult lu) {
+            out.put("l", matrixToMap(lu.getL()));
+            out.put("u", matrixToMap(lu.getU()));
+            out.put("p", matrixToMap(lu.getP().asMatrix()));
+            out.put("singular", lu.isSingular());
+            out.put("determinant", lu.getDeterminant());
+        }
+        return out;
+    }
+
+    private Map<String, Object> choleskyToMap(DiagnosticItem<?> item) {
+        if (item == null) {
+            return null;
+        }
+        LinkedHashMap<String, Object> out = new LinkedHashMap<>(diagnosticItemToMap(item));
+        Object value = item.getValue();
+        if (value instanceof net.faulj.decomposition.result.CholeskyResult chol) {
+            out.put("l", matrixToMap(chol.getL()));
+            out.put("u", matrixToMap(chol.getU()));
+            out.put("determinant", chol.getDeterminant());
+        }
+        return out;
+    }
+
+    private Map<String, Object> svdToMap(DiagnosticItem<?> item) {
+        if (item == null) {
+            return null;
+        }
+        LinkedHashMap<String, Object> out = new LinkedHashMap<>(diagnosticItemToMap(item));
+        Object value = item.getValue();
+        if (value instanceof net.faulj.decomposition.result.SVDResult svd) {
+            out.put("u", matrixToMap(svd.getU()));
+            out.put("sigma", matrixToMap(svd.getSigma()));
+            out.put("v", matrixToMap(svd.getV()));
+            out.put("singularValues", svd.getSingularValues());
+            out.put("rank", svd.getRank(1e-12));
+            out.put("conditionNumber", svd.getConditionNumber());
+        }
+        return out;
+    }
+
+    private Map<String, Object> hessenbergToMap(DiagnosticItem<?> item) {
+        if (item == null) {
+            return null;
+        }
+        LinkedHashMap<String, Object> out = new LinkedHashMap<>(diagnosticItemToMap(item));
+        Object value = item.getValue();
+        if (value instanceof net.faulj.decomposition.result.HessenbergResult hess) {
+            out.put("h", matrixToMap(hess.getH()));
+            out.put("q", matrixToMap(hess.getQ()));
+        }
+        return out;
+    }
+
+    private Map<String, Object> schurToMap(DiagnosticItem<?> item) {
+        if (item == null) {
+            return null;
+        }
+        LinkedHashMap<String, Object> out = new LinkedHashMap<>(diagnosticItemToMap(item));
+        Object value = item.getValue();
+        if (value instanceof net.faulj.decomposition.result.SchurResult schur) {
+            out.put("t", matrixToMap(schur.getT()));
+            out.put("u", matrixToMap(schur.getU()));
+            out.put("eigenvalues", toComplexList(schur.getEigenvalues()));
+            out.put("eigenvectors", matrixToMap(schur.getEigenvectors()));
+        }
+        return out;
+    }
+
+    private Map<String, Object> diagonalizationToMap(DiagnosticItem<?> item) {
+        if (item == null) {
+            return null;
+        }
+        LinkedHashMap<String, Object> out = new LinkedHashMap<>(diagnosticItemToMap(item));
+        Object value = item.getValue();
+        if (value instanceof net.faulj.eigen.Diagonalization diag) {
+            out.put("d", matrixToMap(diag.getD()));
+            out.put("p", matrixToMap(diag.getP()));
+            out.put("eigenvalues", toComplexList(diag.getEigenvalues()));
+            // Compute P inverse
+            Matrix p = diag.getP();
+            if (p != null) {
+                try {
+                    Matrix pInverse = net.faulj.inverse.LUInverse.compute(p);
+                    out.put("pInverse", matrixToMap(pInverse));
+                } catch (Exception e) {
+                    // Log the error but still provide structure
+                    System.err.println("Failed to compute P inverse: " + e.getMessage());
+                    e.printStackTrace();
+                    out.put("pInverse", null);
+                    out.put("pInverseError", e.getMessage());
+                }
+            } else {
+                out.put("pInverse", null);
+            }
+        }
+        return out;
+    }
+
+    private Map<String, Object> spectralToMap(DiagnosticItem<?> item) {
+        if (item == null) {
+            return null;
+        }
+        LinkedHashMap<String, Object> out = new LinkedHashMap<>(diagnosticItemToMap(item));
+        Object value = item.getValue();
+        if (value instanceof net.faulj.symmetric.SpectralDecomposition spectral) {
+            out.put("q", matrixToMap(spectral.getEigenvectors()));
+            out.put("eigenvalues", spectral.getEigenvalues());
+        }
+        return out;
+    }
+
+    private Map<String, Object> bidiagonalizationToMap(DiagnosticItem<?> item) {
+        if (item == null) {
+            return null;
+        }
+        LinkedHashMap<String, Object> out = new LinkedHashMap<>(diagnosticItemToMap(item));
+        Object value = item.getValue();
+        if (value instanceof net.faulj.decomposition.result.BidiagonalizationResult bidiag) {
+            out.put("u", matrixToMap(bidiag.getU()));
+            out.put("b", matrixToMap(bidiag.getB()));
+            out.put("v", matrixToMap(bidiag.getV()));
+        }
+        return out;
+    }
+
+    private Map<String, Object> polarToMap(DiagnosticItem<?> item) {
+        if (item == null) {
+            return null;
+        }
+        LinkedHashMap<String, Object> out = new LinkedHashMap<>(diagnosticItemToMap(item));
+        Object value = item.getValue();
+        if (value instanceof net.faulj.decomposition.result.PolarResult polar) {
+            out.put("u", matrixToMap(polar.getU()));
+            out.put("p", matrixToMap(polar.getP()));
+        }
+        return out;
+    }
+
+    private Map<String, Object> matrixToMap(Matrix matrix) {
+        if (matrix == null) {
+            return null;
+        }
+        LinkedHashMap<String, Object> out = new LinkedHashMap<>();
+        int rows = matrix.getRowCount();
+        int cols = matrix.getColumnCount();
+        out.put("rows", rows);
+        out.put("cols", cols);
+        double[][] data = new double[rows][cols];
+        double[][] imag = matrix.hasImagData() ? new double[rows][cols] : null;
+        for (int i = 0; i < rows; i++) {
+            for (int j = 0; j < cols; j++) {
+                data[i][j] = matrix.get(i, j);
+                if (imag != null) {
+                    imag[i][j] = matrix.getImag(i, j);
+                }
+            }
+        }
+        out.put("data", data);
+        if (imag != null) {
+            out.put("imag", imag);
+        }
+        return out;
+    }
+
+    private List<Map<String, Object>> toComplexList(net.faulj.scalar.Complex[] eigenvalues) {
+        if (eigenvalues == null) {
+            return null;
+        }
+        List<Map<String, Object>> list = new ArrayList<>();
+        for (net.faulj.scalar.Complex c : eigenvalues) {
+            LinkedHashMap<String, Object> item = new LinkedHashMap<>();
+            item.put("real", c.real);
+            item.put("imag", c.imag);
+            list.add(item);
+        }
+        return list;
+    }
 }

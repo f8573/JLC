@@ -1,70 +1,43 @@
-import React, {useEffect, useState} from 'react'
-import katex from 'katex/dist/katex.mjs'
-import 'katex/dist/katex.min.css'
+﻿import React, { useEffect, useState } from 'react'
+import MainPage from './pages/MainPage'
+import MatrixBasicPage from './pages/MatrixBasicPage'
+import MatrixSpectralPage from './pages/MatrixSpectralPage'
+import MatrixDecomposePage from './pages/MatrixDecomposePage'
+import MatrixStructurePage from './pages/MatrixStructurePage'
+import MatrixReportPage from './pages/MatrixReportPage'
+import RecentPage from './pages/RecentPage'
+import FavoritesPage from './pages/FavoritesPage'
+import HistoryPage from './pages/HistoryPage'
+import SettingsPage from './pages/SettingsPage'
 
-export default function App(){
-  const [latexList, setLatexList] = useState(null)
-  const [original, setOriginal] = useState(null)
-  const [eigenvalues, setEigenvalues] = useState(null)
-  const [error, setError] = useState(null)
+export default function App() {
+  useEffect(() => {
+    document.documentElement.classList.add('light')
+  }, [])
+  const [path, setPath] = useState(window.location.pathname || '/')
 
-  useEffect(()=>{
-    const url = 'http://localhost:8080/api/latex'
-    console.log('Fetching LaTeX from', url)
-    fetch(url)
-      .then(r => {
-        if (!r.ok) throw new Error('HTTP ' + r.status)
-        return r.json()
-      })
-      .then(j=>{
-        console.log('received', j)
-        // Support both legacy `latex` array and new structured response
-        setLatexList(j.schur || j.latex || [])
-        setOriginal(j.original || null)
-        setEigenvalues(j.eigenvalues || null)
-      })
-      .catch(e=>{
-        console.error('fetch error', e)
-        setError(e.message)
-      })
-  },[])
+  useEffect(() => {
+    function onPop() { setPath(window.location.pathname || '/') }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [])
+  if (path === '/favorites') return <FavoritesPage />
+  if (path === '/history') return <HistoryPage />
+  if (path === '/recent') return <RecentPage />
+  if (path === '/settings') return <SettingsPage />
+  if (path.startsWith('/matrix=')) {
+    const match = path.match(/^\/matrix=([^/]+)(?:\/(basic|spectral|decompose|structure|report))?$/)
+    if (match) {
+      const matrixString = decodeURIComponent(match[1])
+      const section = match[2] || 'basic'
+      if (section === 'spectral') return <MatrixSpectralPage matrixString={matrixString} />
+      if (section === 'decompose') return <MatrixDecomposePage matrixString={matrixString} />
+      if (section === 'structure') return <MatrixStructurePage matrixString={matrixString} />
+      if (section === 'report') return <MatrixReportPage matrixString={matrixString} />
+      return <MatrixBasicPage matrixString={matrixString} />
+    }
+  }
 
-  return (
-    <div style={{fontFamily:'Arial, sans-serif',padding:20}}>
-      <h1>JLC Frontend — LaTeX Visualizer</h1>
-      {error && <p style={{color:'crimson'}}>Error: {error}</p>}
-      {!latexList && !error && <p>Loading LaTeX from backend...</p>}
-      {latexList && latexList.length === 0 && <p>No Schur matrices returned.</p>}
-
-      {original && (
-        <div style={{marginBottom:20, padding:10, background:'#f7f7ff', border:'1px solid #eee'}}>
-          <h3>Original Matrix</h3>
-          <div dangerouslySetInnerHTML={{__html: katex.renderToString(original, {displayMode:true, throwOnError:false})}} />
-        </div>
-      )}
-
-      {eigenvalues && (
-        <div style={{marginBottom:20, padding:10, background:'#fffaf0', border:'1px solid #eee'}}>
-          <h3>Eigenvalues</h3>
-          <ul>
-            {eigenvalues.map((ev, idx) => <li key={idx}>{ev}</li>)}
-          </ul>
-        </div>
-      )}
-
-      {latexList && latexList.map((math, i) => {
-        let html = ''
-        try {
-          html = katex.renderToString(math, {displayMode:true, throwOnError:false})
-        } catch (err) {
-          console.error('KaTeX render error', err, math)
-          html = `<pre style="white-space:pre-wrap">${math.replace(/</g,'&lt;')}</pre>`
-        }
-        return (
-          <div key={i} style={{marginBottom:20, padding:10, background:'#fff', border:'1px solid #eee'}} dangerouslySetInnerHTML={{__html: html}} />
-        )
-      })}
-      <p style={{marginTop:20}}>Dev setup: run the Java backend and this frontend dev server.</p>
-    </div>
-  )
+  return <MainPage />
 }
+
