@@ -1,13 +1,13 @@
 package net.faulj.eigen.schur;
 
+import java.util.Set;
+import java.util.stream.IntStream;
+
 import net.faulj.core.Tolerance;
 import net.faulj.matrix.Matrix;
 import net.faulj.scalar.Complex;
+import net.faulj.spaces.SubspaceBasis;
 import net.faulj.vector.Vector;
-
-import java.util.Arrays;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.IntStream;
 
 /**
  * High-performance extractor for eigenvectors from a Real Schur Decomposition.
@@ -85,6 +85,44 @@ public class SchurEigenExtractor {
         // Allocate flattened eigenvector matrix (n x n)
         // Stored Column-Major mostly, but we'll manage index manually.
         double[] evecData = new double[n * n];
+        boolean[] fixedColumns = new boolean[n];
+
+        // For repeated real eigenvalues, compute a robust nullspace basis of (T - lambda I)
+        // and use a representative vector for those columns to avoid unstable back-substitution.
+        double tol = Tolerance.get();
+        boolean[] visitedEv = new boolean[n];
+        for (int i = 0; i < n; i++) {
+            if (visitedEv[i]) continue;
+            int count = 0;
+            int j = i;
+            while (j < n && Math.abs(valReal[j] - valReal[i]) <= tol && Math.abs(valImag[j]) <= tol) {
+                visitedEv[j] = true;
+                count++;
+                j++;
+            }
+            if (count > 1) {
+                try {
+                    Matrix Tmat = inflate(tData);
+                    for (int r = 0; r < n; r++) {
+                        Tmat.set(r, r, Tmat.get(r, r) - valReal[i]);
+                    }
+                    Set<Vector> basis = SubspaceBasis.nullSpaceBasis(Tmat);
+                    if (basis != null && !basis.isEmpty()) {
+                        Vector rep = basis.iterator().next();
+                        double[] data = rep.getData();
+                        // fill all columns for this eigenvalue with the representative
+                        for (int k = i; k < i + count; k++) {
+                            for (int r = 0; r < n; r++) {
+                                evecData[r * n + k] = data[r];
+                            }
+                            fixedColumns[k] = true;
+                        }
+                    }
+                } catch (RuntimeException ex) {
+                    // ignore and fall back to back-substitution
+                }
+            }
+        }
 
         // 1. Identify valid blocks for batching
         // We cannot split a 2x2 complex block across batches.
@@ -125,8 +163,61 @@ public class SchurEigenExtractor {
         IntStream.range(0, finalBatchCount).parallel().forEach(b -> {
             int start = batchStarts[b];
             int end = batchStarts[b+1];
-            processBatch(start, end, evecData);
+            processBatch(start, end, evecData, fixedColumns);
         });
+
+        // Validate computed eigenvectors and repair unstable columns by computing
+        // the nullspace of (T - lambda I) when residuals are large or vectors are invalid.
+        double maxAbsT = 0.0;
+        for (double v : tData) {
+            double av = Math.abs(v);
+            if (av > maxAbsT) maxAbsT = av;
+        }
+
+        for (int j = 0; j < n; j++) {
+            if (Math.abs(valImag[j]) > Tolerance.get()) continue; // skip complex pair columns
+            // extract column y
+            double[] y = new double[n];
+            for (int r = 0; r < n; r++) y[r] = evecData[r * n + j];
+
+            // compute residual r = (T - lambda I) * y
+            double lambda = valReal[j];
+            double resNorm = 0.0;
+            double yNorm = 0.0;
+            for (int i = 0; i < n; i++) {
+                double sum = 0.0;
+                int rowOff = i * n;
+                for (int m = 0; m < n; m++) {
+                    sum += tData[rowOff + m] * y[m];
+                }
+                double ri = sum - lambda * y[i];
+                resNorm += ri * ri;
+                yNorm += y[i] * y[i];
+            }
+            resNorm = Math.sqrt(resNorm);
+            yNorm = Math.sqrt(yNorm);
+
+            double allowed = Tolerance.get() * Math.max(1.0, yNorm) * Math.max(1.0, maxAbsT);
+            if (yNorm < Tolerance.get() || resNorm > allowed * 1e3) {
+                // recompute via nullspace of (T - lambda I)
+                try {
+                    Matrix Tmat = inflate(tData);
+                    for (int r = 0; r < n; r++) {
+                        Tmat.set(r, r, Tmat.get(r, r) - lambda);
+                    }
+                    Set<Vector> basis = SubspaceBasis.nullSpaceBasis(Tmat);
+                    if (basis != null && !basis.isEmpty()) {
+                        Vector rep = basis.iterator().next();
+                        double[] data = rep.getData();
+                        for (int r = 0; r < n; r++) {
+                            evecData[r * n + j] = data[r];
+                        }
+                    }
+                } catch (RuntimeException ex) {
+                    // leave column as-is if fallback fails
+                }
+            }
+        }
 
         // 3. Transformation x = Uy (if U was provided)
         // We can do this in place or via a new matrix.
@@ -150,7 +241,7 @@ public class SchurEigenExtractor {
      * Here we treat evecData as n rows x n cols, row-major for simplicity in memory,
      * but eigenvectors are columns. So evecData[row * n + col].
      */
-    private void processBatch(int startCol, int endCol, double[] Y) {
+    private void processBatch(int startCol, int endCol, double[] Y, boolean[] fixed) {
         double tol = Tolerance.get();
 
         // Iterate backwards (Back-Substitution)
@@ -162,6 +253,7 @@ public class SchurEigenExtractor {
 
             // For each eigenvector j in this batch
             for (int j = startCol; j < endCol; j++) {
+                if (fixed != null && fixed[j]) continue;
 
                 // Handle Complex Conjugate Pairs
                 if (Math.abs(valImag[j]) > tol) {
@@ -309,22 +401,22 @@ public class SchurEigenExtractor {
         this.valImag = new double[n];
         double tol = Tolerance.get();
 
-        int i = 0;
-        while (i < n) {
-            // Check for 2x2 block
-            // T is quasi-upper triangular. Elements below diagonal (i+1, i) indicate blocks.
-            // Access T[i+1][i] -> tData[(i+1)*n + i]
-            if (i == n - 1 || Math.abs(tData[(i + 1) * n + i]) <= tol) {
-                // Real eigenvalue
-                valReal[i] = tData[i * n + i];
-                valImag[i] = 0.0;
-                i++;
+        // Better to scan from the bottom up so 2x2 blocks at the lower indices are
+        // detected correctly when consecutive subdiagonals exist.
+        int j = n - 1;
+        while (j >= 0) {
+            if (j == 0 || Math.abs(tData[j * n + (j - 1)]) <= tol) {
+                // 1x1 block at j
+                valReal[j] = tData[j * n + j];
+                valImag[j] = 0.0;
+                j--;
             } else {
-                // 2x2 Block
-                double a = tData[i * n + i];
-                double b = tData[i * n + (i + 1)];
-                double c = tData[(i + 1) * n + i];
-                double d = tData[(i + 1) * n + (i + 1)];
+                // 2x2 block covering (j-1, j)
+                int i0 = j - 1;
+                double a = tData[i0 * n + i0];
+                double b = tData[i0 * n + j];
+                double c = tData[j * n + i0];
+                double d = tData[j * n + j];
 
                 double tr = a + d;
                 double det = a * d - b * c;
@@ -332,19 +424,19 @@ public class SchurEigenExtractor {
 
                 if (disc >= 0) {
                     double sqrt = Math.sqrt(disc);
-                    valReal[i] = (tr + sqrt) / 2.0;
-                    valReal[i + 1] = (tr - sqrt) / 2.0;
-                    valImag[i] = 0.0;
-                    valImag[i + 1] = 0.0;
+                    valReal[i0] = (tr + sqrt) / 2.0;
+                    valReal[j] = (tr - sqrt) / 2.0;
+                    valImag[i0] = 0.0;
+                    valImag[j] = 0.0;
                 } else {
                     double real = tr / 2.0;
                     double imag = Math.sqrt(-disc) / 2.0;
-                    valReal[i] = real;
-                    valReal[i + 1] = real;
-                    valImag[i] = imag;
-                    valImag[i + 1] = -imag;
+                    valReal[i0] = real;
+                    valReal[j] = real;
+                    valImag[i0] = imag;
+                    valImag[j] = -imag;
                 }
-                i += 2;
+                j -= 2;
             }
         }
     }
