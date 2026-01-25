@@ -1,16 +1,18 @@
 package net.faulj.spaces;
 
-import net.faulj.matrix.Matrix;
-import net.faulj.matrix.MatrixAccuracyValidator;
-import net.faulj.vector.Vector;
-import org.junit.Test;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import org.junit.Test;
+
+import net.faulj.matrix.Matrix;
+import net.faulj.matrix.MatrixAccuracyValidator;
+import net.faulj.vector.Vector;
 
 /**
  * Comprehensive test suite for all spaces-related functionality including

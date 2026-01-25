@@ -1,10 +1,11 @@
 package net.faulj.eigen;
 
-import net.faulj.matrix.Matrix;
-import net.faulj.eigen.schur.RealSchurDecomposition;
-import net.faulj.decomposition.result.SchurResult;
-import net.faulj.decomposition.qr.HouseholderQR;
 import org.junit.Test;
+
+import net.faulj.decomposition.qr.HouseholderQR;
+import net.faulj.decomposition.result.SchurResult;
+import net.faulj.eigen.schur.RealSchurDecomposition;
+import net.faulj.matrix.Matrix;
 
 public class DebugEigenSmallTest {
 

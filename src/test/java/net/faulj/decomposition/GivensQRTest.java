@@ -1,15 +1,17 @@
 package net.faulj.decomposition;
 
+import java.util.Random;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import org.junit.Test;
+
 import net.faulj.decomposition.qr.GivensQR;
 import net.faulj.decomposition.result.QRResult;
 import net.faulj.matrix.Matrix;
 import net.faulj.matrix.MatrixUtils;
 import net.faulj.vector.Vector;
-import org.junit.Test;
-
-import java.util.Random;
-
-import static org.junit.Assert.*;
 
 public class GivensQRTest {
 

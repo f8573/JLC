@@ -1,12 +1,13 @@
 package net.faulj.symmetric;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import org.junit.Test;
+
 import net.faulj.matrix.Matrix;
 import net.faulj.matrix.MatrixAccuracyValidator;
 import net.faulj.matrix.MatrixAccuracyValidator.ValidationResult;
 import net.faulj.vector.Vector;
-import org.junit.Test;
-
-import static org.junit.Assert.*;
 
 /**
  * Comprehensive tests for symmetric matrix eigendecomposition and related classes.

@@ -1,16 +1,17 @@
 package net.faulj.orthogonal;
 
-import net.faulj.matrix.Matrix;
-import net.faulj.matrix.MatrixUtils;
-import net.faulj.vector.Vector;
-import org.junit.Test;
-
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 
-import static org.junit.Assert.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import org.junit.Test;
+
+import net.faulj.matrix.Matrix;
+import net.faulj.vector.Vector;
 
 /**
  * Comprehensive tests for orthogonal projection and orthonormalization algorithms.

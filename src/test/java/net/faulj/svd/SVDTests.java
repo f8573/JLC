@@ -1,5 +1,12 @@
 package net.faulj.svd;
 
+import java.util.Arrays;
+import java.util.Random;
+
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import org.junit.Test;
+
 import net.faulj.decomposition.result.SVDResult;
 import net.faulj.decomposition.result.SchurResult;
 import net.faulj.eigen.schur.RealSchurDecomposition;
@@ -7,13 +14,6 @@ import net.faulj.matrix.Matrix;
 import net.faulj.matrix.MatrixAccuracyValidator;
 import net.faulj.matrix.MatrixAccuracyValidator.ValidationResult;
 import net.faulj.matrix.MatrixUtils;
-import org.junit.Test;
-
-import java.util.Arrays;
-import java.util.Random;
-
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 
 /**
  * Comprehensive test suite for SVD-related functionality including
