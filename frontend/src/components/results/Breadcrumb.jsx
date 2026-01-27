@@ -1,6 +1,12 @@
 import React from 'react'
 import { navigate } from '../../utils/navigation'
 
+/**
+ * Breadcrumb trail for matrix analysis pages.
+ *
+ * @param {Object} props
+ * @param {Array<{label: string, href?: string}>} props.items
+ */
 export default function Breadcrumb({ items }) {
   return (
     <div className="flex items-center gap-2 text-xs font-medium text-slate-400">

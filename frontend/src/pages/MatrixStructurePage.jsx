@@ -4,6 +4,14 @@ import Breadcrumb from '../components/results/Breadcrumb'
 import { useDiagnostics } from '../hooks/useDiagnostics'
 import { formatPercent } from '../utils/format'
 
+/**
+ * Status row describing a structural property of a matrix.
+ *
+ * @param {Object} props
+ * @param {string} props.label
+ * @param {boolean} props.active
+ * @param {string} [props.detail]
+ */
 function StatusRow({ label, active, detail }) {
   return (
     <div className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
@@ -20,6 +28,12 @@ function StatusRow({ label, active, detail }) {
   )
 }
 
+/**
+ * Structural analysis view that classifies matrices into named categories.
+ *
+ * @param {Object} props
+ * @param {string} props.matrixString - Serialized matrix payload from the URL.
+ */
 export default function MatrixStructurePage({ matrixString }) {
   const { diagnostics } = useDiagnostics(matrixString)
 

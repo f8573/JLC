@@ -1,6 +1,15 @@
 import React, { useEffect, useState } from 'react'
 import katex from 'katex'
 
+/**
+ * Renders KaTeX math from a TeX string with a safe fallback.
+ *
+ * @param {Object} props
+ * @param {string} [props.tex='']
+ * @param {boolean} [props.displayMode=false]
+ * @param {string} [props.className='']
+ * @param {Object} [props.style={}]
+ */
 export default function Latex({ tex = '', displayMode = false, className = '', style = {} }) {
   const [html, setHtml] = useState('')
 

@@ -1,5 +1,12 @@
 import React, { useEffect, useState } from 'react'
 
+/**
+ * Matrix header with input box and compute action.
+ *
+ * @param {Object} props
+ * @param {string} [props.inputValue]
+ * @param {(matrixString: string) => void} [props.onCompute]
+ */
 export default function MatrixHeader({ inputValue, onCompute }) {
   const [value, setValue] = useState(inputValue || '')
 

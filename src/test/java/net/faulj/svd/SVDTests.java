@@ -23,6 +23,14 @@ public class SVDTests {
 
     private static final Random RNG = new Random(42);
 
+    /**
+     * Generates a random matrix with diagonal conditioning boost.
+     *
+     * @param m rows
+     * @param n columns
+     * @param seed RNG seed
+     * @return random matrix
+     */
     private static Matrix randomMatrix(int m, int n, long seed) {
         Random rnd = new Random(seed);
         double[][] a = new double[m][n];
@@ -38,6 +46,12 @@ public class SVDTests {
         return fromRowMajor(a);
     }
 
+    /**
+     * Builds a matrix from row-major input.
+     *
+     * @param a row-major values
+     * @return matrix with matching entries
+     */
     private static Matrix fromRowMajor(double[][] a) {
         int rows = a.length;
         int cols = a[0].length;
@@ -50,6 +64,14 @@ public class SVDTests {
         return new Matrix(colsV);
     }
 
+    /**
+     * Asserts accuracy using the matrix validator with a context label.
+     *
+     * @param expected expected matrix
+     * @param actual actual matrix
+     * @param context label for assertions
+     * @param cond estimated condition number
+     */
     private static void assertAccurate(Matrix expected, Matrix actual, String context, double cond) {
         ValidationResult result = MatrixAccuracyValidator.validate(expected, actual, context, cond);
         assertTrue(context + " failed:\n" + result.message, result.passes);
@@ -57,6 +79,9 @@ public class SVDTests {
 
     // ========== Pseudoinverse Tests ==========
 
+    /**
+     * Validates pseudoinverse on a full-rank square matrix.
+     */
     @Test
     public void testPseudoinverseSquareFullRank() {
         Matrix A = randomMatrix(5, 5, 100);
@@ -67,6 +92,9 @@ public class SVDTests {
         assertAccurate(A, A.multiply(Aplus).multiply(A), "A*A+*A (square)", cond);
     }
 
+    /**
+     * Validates pseudoinverse on a tall full-rank matrix.
+     */
     @Test
     public void testPseudoinverseTallFullRank() {
         Matrix A = randomMatrix(6, 3, 200);
@@ -77,6 +105,9 @@ public class SVDTests {
         assertAccurate(A, A.multiply(Aplus).multiply(A), "A*A+*A (tall)", cond);
     }
 
+    /**
+     * Validates pseudoinverse on a wide full-rank matrix.
+     */
     @Test
     public void testPseudoinverseWideFullRank() {
         Matrix A = randomMatrix(3, 6, 300);
@@ -87,6 +118,9 @@ public class SVDTests {
         assertAccurate(A, A.multiply(Aplus).multiply(A), "A*A+*A (wide)", cond);
     }
 
+    /**
+     * Validates pseudoinverse on a rank-deficient matrix.
+     */
     @Test
     public void testPseudoinverseRankDeficient() {
         Matrix A = new Matrix(new double[][]{
@@ -103,6 +137,9 @@ public class SVDTests {
 
     // ========== Rank Estimation Tests ==========
 
+    /**
+     * Checks effective rank using default tolerance with dimensions.
+     */
     @Test
     public void testEffectiveRankDefaultToleranceWithDimensions() {
         double[] singularValues = {10.0, 1e-4, 1e-16};
@@ -110,6 +147,9 @@ public class SVDTests {
         assertEquals(2, rank);
     }
 
+    /**
+     * Checks effective rank under custom tolerance values.
+     */
     @Test
     public void testEffectiveRankCustomTolerance() {
         double[] singularValues = {5.0, 1e-3, 1e-6};
@@ -117,6 +157,9 @@ public class SVDTests {
         assertEquals(1, RankEstimation.effectiveRank(singularValues, 1e-2));
     }
 
+    /**
+     * Checks effective rank directly from a matrix.
+     */
     @Test
     public void testEffectiveRankFromMatrix() {
         Matrix A = new Matrix(new double[][]{
@@ -128,6 +171,9 @@ public class SVDTests {
         assertEquals(1, rank);
     }
 
+    /**
+     * Ensures random matrices are close to full rank.
+     */
     @Test
     public void testEffectiveRankFromRandomMatrix() {
         Matrix A = randomMatrix(5, 5, 100);
@@ -138,6 +184,13 @@ public class SVDTests {
 
     // ========== SVD Algorithms Tests ==========
 
+    /**
+     * Computes relative reconstruction error using Frobenius norm.
+     *
+     * @param A original matrix
+     * @param reconstructed reconstructed matrix
+     * @return relative error
+     */
     private static double reconstructionError(Matrix A, Matrix reconstructed) {
         double normA = A.frobeniusNorm();
         if (normA < 1e-14) {
@@ -146,10 +199,25 @@ public class SVDTests {
         return A.subtract(reconstructed).frobeniusNorm() / normA;
     }
 
+    /**
+     * Returns base tolerance for a given matrix size.
+     *
+     * @param m rows
+     * @param n columns
+     * @return base tolerance
+     */
     private static double baseTol(int m, int n) {
         return 1e-8 * Math.max(1.0, Math.max(m, n));
     }
 
+    /**
+     * Computes singular values via eigenvalues of $A^T A$ or $A A^T$.
+     *
+     * @param A input matrix
+     * @param tol tolerance for eigenvalue checks
+     * @param context label for assertions
+     * @return singular values sorted descending
+     */
     private static double[] singularValuesFromEigen(Matrix A, double tol, String context) {
         int m = A.getRowCount();
         int n = A.getColumnCount();
@@ -179,6 +247,14 @@ public class SVDTests {
         return sigma;
     }
 
+    /**
+     * Validates SVD factorization, orthogonality, and singular values.
+     *
+     * @param A original matrix
+     * @param result computed SVD
+     * @param thin whether thin SVD is expected
+     * @param context label for assertions
+     */
     private static void validateSvd(Matrix A, SVDResult result, boolean thin, String context) {
         int m = A.getRowCount();
         int n = A.getColumnCount();
@@ -232,6 +308,9 @@ public class SVDTests {
         }
     }
 
+    /**
+     * Tests Golub-Kahan full SVD on a tall matrix.
+     */
     @Test
     public void testGolubKahanFullTall() {
         Matrix A = randomMatrix(7, 4, 3101);
@@ -239,6 +318,9 @@ public class SVDTests {
         validateSvd(A, result, false, "Golub-Kahan full tall");
     }
 
+    /**
+     * Tests Golub-Kahan thin SVD on a wide matrix.
+     */
     @Test
     public void testGolubKahanThinWide() {
         Matrix A = randomMatrix(4, 7, 3102);
@@ -246,6 +328,9 @@ public class SVDTests {
         validateSvd(A, result, true, "Golub-Kahan thin wide");
     }
 
+    /**
+     * Tests divide-and-conquer full SVD on a wide matrix.
+     */
     @Test
     public void testDivideAndConquerFullWide() {
         Matrix A = randomMatrix(5, 8, 3201);
@@ -253,6 +338,9 @@ public class SVDTests {
         validateSvd(A, result, false, "Divide-and-conquer full wide");
     }
 
+    /**
+     * Tests divide-and-conquer thin SVD on a tall matrix.
+     */
     @Test
     public void testDivideAndConquerThinTall() {
         Matrix A = randomMatrix(8, 5, 3202);

@@ -1,4 +1,3 @@
-// build.gradle (Groovy DSL)
 plugins {
     id 'org.springframework.boot' version '3.1.4'
     id 'io.spring.dependency-management' version '1.1.3'
@@ -13,110 +12,118 @@ repositories {
     mavenCentral()
 }
 
-// Utility methods for determining OS and Architecture
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+//
+// ===== Enable Panama Vector API =====
+//
+
+tasks.withType(JavaCompile).configureEach {
+    options.fork = true
+    options.compilerArgs += [
+            '--add-modules=jdk.incubator.vector',
+            '--enable-preview'
+    ]
+}
+
+tasks.withType(Test).configureEach {
+    jvmArgs += [
+            '--add-modules=jdk.incubator.vector',
+            '--enable-preview'
+    ]
+}
+
+tasks.withType(JavaExec).configureEach {
+    jvmArgs += [
+            '--add-modules=jdk.incubator.vector',
+            '--enable-preview'
+    ]
+}
+
+
+//
+// ===== OS / Arch helpers =====
+//
+
 def static getOsString() {
     String vendor = System.getProperty("java.vendor")
-    if ("The Android Project" == vendor) {
-        return "android"
-    } else {
-        String osName = System.getProperty("os.name").toLowerCase(Locale.ENGLISH)
-        if (osName.startsWith("windows")) {
-            return "windows"
-        } else if (osName.startsWith("mac os")) {
-            return "apple"
-        } else if (osName.startsWith("linux")) {
-            return "linux"
-        } else if (osName.startsWith("sun")) {
-            return "sun"
-        }
-        return "unknown"
-    }
+    if ("The Android Project" == vendor) return "android"
+
+    String osName = System.getProperty("os.name").toLowerCase(Locale.ENGLISH)
+
+    if (osName.startsWith("windows")) return "windows"
+    if (osName.startsWith("mac os")) return "apple"
+    if (osName.startsWith("linux")) return "linux"
+    if (osName.startsWith("sun")) return "sun"
+
+    return "unknown"
 }
 
 def static getArchString() {
     String osArch = System.getProperty("os.arch").toLowerCase(Locale.ENGLISH)
-    if ("i386" == osArch || "x86" == osArch || "i686" == osArch) {
-        return "x86"
-    } else if (osArch.startsWith("amd64") || osArch.startsWith("x86_64")) {
-        return "x86_64"
-    } else if (osArch.startsWith("arm64")) {
-        return "arm64"
-    } else if (osArch.startsWith("arm")) {
-        return "arm"
-    } else if ("ppc" == osArch || "powerpc" == osArch) {
-        return "ppc"
-    } else if (osArch.startsWith("ppc")) {
-        return "ppc_64"
-    } else if (osArch.startsWith("sparc")) {
-        return "sparc"
-    } else if (osArch.startsWith("mips64")) {
-        return "mips64"
-    } else if (osArch.startsWith("mips")) {
-        return "mips"
-    } else if (osArch.contains("risc")) {
-        return "risc"
-    }
+
+    if (osArch in ["i386", "x86", "i686"]) return "x86"
+    if (osArch.startsWith("amd64") || osArch.startsWith("x86_64")) return "x86_64"
+    if (osArch.startsWith("arm64")) return "arm64"
+    if (osArch.startsWith("arm")) return "arm"
+
     return "unknown"
 }
 
+//
+// ===== Dependencies =====
+//
+
 dependencies {
-    // JUnit dependency for testing
+
+    // Testing
     testImplementation 'junit:junit:4.13.2'
 
-    // Spring Boot web starter for a lightweight HTTP API
+    // Spring Boot web
     implementation 'org.springframework.boot:spring-boot-starter-web'
 
+    // ===== JCuda =====
 
+    def jCudaVersion = "11.0.0"
+    def classifier = getOsString() + "-" + getArchString()
+
+    implementation("org.jcuda:jcuda:$jCudaVersion") { transitive = false }
+    implementation("org.jcuda:jcublas:$jCudaVersion") { transitive = false }
+    implementation("org.jcuda:jcufft:$jCudaVersion") { transitive = false }
+    implementation("org.jcuda:jcusparse:$jCudaVersion") { transitive = false }
+    implementation("org.jcuda:jcurand:$jCudaVersion") { transitive = false }
+    implementation("org.jcuda:jcusolver:$jCudaVersion") { transitive = false }
+    implementation("org.jcuda:jcudnn:$jCudaVersion") { transitive = false }
+
+    implementation "org.jcuda:jcuda-natives:$jCudaVersion:$classifier"
+    implementation "org.jcuda:jcublas-natives:$jCudaVersion:$classifier"
+    implementation "org.jcuda:jcufft-natives:$jCudaVersion:$classifier"
+    implementation "org.jcuda:jcusparse-natives:$jCudaVersion:$classifier"
+    implementation "org.jcuda:jcurand-natives:$jCudaVersion:$classifier"
+    implementation "org.jcuda:jcusolver-natives:$jCudaVersion:$classifier"
+    implementation "org.jcuda:jcudnn-natives:$jCudaVersion:$classifier"
+}
+
+//
+// ===== Application Entrypoints =====
+//
 
 application {
-    // default main for the visualizer run task; you can override on the command line
     mainClass = 'net.faulj.visualizer.RunVisualizer'
 }
 
 bootRun {
-    // ensure bootRun launches the Spring Boot application main
     mainClass = 'net.faulj.web.Application'
 }
-    // Set the JCuda version (modify as needed)
-    def jCudaVersion = "11.0.0"
 
-    // Determine the classifier for native libraries based on OS and Architecture
-    def classifier = getOsString() + "-" + getArchString()
+//
+// ===== Test config =====
+//
 
-    // JCuda Java libraries (setting transitive to false to avoid unnecessary dependencies)
-    implementation(group: 'org.jcuda', name: 'jcuda', version: jCudaVersion) {
-        transitive = false
-    }
-    implementation(group: 'org.jcuda', name: 'jcublas', version: jCudaVersion) {
-        transitive = false
-    }
-    implementation(group: 'org.jcuda', name: 'jcufft', version: jCudaVersion) {
-        transitive = false
-    }
-    implementation(group: 'org.jcuda', name: 'jcusparse', version: jCudaVersion) {
-        transitive = false
-    }
-    implementation(group: 'org.jcuda', name: 'jcurand', version: jCudaVersion) {
-        transitive = false
-    }
-    implementation(group: 'org.jcuda', name: 'jcusolver', version: jCudaVersion) {
-        transitive = false
-    }
-    implementation(group: 'org.jcuda', name: 'jcudnn', version: jCudaVersion) {
-        transitive = false
-    }
-
-    // JCuda native libraries (using the classifier for current OS/Architecture)
-    implementation group: 'org.jcuda', name: 'jcuda-natives', classifier: classifier, version: jCudaVersion
-    implementation group: 'org.jcuda', name: 'jcublas-natives', classifier: classifier, version: jCudaVersion
-    implementation group: 'org.jcuda', name: 'jcufft-natives', classifier: classifier, version: jCudaVersion
-    implementation group: 'org.jcuda', name: 'jcusparse-natives', classifier: classifier, version: jCudaVersion
-    implementation group: 'org.jcuda', name: 'jcurand-natives', classifier: classifier, version: jCudaVersion
-    implementation group: 'org.jcuda', name: 'jcusolver-natives', classifier: classifier, version: jCudaVersion
-    implementation group: 'org.jcuda', name: 'jcudnn-natives', classifier: classifier, version: jCudaVersion
-}
-
-// Enable CUDA system property for test JVMs so local verification can be performed.
 test {
     systemProperty 'faulj.cuda.enabled', 'true'
     testLogging {

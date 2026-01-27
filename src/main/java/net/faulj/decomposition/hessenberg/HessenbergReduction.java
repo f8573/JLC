@@ -152,7 +152,12 @@ import net.faulj.matrix.Matrix;
 public class HessenbergReduction {
 	private static final double EPS = 1e-12;
 
-
+	/**
+	 * Reduce a square matrix to Hessenberg form.
+	 *
+	 * @param A matrix to reduce
+	 * @return result containing H and the orthogonal Q
+	 */
 	public static HessenbergResult decompose(Matrix A) {
 		if (A == null) {
 			throw new IllegalArgumentException("Matrix must not be null");
@@ -214,6 +219,17 @@ public class HessenbergReduction {
 		return new HessenbergResult(A, H, Q);
 	}
 
+	/**
+	 * Apply a Householder reflector from the left to a submatrix.
+	 *
+	 * @param data matrix data in row-major order
+	 * @param size matrix dimension (square)
+	 * @param startRow first row of the submatrix
+	 * @param startCol first column of the submatrix
+	 * @param v Householder vector (length len)
+	 * @param len reflector length
+	 * @param tau Householder scalar
+	 */
 	private static void applyHouseholderLeft(double[] data, int size, int startRow, int startCol,
 											 double[] v, int len, double tau) {
 		if (tau == 0.0 || len <= 1) {
@@ -237,6 +253,17 @@ public class HessenbergReduction {
 		}
 	}
 
+	/**
+	 * Apply a Householder reflector from the right to a submatrix.
+	 *
+	 * @param data matrix data in row-major order
+	 * @param size matrix dimension (square)
+	 * @param startRow first row of the submatrix
+	 * @param startCol first column of the submatrix
+	 * @param v Householder vector (length len)
+	 * @param len reflector length
+	 * @param tau Householder scalar
+	 */
 	private static void applyHouseholderRight(double[] data, int size, int startRow, int startCol,
 											  double[] v, int len, double tau) {
 		if (tau == 0.0 || len <= 1) {

@@ -47,6 +47,9 @@ import net.faulj.vector.Vector;
  */
 public class LeastSquaresSolver implements LinearSolver {
 
+    /**
+     * Create a least-squares solver.
+     */
     public LeastSquaresSolver() {
 
     }

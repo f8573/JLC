@@ -2,6 +2,9 @@
 import Header from '../components/Header'
 import Sidebar from '../components/Sidebar'
 
+/**
+ * Favorites catalog for starred matrices and computations.
+ */
 export default function FavoritesPage() {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#ffffff] text-slate-800 font-sans selection:bg-primary/20">

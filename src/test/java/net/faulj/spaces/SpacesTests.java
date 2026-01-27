@@ -26,6 +26,13 @@ public class SpacesTests {
 
     // ========== Utility Methods ==========
 
+    /**
+     * Generates a random, diagonally dominant square matrix.
+     *
+     * @param n size of the matrix
+     * @param seed RNG seed
+     * @return random invertible matrix
+     */
     private static Matrix randomInvertibleMatrix(int n, long seed) {
         Random rnd = new Random(seed);
         double[][] a = new double[n][n];
@@ -38,6 +45,14 @@ public class SpacesTests {
         return fromRowMajor(a);
     }
 
+    /**
+     * Generates a random orthonormal basis matrix with $k$ columns.
+     *
+     * @param n ambient dimension
+     * @param k number of basis vectors
+     * @param seed RNG seed
+     * @return orthonormal basis matrix
+     */
     private static Matrix randomOrthonormalBasis(int n, int k, long seed) {
         Random rnd = new Random(seed);
         double[][] a = new double[n][k];
@@ -66,6 +81,14 @@ public class SpacesTests {
         return new Matrix(ortho);
     }
 
+    /**
+     * Generates a random $m\times n$ matrix with entries in $[-1, 1]$.
+     *
+     * @param m rows
+     * @param n columns
+     * @param seed RNG seed
+     * @return random matrix
+     */
     private static Matrix randomMatrix(int m, int n, long seed) {
         Random rnd = new Random(seed);
         double[][] a = new double[m][n];
@@ -77,6 +100,13 @@ public class SpacesTests {
         return fromRowMajor(a);
     }
 
+    /**
+     * Generates a random vector with entries in $[-5, 5]$.
+     *
+     * @param n dimension
+     * @param seed RNG seed
+     * @return random vector
+     */
     private static Vector randomVector(int n, long seed) {
         Random rnd = new Random(seed);
         double[] data = new double[n];
@@ -86,6 +116,14 @@ public class SpacesTests {
         return new Vector(data);
     }
 
+    /**
+     * Generates a list of random vectors.
+     *
+     * @param n dimension
+     * @param count number of vectors
+     * @param seed RNG seed
+     * @return list of vectors
+     */
     private static List<Vector> randomVectors(int n, int count, long seed) {
         Random rnd = new Random(seed);
         List<Vector> vectors = new ArrayList<>();
@@ -99,6 +137,12 @@ public class SpacesTests {
         return vectors;
     }
 
+    /**
+     * Builds a matrix from row-major input.
+     *
+     * @param a row-major values
+     * @return matrix with matching entries
+     */
     private static Matrix fromRowMajor(double[][] a) {
         int rows = a.length;
         int cols = a[0].length;
@@ -111,10 +155,23 @@ public class SpacesTests {
         return new Matrix(colsV);
     }
 
+    /**
+     * Creates a vector from the provided values.
+     *
+     * @param values vector entries
+     * @return vector instance
+     */
     private static Vector vec(double... values) {
         return new Vector(values);
     }
 
+    /**
+     * Asserts element-wise equality for vectors within tolerance.
+     *
+     * @param expected expected vector
+     * @param actual actual vector
+     * @param tolerance tolerance per component
+     */
     private void assertVectorEquals(Vector expected, Vector actual, double tolerance) {
         assertEquals(expected.dimension(), actual.dimension());
         for (int i = 0; i < expected.dimension(); i++) {
@@ -122,6 +179,13 @@ public class SpacesTests {
         }
     }
 
+    /**
+     * Asserts element-wise equality for matrices within tolerance.
+     *
+     * @param expected expected matrix
+     * @param actual actual matrix
+     * @param tolerance tolerance per component
+     */
     private void assertMatrixEquals(Matrix expected, Matrix actual, double tolerance) {
         assertEquals(expected.getRowCount(), actual.getRowCount());
         assertEquals(expected.getColumnCount(), actual.getColumnCount());
@@ -134,6 +198,9 @@ public class SpacesTests {
 
     // ========== ChangeOfBasis Tests ==========
 
+    /**
+     * Verifies ChangeOfBasis accepts a valid invertible matrix.
+     */
     @Test
     public void testChangeOfBasisConstructorWithValidMatrix() {
         Matrix P = Matrix.Identity(3);
@@ -142,11 +209,17 @@ public class SpacesTests {
         assertMatrixEquals(P, cob.matrix(), EPSILON);
     }
 
+    /**
+     * Ensures null matrix input is rejected.
+     */
     @Test(expected = IllegalArgumentException.class)
     public void testChangeOfBasisConstructorRejectsNull() {
         new ChangeOfBasis(null);
     }
 
+    /**
+     * Ensures non-square matrix input is rejected.
+     */
     @Test(expected = IllegalArgumentException.class)
     public void testChangeOfBasisConstructorRejectsNonSquareMatrix() {
         Matrix P = new Matrix(new Vector[]{
@@ -157,6 +230,9 @@ public class SpacesTests {
         new ChangeOfBasis(P);
     }
 
+    /**
+     * Ensures singular change-of-basis matrices are rejected.
+     */
     @Test(expected = IllegalArgumentException.class)
     public void testChangeOfBasisConstructorRejectsSingularMatrix() {
         Matrix P = new Matrix(new Vector[]{
@@ -167,6 +243,9 @@ public class SpacesTests {
         new ChangeOfBasis(P);
     }
 
+    /**
+     * Confirms identity change-of-basis is a no-op.
+     */
     @Test
     public void testChangeOfBasisIdentityTransformation() {
         Matrix I = Matrix.Identity(3);
@@ -176,6 +255,9 @@ public class SpacesTests {
         assertVectorEquals(x, result, EPSILON);
     }
 
+    /**
+     * Validates round-trip conversion between bases.
+     */
     @Test
     public void testChangeOfBasisRoundTrip() {
         Matrix P = randomInvertibleMatrix(4, 101);
@@ -186,6 +268,9 @@ public class SpacesTests {
         assertVectorEquals(original, back, EPSILON);
     }
 
+    /**
+     * Checks a simple 2D basis rotation example.
+     */
     @Test
     public void testChangeOfBasisSimpleBasisChange2D() {
         Matrix P = new Matrix(new Vector[]{
@@ -201,6 +286,9 @@ public class SpacesTests {
         assertVectorEquals(vec(-1, 0), yStd, EPSILON);
     }
 
+    /**
+     * Verifies inverse ChangeOfBasis recovers original vectors.
+     */
     @Test
     public void testChangeOfBasisInverse() {
         Matrix P = randomInvertibleMatrix(5, 600);
@@ -212,6 +300,9 @@ public class SpacesTests {
         assertVectorEquals(xB, backToB, EPSILON);
     }
 
+    /**
+     * Validates composition of two basis transforms.
+     */
     @Test
     public void testChangeOfBasisComposition() {
         Matrix P1 = randomInvertibleMatrix(4, 900);
@@ -228,6 +319,9 @@ public class SpacesTests {
 
     // ========== DirectSum Tests ==========
 
+    /**
+     * Ensures DirectSum dimensions are correct for 2D subspaces.
+     */
     @Test
     public void testDirectSumConstructorWith2DSubspaces() {
         Matrix U = new Matrix(new Vector[]{vec(1, 0)});
@@ -240,6 +334,9 @@ public class SpacesTests {
         assertTrue(ds.isSquareInvertible());
     }
 
+    /**
+     * Ensures DirectSum dimensions are correct for 3D subspaces.
+     */
     @Test
     public void testDirectSumConstructorWith3DSubspaces() {
         Matrix U = new Matrix(new Vector[]{
@@ -257,12 +354,18 @@ public class SpacesTests {
         assertTrue(ds.isSquareInvertible());
     }
 
+    /**
+     * Ensures DirectSum rejects null subspace bases.
+     */
     @Test(expected = IllegalArgumentException.class)
     public void testDirectSumConstructorRejectsNullBases() {
         Matrix U = new Matrix(new Vector[]{vec(1, 0)});
         new DirectSum(null, U);
     }
 
+    /**
+     * Ensures DirectSum rejects dimension mismatches.
+     */
     @Test(expected = IllegalArgumentException.class)
     public void testDirectSumConstructorRejectsDimensionMismatch() {
         Matrix U = new Matrix(new Vector[]{vec(1, 0)});
@@ -270,6 +373,9 @@ public class SpacesTests {
         new DirectSum(U, W);
     }
 
+    /**
+     * Decomposes a vector into 2D direct-sum components.
+     */
     @Test
     public void testDirectSumDecomposition2D() {
         Matrix U = new Matrix(new Vector[]{vec(1, 0)});
@@ -282,6 +388,9 @@ public class SpacesTests {
         assertTrue(decomp.residual() < TOLERANCE);
     }
 
+    /**
+     * Checks that DirectSum projection matrices sum to identity.
+     */
     @Test
     public void testDirectSumProjectionMatricesSumToIdentity() {
         Matrix U = new Matrix(new Vector[]{
@@ -303,6 +412,9 @@ public class SpacesTests {
 
     // ========== OrthogonalComplement Tests ==========
 
+    /**
+     * Builds an orthogonal complement from a single vector basis.
+     */
     @Test
     public void testOrthogonalComplementFactoryWithSingleVector() {
         List<Vector> W = List.of(vec(1, 0, 0));
@@ -312,6 +424,9 @@ public class SpacesTests {
         assertEquals(2, oc.dimensionPerp());
     }
 
+    /**
+     * Builds an orthogonal complement from multiple basis vectors.
+     */
     @Test
     public void testOrthogonalComplementFactoryWithMultipleVectors() {
         List<Vector> W = List.of(
@@ -324,17 +439,26 @@ public class SpacesTests {
         assertEquals(1, oc.dimensionPerp());
     }
 
+    /**
+     * Ensures null input is rejected for orthogonal complement.
+     */
     @Test(expected = NullPointerException.class)
     public void testOrthogonalComplementFactoryRejectsNull() {
         OrthogonalComplement.of(null);
     }
 
+    /**
+     * Ensures empty input is rejected for orthogonal complement.
+     */
     @Test(expected = IllegalArgumentException.class)
     public void testOrthogonalComplementFactoryRejectsEmptyList() {
         List<Vector> empty = List.of();
         OrthogonalComplement.of(empty);
     }
 
+    /**
+     * Verifies orthogonality between basis vectors and complement basis.
+     */
     @Test
     public void testOrthogonalComplementBasisOrthogonality() {
         List<Vector> W = randomVectors(5, 2, 100);
@@ -349,6 +473,9 @@ public class SpacesTests {
         }
     }
 
+    /**
+     * Tests projection onto the orthogonal complement.
+     */
     @Test
     public void testOrthogonalComplementProjection() {
         List<Vector> W = List.of(
@@ -361,6 +488,9 @@ public class SpacesTests {
         assertVectorEquals(vec(0, 0, 5), projPerp, EPSILON);
     }
 
+    /**
+     * Confirms $v = v_W + v_\perp$ decomposition via projections.
+     */
     @Test
     public void testOrthogonalComplementProjectionSumEqualsOriginal() {
         List<Vector> W = randomVectors(5, 2, 500);
@@ -374,11 +504,17 @@ public class SpacesTests {
 
     // ========== SubspaceBasis Tests ==========
 
+    /**
+     * Ensures row-space basis rejects null matrix input.
+     */
     @Test(expected = NullPointerException.class)
     public void testSubspaceBasisRowSpaceBasisRejectsNull() {
         SubspaceBasis.rowSpaceBasis(null);
     }
 
+    /**
+     * Ensures row-space basis of zero matrix is empty.
+     */
     @Test
     public void testSubspaceBasisRowSpaceBasisWithZeroMatrix() {
         Matrix Z = Matrix.zero(3, 3);
@@ -386,6 +522,9 @@ public class SpacesTests {
         assertEquals(0, basis.size());
     }
 
+    /**
+     * Ensures row-space basis of identity has full size.
+     */
     @Test
     public void testSubspaceBasisRowSpaceBasisWithIdentity() {
         Matrix I = Matrix.Identity(4);
@@ -393,6 +532,9 @@ public class SpacesTests {
         assertEquals(4, basis.size());
     }
 
+    /**
+     * Checks orthonormality of the computed row-space basis.
+     */
     @Test
     public void testSubspaceBasisRowSpaceBasisOrthonormality() {
         Matrix A = randomMatrix(4, 5, 100);
@@ -409,6 +551,9 @@ public class SpacesTests {
         }
     }
 
+    /**
+     * Ensures rank-deficient matrices yield a reduced row-space basis.
+     */
     @Test
     public void testSubspaceBasisRankDeficientMatrix() {
         Matrix A = new Matrix(new double[][]{
@@ -420,11 +565,17 @@ public class SpacesTests {
         assertEquals(1, basis.size());
     }
 
+    /**
+     * Ensures column-space basis rejects null matrix input.
+     */
     @Test(expected = NullPointerException.class)
     public void testSubspaceBasisColumnSpaceBasisRejectsNull() {
         SubspaceBasis.columnSpaceBasis(null);
     }
 
+    /**
+     * Ensures column-space basis of identity has full size.
+     */
     @Test
     public void testSubspaceBasisColumnSpaceBasisWithIdentity() {
         Matrix I = Matrix.Identity(5);
@@ -432,11 +583,17 @@ public class SpacesTests {
         assertEquals(5, basis.size());
     }
 
+    /**
+     * Ensures null-space basis rejects null matrix input.
+     */
     @Test(expected = NullPointerException.class)
     public void testSubspaceBasisNullSpaceBasisRejectsNull() {
         SubspaceBasis.nullSpaceBasis(null);
     }
 
+    /**
+     * Ensures identity matrix has an empty null space.
+     */
     @Test
     public void testSubspaceBasisNullSpaceBasisWithIdentity() {
         Matrix I = Matrix.Identity(4);
@@ -445,6 +602,9 @@ public class SpacesTests {
         assertEquals(0, basis.size());
     }
 
+    /**
+     * Verifies null-space basis vectors satisfy $Av=0$.
+     */
     @Test
     public void testSubspaceBasisNullSpaceBasisVectorsAreInNullSpace() {
         Matrix A = randomMatrix(3, 5, 500);
@@ -459,6 +619,9 @@ public class SpacesTests {
         }
     }
 
+    /**
+     * Checks rank-nullity theorem for a random matrix.
+     */
     @Test
     public void testSubspaceBasisRankNullityTheorem() {
         Matrix A = randomMatrix(3, 6, 700);
@@ -470,6 +633,9 @@ public class SpacesTests {
         assertEquals(n, rowBasis.size() + nullBasis.size());
     }
 
+    /**
+     * Validates row/column/null space sizes for rank-one matrices.
+     */
     @Test
     public void testSubspaceBasisRankOneMatrix() {
         Matrix A = new Matrix(new double[][]{

@@ -1,5 +1,8 @@
 import { useRef, useCallback } from 'react'
 
+/**
+ * Hook that owns the input grid ref and a transpose animation helper.
+ */
 export function useMatrixAnimation() {
   const containerRef = useRef(null)
 

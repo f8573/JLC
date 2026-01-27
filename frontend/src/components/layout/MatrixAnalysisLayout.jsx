@@ -6,6 +6,19 @@ import MatrixDisplay from '../matrix/MatrixDisplay'
 import { parseMatrixString, analyzeAndCache, matrixToString } from '../../utils/diagnostics'
 import { formatDimension, formatPercent } from '../../utils/format'
 
+/**
+ * Shared layout for all matrix analysis pages.
+ *
+ * @param {Object} props
+ * @param {string} props.matrixString
+ * @param {Object} [props.diagnostics]
+ * @param {'basic'|'spectral'|'decompose'|'structure'} [props.activeTab='basic']
+ * @param {string} props.title
+ * @param {string} props.subtitle
+ * @param {React.ReactNode} props.breadcrumbs
+ * @param {React.ReactNode} props.actions
+ * @param {React.ReactNode} props.children
+ */
 export default function MatrixAnalysisLayout({
   matrixString,
   diagnostics,
@@ -21,6 +34,12 @@ export default function MatrixAnalysisLayout({
     return parseMatrixString(matrixString)
   }, [diagnostics, matrixString])
 
+  /**
+   * Parse input, run diagnostics, and navigate to the basic results view.
+   *
+   * @param {string} inputValue
+   * @returns {Promise<void>}
+   */
   async function handleCompute(inputValue) {
     const parsed = parseMatrixString(inputValue)
     if (!parsed) {

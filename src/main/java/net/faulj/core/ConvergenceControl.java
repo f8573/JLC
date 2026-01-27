@@ -121,14 +121,32 @@ public class ConvergenceControl {
         this.stagnationTolerance = builder.stagnationTolerance;
     }
 
+    /**
+     * Create a builder for convergence control configuration.
+     *
+     * @return builder
+     */
     public static Builder builder() {
         return new Builder();
     }
 
+    /**
+     * Update convergence state with an error value.
+     *
+     * @param error current error metric
+     * @return updated state
+     */
     public State update(double error) {
         return update(error, Double.NaN);
     }
 
+    /**
+     * Update convergence state with error and residual values.
+     *
+     * @param error current error metric
+     * @param residual current residual norm
+     * @return updated state
+     */
     public State update(double error, double residual) {
         if (state != State.IN_PROGRESS) {
             return state;
@@ -229,6 +247,9 @@ public class ConvergenceControl {
         return state;
     }
 
+    /**
+     * Reset all tracked convergence counters and state.
+     */
     public void reset() {
         iterationCount = 0;
         stagnationCount = 0;
@@ -242,82 +263,142 @@ public class ConvergenceControl {
         state = State.IN_PROGRESS;
     }
 
+    /**
+     * @return true if convergence has been reached
+     */
     public boolean hasConverged() {
         return state != State.IN_PROGRESS;
     }
 
+    /**
+     * @return true if iteration should stop for any terminal state
+     */
     public boolean shouldStop() {
         return state != State.IN_PROGRESS;
     }
 
+    /**
+     * @return true if state is CONVERGED
+     */
     public boolean isConverged() {
         return state == State.CONVERGED;
     }
 
+    /**
+     * @return true if state is STAGNATED
+     */
     public boolean isStagnated() {
         return state == State.STAGNATED;
     }
 
+    /**
+     * @return true if state is DIVERGED
+     */
     public boolean isDiverged() {
         return state == State.DIVERGED;
     }
 
+    /**
+     * @return true if max iterations reached
+     */
     public boolean isMaxIterationsReached() {
         return state == State.MAX_ITERATIONS;
     }
 
+    /**
+     * @return current convergence state
+     */
     public State getState() {
         return state;
     }
 
+    /**
+     * @return current iteration count
+     */
     public int getIterationCount() {
         return iterationCount;
     }
 
+    /**
+     * @return last error value
+     */
     public double getLastError() {
         return lastError;
     }
 
+    /**
+     * @return last residual value
+     */
     public double getLastResidual() {
         return lastResidual;
     }
 
+    /**
+     * @return best (minimum) error observed
+     */
     public double getBestError() {
         return bestError;
     }
 
+    /**
+     * @return best (minimum) residual observed
+     */
     public double getBestResidual() {
         return bestResidual;
     }
 
+    /**
+     * @return last absolute error change
+     */
     public double getLastAbsoluteChange() {
         return lastAbsoluteChange;
     }
 
+    /**
+     * @return last relative error change
+     */
     public double getLastRelativeChange() {
         return lastRelativeChange;
     }
 
+    /**
+     * @return configured max iterations
+     */
     public int getMaxIterations() {
         return maxIterations;
     }
 
+    /**
+     * @return absolute tolerance
+     */
     public double getAbsoluteTolerance() {
         return absoluteTolerance;
     }
 
+    /**
+     * @return relative tolerance
+     */
     public double getRelativeTolerance() {
         return relativeTolerance;
     }
 
+    /**
+     * @return residual tolerance
+     */
     public double getResidualTolerance() {
         return residualTolerance;
     }
 
+    /**
+     * @return stagnation window size
+     */
     public int getStagnationWindow() {
         return stagnationWindow;
     }
 
+    /**
+     * @return divergence window size
+     */
     public int getDivergenceWindow() {
         return divergenceWindow;
     }
@@ -330,6 +411,9 @@ public class ConvergenceControl {
         return isFinite(value);
     }
 
+    /**
+     * Builder for ConvergenceControl configuration.
+     */
     public static final class Builder {
         private int maxIterations = 1000;
         private double absoluteTolerance = Tolerance.get();
@@ -339,56 +423,118 @@ public class ConvergenceControl {
         private int divergenceWindow = 10;
         private double stagnationTolerance = Double.NaN;
 
+        /**
+         * Set maximum iterations.
+         *
+         * @param maxIterations max iteration count
+         * @return builder
+         */
         public Builder maxIterations(int maxIterations) {
             this.maxIterations = Math.max(1, maxIterations);
             return this;
         }
 
+        /**
+         * Set absolute tolerance.
+         *
+         * @param absoluteTolerance tolerance
+         * @return builder
+         */
         public Builder absoluteTolerance(double absoluteTolerance) {
             this.absoluteTolerance = normalizeTolerance(absoluteTolerance, "absoluteTolerance");
             return this;
         }
 
+        /**
+         * Set relative tolerance.
+         *
+         * @param relativeTolerance tolerance
+         * @return builder
+         */
         public Builder relativeTolerance(double relativeTolerance) {
             this.relativeTolerance = normalizeTolerance(relativeTolerance, "relativeTolerance");
             return this;
         }
 
+        /**
+         * Set residual tolerance.
+         *
+         * @param residualTolerance tolerance
+         * @return builder
+         */
         public Builder residualTolerance(double residualTolerance) {
             this.residualTolerance = normalizeTolerance(residualTolerance, "residualTolerance");
             return this;
         }
 
+        /**
+         * Set stagnation window length.
+         *
+         * @param stagnationWindow window size
+         * @return builder
+         */
         public Builder stagnationWindow(int stagnationWindow) {
             this.stagnationWindow = Math.max(0, stagnationWindow);
             return this;
         }
 
+        /**
+         * Set divergence window length.
+         *
+         * @param divergenceWindow window size
+         * @return builder
+         */
         public Builder divergenceWindow(int divergenceWindow) {
             this.divergenceWindow = Math.max(0, divergenceWindow);
             return this;
         }
 
+        /**
+         * Set tolerance for stagnation detection.
+         *
+         * @param stagnationTolerance tolerance
+         * @return builder
+         */
         public Builder stagnationTolerance(double stagnationTolerance) {
             this.stagnationTolerance = normalizeTolerance(stagnationTolerance, "stagnationTolerance");
             return this;
         }
 
+        /**
+         * Disable absolute tolerance check.
+         *
+         * @return builder
+         */
         public Builder disableAbsoluteTolerance() {
             this.absoluteTolerance = Double.NaN;
             return this;
         }
 
+        /**
+         * Disable relative tolerance check.
+         *
+         * @return builder
+         */
         public Builder disableRelativeTolerance() {
             this.relativeTolerance = Double.NaN;
             return this;
         }
 
+        /**
+         * Disable residual tolerance check.
+         *
+         * @return builder
+         */
         public Builder disableResidualTolerance() {
             this.residualTolerance = Double.NaN;
             return this;
         }
 
+        /**
+         * Build a ConvergenceControl instance.
+         *
+         * @return configured control
+         */
         public ConvergenceControl build() {
             return new ConvergenceControl(this);
         }

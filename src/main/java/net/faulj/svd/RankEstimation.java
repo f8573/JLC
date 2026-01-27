@@ -55,6 +55,9 @@ import net.faulj.matrix.Matrix;
 public class RankEstimation {
 	private static final double EPS = 2.220446049250313e-16;
 
+	/**
+	 * Create a rank estimation helper.
+	 */
 	public RankEstimation() {
 	}
 

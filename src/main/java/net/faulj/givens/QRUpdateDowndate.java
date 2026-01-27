@@ -155,6 +155,14 @@ public class QRUpdateDowndate {
         return new QRResult(A_new, Q_new, R_new);
     }
     
+    /**
+     * Apply a Givens rotation transpose on the right (column update).
+     *
+     * @param M matrix to update
+     * @param G rotation parameters
+     * @param i first column index
+     * @param k second column index
+     */
     private static void applyGivensTransposeRight(Matrix M, GivensRotation G, int i, int k) {
         int m = M.getRowCount();
         for (int row = 0; row < m; row++) {

@@ -15,6 +15,14 @@ public class Diagonalization {
     private final Matrix P;
     private final Complex[] eigenvalues;
 
+    /**
+     * Create a diagonalization container.
+     *
+     * @param A original matrix
+     * @param D diagonal matrix of eigenvalues
+     * @param P eigenvector matrix
+     * @param eigenvalues eigenvalues as complex numbers
+     */
     public Diagonalization(Matrix A, Matrix D, Matrix P, Complex[] eigenvalues) {
         this.A = A;
         this.D = D;
@@ -22,22 +30,40 @@ public class Diagonalization {
         this.eigenvalues = eigenvalues;
     }
 
+    /**
+     * @return original matrix
+     */
     public Matrix getA() {
         return A;
     }
 
+    /**
+     * @return diagonal eigenvalue matrix
+     */
     public Matrix getD() {
         return D;
     }
 
+    /**
+     * @return eigenvector matrix
+     */
     public Matrix getP() {
         return P;
     }
 
+    /**
+     * @return eigenvalues as complex numbers
+     */
     public Complex[] getEigenvalues() {
         return eigenvalues;
     }
 
+    /**
+     * Compute the diagonalization A = P D P^{-1} via Schur decomposition.
+     *
+     * @param A matrix to diagonalize
+     * @return diagonalization result
+     */
     public static Diagonalization decompose(Matrix A) {
         if (A == null) {
             throw new IllegalArgumentException("Matrix must not be null");
@@ -53,6 +79,12 @@ public class Diagonalization {
         return new Diagonalization(A, D, P, eigenvalues);
     }
 
+    /**
+     * Build a complex diagonal matrix from eigenvalues.
+     *
+     * @param eigenvalues eigenvalues
+     * @return diagonal matrix
+     */
     private static Matrix diagonalMatrix(Complex[] eigenvalues) {
         int n = eigenvalues.length;
         Matrix D = new Matrix(n, n);

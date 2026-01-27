@@ -24,6 +24,9 @@ const summaryItems = [
   { title: 'Condition Number', description: 'κ ≈ 18.42 (Well-conditioned).' }
 ]
 
+/**
+ * Analysis summary view for the matrix dashboard.
+ */
 export default function MatrixResults() {
   const { diagnostics } = useDiagnostics(window.location.pathname.startsWith('/matrix=') ? decodeURIComponent((window.location.pathname.match(/^\/matrix=([^/]+)/) || [])[1] || '') : '')
 

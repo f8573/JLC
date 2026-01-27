@@ -1,5 +1,16 @@
 import React from 'react'
 
+/**
+ * Numeric input for dimensions or small controls.
+ *
+ * @param {Object} props
+ * @param {number|string} props.value
+ * @param {(event: React.ChangeEvent<HTMLInputElement>) => void} props.onChange
+ * @param {number} [props.min=1]
+ * @param {number} [props.max=20]
+ * @param {string} [props.label]
+ * @param {string} [props.className='']
+ */
 export default function NumberInput({ 
   value, 
   onChange, 

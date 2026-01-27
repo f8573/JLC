@@ -1,6 +1,15 @@
 import React from 'react'
 import MatrixCell from './MatrixCell'
 
+/**
+ * Grid of matrix input cells.
+ *
+ * @param {Object} props
+ * @param {string[][]} props.values
+ * @param {number} props.cols
+ * @param {(row: number, col: number, value: string) => void} props.onCellChange
+ * @param {() => void} [props.onAnalyze]
+ */
 export default function MatrixGrid({ values, cols, onCellChange, onAnalyze }) {
   return (
     <div 

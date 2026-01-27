@@ -49,6 +49,9 @@ package net.faulj.svd;
  * @see net.faulj.decomposition.bidiagonal.Bidiagonalization
  */
 public class BidiagonalQR {
+	/**
+	 * Create a bidiagonal QR helper.
+	 */
 	public BidiagonalQR() {
 	}
 
@@ -80,6 +83,12 @@ public class BidiagonalQR {
 		return decomposeUpper(B);
 	}
 
+	/**
+	 * Compute SVD for an upper bidiagonal matrix.
+	 *
+	 * @param B bidiagonal matrix
+	 * @return bidiagonal SVD result
+	 */
 	private static BidiagonalSVDResult decomposeUpper(net.faulj.matrix.Matrix B) {
 		int m = B.getRowCount();
 		int n = B.getColumnCount();
@@ -251,10 +260,26 @@ public class BidiagonalQR {
 		return new BidiagonalSVDResult(U, V, s);
 	}
 
+	/**
+	 * Compute hypot(a, b) safely.
+	 *
+	 * @param a first value
+	 * @param b second value
+	 * @return sqrt(a^2 + b^2)
+	 */
 	private static double hypot(double a, double b) {
 		return Math.hypot(a, b);
 	}
 
+	/**
+	 * Apply a Givens rotation to two columns.
+	 *
+	 * @param M matrix to update
+	 * @param col1 first column index
+	 * @param col2 second column index
+	 * @param c cosine term
+	 * @param s sine term
+	 */
 	private static void applyRotationToColumns(net.faulj.matrix.Matrix M, int col1, int col2, double c, double s) {
 		int rows = M.getRowCount();
 		for (int i = 0; i < rows; i++) {
@@ -265,6 +290,13 @@ public class BidiagonalQR {
 		}
 	}
 
+	/**
+	 * Swap two columns in-place.
+	 *
+	 * @param M matrix to update
+	 * @param col1 first column index
+	 * @param col2 second column index
+	 */
 	private static void swapColumns(net.faulj.matrix.Matrix M, int col1, int col2) {
 		int rows = M.getRowCount();
 		for (int i = 0; i < rows; i++) {
@@ -279,20 +311,36 @@ public class BidiagonalQR {
 		private final net.faulj.matrix.Matrix V;
 		private final double[] singularValues;
 
+		/**
+		 * Create a bidiagonal SVD result container.
+		 *
+		 * @param U left singular vectors
+		 * @param V right singular vectors
+		 * @param singularValues singular values
+		 */
 		private BidiagonalSVDResult(net.faulj.matrix.Matrix U, net.faulj.matrix.Matrix V, double[] singularValues) {
 			this.U = U;
 			this.V = V;
 			this.singularValues = singularValues;
 		}
 
+		/**
+		 * @return left singular vectors
+		 */
 		public net.faulj.matrix.Matrix getU() {
 			return U;
 		}
 
+		/**
+		 * @return right singular vectors
+		 */
 		public net.faulj.matrix.Matrix getV() {
 			return V;
 		}
 
+		/**
+		 * @return singular values
+		 */
 		public double[] getSingularValues() {
 			return singularValues;
 		}

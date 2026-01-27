@@ -5,7 +5,15 @@ import net.faulj.matrix.Matrix;
 
 import java.io.File;
 
+/**
+ * CLI entry point for generating a LaTeX report from QR iteration output.
+ */
 public class RunVisualizer {
+    /**
+     * Entry point for generating a LaTeX report of QR iteration output.
+     *
+     * @param args command-line arguments
+     */
     public static void main(String[] args) {
         Matrix m = Matrix.randomMatrix(6,6);
         Matrix[] matrices = ExplicitQRIteration.decompose(m);

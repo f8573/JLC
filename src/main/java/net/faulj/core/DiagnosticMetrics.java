@@ -57,6 +57,15 @@ public class DiagnosticMetrics {
         private final T value;
         private final MatrixAccuracyValidator.ValidationResult validation;
 
+        /**
+         * Create a diagnostic item.
+         *
+         * @param name metric name
+         * @param status status flag
+         * @param message message or context
+         * @param value metric value
+         * @param validation validation result
+         */
         public DiagnosticItem(String name,
                               Status status,
                               String message,
@@ -69,22 +78,37 @@ public class DiagnosticMetrics {
             this.validation = validation;
         }
 
+        /**
+         * @return metric name
+         */
         public String getName() {
             return name;
         }
 
+        /**
+         * @return status flag
+         */
         public Status getStatus() {
             return status;
         }
 
+        /**
+         * @return message string
+         */
         public String getMessage() {
             return message;
         }
 
+        /**
+         * @return metric value
+         */
         public T getValue() {
             return value;
         }
 
+        /**
+         * @return validation details
+         */
         public MatrixAccuracyValidator.ValidationResult getValidation() {
             return validation;
         }
@@ -188,391 +212,682 @@ public class DiagnosticMetrics {
         private DiagnosticItem<BidiagonalizationResult> bidiagonalization;
         private DiagnosticItem<PolarResult> polar;
 
+        /**
+         * @return source matrix
+         */
         public Matrix getMatrix() {
             return matrix;
         }
 
+        /**
+         * @return row count
+         */
         public int getRows() {
             return rows;
         }
 
+        /**
+         * @return column count
+         */
         public int getCols() {
             return cols;
         }
 
+        /**
+         * @return column count (alias)
+         */
         public int getColumns() {
             return columns;
         }
 
+        /**
+         * @return true if matrix is square
+         */
         public boolean isSquare() {
             return square;
         }
 
+        /**
+         * @return true if matrix is real-valued
+         */
         public boolean isReal() {
             return real;
         }
 
+        /**
+         * @return true if matrix is symmetric
+         */
         public boolean isSymmetric() {
             return symmetric;
         }
 
+        /**
+         * @return symmetry error metric
+         */
         public double getSymmetryError() {
             return symmetryError;
         }
 
+        /**
+         * @return 1-norm
+         */
         public double getNorm1() {
             return norm1;
         }
 
+        /**
+         * @return infinity norm
+         */
         public double getNormInf() {
             return normInf;
         }
 
+        /**
+         * @return Frobenius norm
+         */
         public double getFrobeniusNorm() {
             return frobeniusNorm;
         }
 
+        /**
+         * @return domain label (e.g., R or C)
+         */
         public String getDomain() {
             return domain;
         }
 
+        /**
+         * @return density estimate
+         */
         public double getDensity() {
             return density;
         }
 
+        /**
+         * @return real matrix data
+         */
         public double[][] getMatrixData() {
             return matrixData;
         }
 
+        /**
+         * @return imaginary matrix data
+         */
         public double[][] getMatrixImagData() {
             return matrixImagData;
         }
 
+        /**
+         * @return trace
+         */
         public Double getTrace() {
             return trace;
         }
 
+        /**
+         * @return determinant
+         */
         public Double getDeterminant() {
             return determinant;
         }
 
+        /**
+         * @return condition number estimate
+         */
         public Double getConditionNumber() {
             return conditionNumber;
         }
 
+        /**
+         * @return reciprocal condition number
+         */
         public Double getReciprocalConditionNumber() {
             return reciprocalConditionNumber;
         }
 
+        /**
+         * @return rank
+         */
         public Integer getRank() {
             return rank;
         }
 
+        /**
+         * @return nullity
+         */
         public Integer getNullity() {
             return nullity;
         }
 
+        /**
+         * @return invertibility flag
+         */
         public Boolean getInvertible() {
             return invertible;
         }
 
         
 
+        /**
+         * @return singularity flag
+         */
         public Boolean getSingular() {
             return singular;
         }
 
+        /**
+         * @return full-rank flag
+         */
         public Boolean getFullRank() {
             return fullRank;
         }
 
+        /**
+         * @return rank-deficient flag
+         */
         public Boolean getRankDeficient() {
             return rankDeficient;
         }
 
+        /**
+         * @return left-invertible flag
+         */
         public Boolean getLeftInvertible() {
             return leftInvertible;
         }
 
+        /**
+         * @return right-invertible flag
+         */
         public Boolean getRightInvertible() {
             return rightInvertible;
         }
 
+        /**
+         * @return well-conditioned flag
+         */
         public Boolean getWellConditioned() {
             return wellConditioned;
         }
 
+        /**
+         * @return ill-conditioned flag
+         */
         public Boolean getIllConditioned() {
             return illConditioned;
         }
 
+        /**
+         * @return nearly singular flag
+         */
         public Boolean getNearlySingular() {
             return nearlySingular;
         }
 
+        /**
+         * @return eigenvalues
+         */
         public Complex[] getEigenvalues() {
             return eigenvalues;
         }
 
+        /**
+         * @return eigenvector matrix
+         */
         public Matrix getEigenvectors() {
             return eigenvectors;
         }
 
+        /**
+         * @return eigenspace basis matrix
+         */
         public Matrix getEigenspace() {
             return eigenspace;
         }
 
+        /**
+         * @return algebraic multiplicities
+         */
         public int[] getAlgebraicMultiplicity() {
             return algebraicMultiplicity;
         }
 
+        /**
+         * @return geometric multiplicities
+         */
         public int[] getGeometricMultiplicity() {
             return geometricMultiplicity;
         }
 
+        /**
+         * @return characteristic polynomial coefficients
+         */
         public Complex[] getCharacteristicPolynomial() {
             return characteristicPolynomial;
         }
 
+        /**
+         * @return singular values
+         */
         public double[] getSingularValues() {
             return singularValues;
         }
 
+        /**
+         * @return spectral radius
+         */
         public Double getSpectralRadius() {
             return spectralRadius;
         }
 
+        /**
+         * @return operator norm
+         */
         public Double getOperatorNorm() {
             return operatorNorm;
         }
 
+        /**
+         * @return defective flag
+         */
         public Boolean getDefective() {
             return defective;
         }
 
+        /**
+         * @return diagonalizable flag
+         */
         public Boolean getDiagonalizable() {
             return diagonalizable;
         }
 
+        /**
+         * @return definiteness label
+         */
         public String getDefiniteness() {
             return definiteness;
         }
 
+        /**
+         * @return orthogonal flag
+         */
         public Boolean getOrthogonal() {
             return orthogonal;
         }
 
+        /**
+         * @return unitary flag
+         */
         public Boolean getUnitary() {
             return unitary;
         }
 
+        /**
+         * @return orthonormal flag
+         */
         public Boolean getOrthonormal() {
             return orthonormal;
         }
 
+        /**
+         * @return skew-symmetric flag
+         */
         public Boolean getSkewSymmetric() {
             return skewSymmetric;
         }
 
+        /**
+         * @return diagonal flag
+         */
         public Boolean getDiagonal() {
             return diagonal;
         }
 
+        /**
+         * @return bidiagonal flag
+         */
         public Boolean getBidiagonal() {
             return bidiagonal;
         }
 
+        /**
+         * @return tridiagonal flag
+         */
         public Boolean getTridiagonal() {
             return tridiagonal;
         }
 
+        /**
+         * @return upper-triangular flag
+         */
         public Boolean getUpperTriangular() {
             return upperTriangular;
         }
 
+        /**
+         * @return lower-triangular flag
+         */
         public Boolean getLowerTriangular() {
             return lowerTriangular;
         }
 
+        /**
+         * @return sparse flag
+         */
         public Boolean getSparse() {
             return sparse;
         }
 
+        /**
+         * @return zero-matrix flag
+         */
         public Boolean getZero() {
             return zero;
         }
 
+        /**
+         * @return identity flag
+         */
         public Boolean getIdentity() {
             return identity;
         }
 
+        /**
+         * @return scalar-matrix flag
+         */
         public Boolean getScalar() {
             return scalar;
         }
 
+        /**
+         * @return antidiagonal flag
+         */
         public Boolean getAntidiagonal() {
             return antidiagonal;
         }
 
+        /**
+         * @return Hermitian flag
+         */
         public Boolean getHermitian() {
             return hermitian;
         }
 
+        /**
+         * @return persymmetric flag
+         */
         public Boolean getPersymmetric() {
             return persymmetric;
         }
 
         
 
+        /**
+         * @return rotation flag
+         */
         public Boolean getRotation() {
             return rotation;
         }
 
+        /**
+         * @return reflection flag
+         */
         public Boolean getReflection() {
             return reflection;
         }
 
+        /**
+         * @return normal flag
+         */
         public Boolean getNormal() {
             return normal;
         }
 
+        /**
+         * @return non-normal flag
+         */
         public Boolean getNonNormal() {
             return nonNormal;
         }
 
+        /**
+         * @return spectral flag
+         */
         public Boolean getSpectral() {
             return spectral;
         }
 
+        /**
+         * @return nilpotent flag
+         */
         public Boolean getNilpotent() {
             return nilpotent;
         }
 
+        /**
+         * @return involutory flag
+         */
         public Boolean getInvolutory() {
             return involutory;
         }
 
+        /**
+         * @return idempotent flag
+         */
         public Boolean getIdempotent() {
             return idempotent;
         }
 
+        /**
+         * @return companion flag
+         */
         public Boolean getCompanion() {
             return companion;
         }
 
+        /**
+         * @return block-diagonal flag
+         */
         public Boolean getBlock() {
             return block;
         }
 
+        /**
+         * @return Hessenberg flag
+         */
         public Boolean getHessenberg() {
             return hessenberg;
         }
 
+        /**
+         * @return lower-Hessenberg flag
+         */
         public Boolean getLowerHessenberg() {
             return lowerHessenberg;
         }
 
+        /**
+         * @return upper-Hessenberg flag
+         */
         public Boolean getUpperHessenberg() {
             return upperHessenberg;
         }
 
+        /**
+         * @return Schur-form flag
+         */
         public Boolean getSchur() {
             return schur;
         }
 
+        /**
+         * @return row-echelon flag
+         */
         public Boolean getRowEchelon() {
             return rowEchelon;
         }
 
+        /**
+         * @return reduced row-echelon flag
+         */
         public Boolean getReducedRowEchelon() {
             return reducedRowEchelon;
         }
 
+        /**
+         * @return characteristic polynomial coefficients
+         */
         public Complex[] getCharacteristicPolynomials() {
             return characteristicPolynomials;
         }
 
+        /**
+         * @return RREF diagnostic item
+         */
         public DiagnosticItem<Matrix> getRref() {
             return rref;
         }
 
+        /**
+         * @return inverse diagnostic item
+         */
         public DiagnosticItem<Matrix> getInverse() {
             return inverse;
         }
 
+        /**
+         * @return row space basis diagnostic item
+         */
         public DiagnosticItem<Set<Vector>> getRowSpaceBasis() {
             return rowSpaceBasis;
         }
 
+        /**
+         * @return row space basis diagnostic item (alias)
+         */
         public DiagnosticItem<Set<Vector>> getRowSpace() {
             return rowSpaceBasis;
         }
 
+        /**
+         * @return column space basis diagnostic item
+         */
         public DiagnosticItem<Set<Vector>> getColumnSpaceBasis() {
             return columnSpaceBasis;
         }
 
+        /**
+         * @return column space basis diagnostic item (alias)
+         */
         public DiagnosticItem<Set<Vector>> getColumnSpace() {
             return columnSpaceBasis;
         }
 
+        /**
+         * @return null space basis diagnostic item
+         */
         public DiagnosticItem<Set<Vector>> getNullSpaceBasis() {
             return nullSpaceBasis;
         }
 
+        /**
+         * @return eigenbasis diagnostic list
+         */
         public List<DiagnosticItem<Set<Vector>>> getEigenbasisList() {
             return eigenbasisList;
         }
 
+        /**
+         * @return eigenspace diagnostic list
+         */
         public List<DiagnosticItem<Set<Vector>>> getEigenspaceList() {
             return eigenspaceList;
         }
 
+        /**
+         * @return null space diagnostic item (alias)
+         */
         public DiagnosticItem<Set<Vector>> getNullSpace() {
             return nullSpaceBasis;
         }
 
+        /**
+         * @return QR diagnostic item
+         */
         public DiagnosticItem<QRResult> getQr() {
             return qr;
         }
 
+        /**
+         * @return LU diagnostic item
+         */
         public DiagnosticItem<LUResult> getLu() {
             return lu;
         }
 
+        /**
+         * @return Cholesky diagnostic item
+         */
         public DiagnosticItem<CholeskyResult> getCholesky() {
             return cholesky;
         }
 
+        /**
+         * @return SVD diagnostic item
+         */
         public DiagnosticItem<SVDResult> getSvd() {
             return svd;
         }
 
+        /**
+         * @return Hessenberg diagnostic item
+         */
         public DiagnosticItem<HessenbergResult> getHessenbergDecomposition() {
             return hessenbergDecomposition;
         }
 
+        /**
+         * @return Schur diagnostic item
+         */
         public DiagnosticItem<SchurResult> getSchurDecomposition() {
             return schurDecomposition;
         }
 
+        /**
+         * @return diagonalization diagnostic item
+         */
         public DiagnosticItem<Diagonalization> getDiagonalization() {
             return diagonalization;
         }
 
+        /**
+         * @return symmetric spectral diagnostic item
+         */
         public DiagnosticItem<SpectralDecomposition> getSymmetricSpectral() {
             return symmetricSpectral;
         }
 
+        /**
+         * @return bidiagonalization diagnostic item
+         */
         public DiagnosticItem<BidiagonalizationResult> getBidiagonalization() {
             return bidiagonalization;
         }
 
+        /**
+         * @return polar diagnostic item
+         */
         public DiagnosticItem<PolarResult> getPolar() {
             return polar;
         }
     }
 
+    /**
+     * Compute diagnostics for a matrix.
+     *
+     * @param A matrix to analyze
+     * @return diagnostics object
+     */
     public static MatrixDiagnostics analyze(Matrix A) {
         if (A == null) {
             throw new IllegalArgumentException("Matrix must not be null");

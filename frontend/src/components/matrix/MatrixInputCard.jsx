@@ -2,6 +2,20 @@ import React from 'react'
 import MatrixGrid from './MatrixGrid'
 import IconButton from '../ui/IconButton'
 
+/**
+ * Card wrapper for the matrix grid and dimension controls.
+ *
+ * @param {Object} props
+ * @param {React.RefObject<HTMLDivElement>} props.matrixRef
+ * @param {string[][]} props.values
+ * @param {number} props.cols
+ * @param {(row: number, col: number, value: string) => void} props.onCellChange
+ * @param {() => void} props.onIncreaseRows
+ * @param {() => void} props.onDecreaseRows
+ * @param {() => void} props.onIncreaseCols
+ * @param {() => void} props.onDecreaseCols
+ * @param {() => void} [props.onAnalyze]
+ */
 export default function MatrixInputCard({ 
   matrixRef, 
   values, 

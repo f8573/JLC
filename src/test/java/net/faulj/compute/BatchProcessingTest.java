@@ -7,8 +7,14 @@ import org.junit.Test;
 
 import net.faulj.matrix.Matrix;
 
+/**
+ * Tests for batch and accelerated matrix multiplication utilities.
+ */
 public class BatchProcessingTest {
 
+    /**
+     * Validate naive multiplication output on a small matrix.
+     */
     @Test
     public void testMultiplyProducesCorrectResult() {
         Matrix a = new Matrix(new double[][]{{1, 2}, {3, 4}});
@@ -25,6 +31,9 @@ public class BatchProcessingTest {
         }
     }
 
+    /**
+     * Validate parallel dispatch and multiplication consistency.
+     */
     @Test
     public void testParallelDispatchAndParallelMultiply() {
         DispatchPolicy policy = DispatchPolicy.builder()
@@ -50,6 +59,9 @@ public class BatchProcessingTest {
         assertTrue("Parallel multiply should match naive multiply", err < 1e-8);
     }
 
+    /**
+     * Validate CUDA availability probe runs without error.
+     */
     @Test
     public void testCudaSupportRefreshAndDetection() {
         // Refresh any cached detection

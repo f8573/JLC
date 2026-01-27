@@ -1,5 +1,13 @@
 import React from 'react'
 
+/**
+ * User avatar badge rendered as a background image.
+ *
+ * @param {Object} props
+ * @param {string} props.src
+ * @param {string} [props.alt='User Avatar']
+ * @param {'sm'|'md'} [props.size='md']
+ */
 export default function UserAvatar({ src, alt = 'User Avatar', size = 'md' }) {
   const sizes = {
     sm: 'size-8',

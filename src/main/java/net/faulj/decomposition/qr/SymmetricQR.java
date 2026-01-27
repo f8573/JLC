@@ -10,6 +10,12 @@ import net.faulj.matrix.Matrix;
 public class SymmetricQR {
     private static final double SYM_TOL = 1e-12;
 
+    /**
+     * Compute a QR decomposition for a symmetric matrix.
+     *
+     * @param A matrix to decompose
+     * @return QR result containing Q and R
+     */
     public static QRResult decompose(Matrix A) {
         if (A == null) {
             throw new IllegalArgumentException("Matrix must not be null");
@@ -23,6 +29,12 @@ public class SymmetricQR {
         return HouseholderQR.decompose(A);
     }
 
+    /**
+     * Check whether a matrix is symmetric within tolerance.
+     *
+     * @param A matrix to test
+     * @return true if symmetric
+     */
     private static boolean isSymmetric(Matrix A) {
         int n = A.getRowCount();
         if (n != A.getColumnCount()) {

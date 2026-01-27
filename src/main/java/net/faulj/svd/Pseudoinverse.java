@@ -60,6 +60,9 @@ import net.faulj.matrix.Matrix;
 public class Pseudoinverse {
 	private static final double EPS = 2.220446049250313e-16;
 
+	/**
+	 * Create a pseudoinverse helper.
+	 */
 	public Pseudoinverse() {
 	}
 
@@ -104,6 +107,13 @@ public class Pseudoinverse {
 		return computeFromSvd(result, tolerance);
 	}
 
+	/**
+	 * Compute the pseudoinverse from a precomputed SVD.
+	 *
+	 * @param result SVD result
+	 * @param tolerance threshold below which singular values are treated as zero
+	 * @return pseudoinverse matrix
+	 */
 	private static Matrix computeFromSvd(net.faulj.decomposition.result.SVDResult result, double tolerance) {
 		Matrix U = result.getU();
 		Matrix V = result.getV();
@@ -131,6 +141,14 @@ public class Pseudoinverse {
 		return Vthin.multiply(sigmaPlus).multiply(Uthin.transpose());
 	}
 
+	/**
+	 * Compute the default tolerance for singular value cutoff.
+	 *
+	 * @param singularValues singular values
+	 * @param rows row count
+	 * @param cols column count
+	 * @return tolerance value
+	 */
 	private static double defaultTolerance(double[] singularValues, int rows, int cols) {
 		double maxSigma = 0.0;
 		for (double s : singularValues) {

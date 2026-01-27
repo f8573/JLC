@@ -5,6 +5,16 @@ import MatrixDisplay from '../components/matrix/MatrixDisplay'
 import { useDiagnostics } from '../hooks/useDiagnostics'
 import Latex from '../components/ui/Latex'
 
+/**
+ * Renders a decomposition section with optional factor matrices.
+ *
+ * @param {Object} props
+ * @param {string} props.title
+ * @param {React.ReactNode} [props.formula]
+ * @param {Array<{label: React.ReactNode, data?: number[][], w?: number, g?: number, s?: string}>} [props.data]
+ * @param {string} [props.label]
+ * @param {boolean} [props.available=true]
+ */
 function DecompSection({ title, formula, data, label, available = true }) {
   return (
     <section className={`space-y-4 ${!available ? 'opacity-50' : ''}`}>
@@ -38,10 +48,22 @@ function DecompSection({ title, formula, data, label, available = true }) {
   )
 }
 
+/**
+ * Decomposition overview page showing common factorization outputs.
+ *
+ * @param {Object} props
+ * @param {string} props.matrixString - Serialized matrix payload from the URL.
+ */
 export default function MatrixDecomposePage({ matrixString }) {
   const { diagnostics } = useDiagnostics(matrixString)
 
   // Helper to transpose basis vectors for display
+  /**
+   * Transpose an array of basis vectors into column-major matrix layout.
+   *
+   * @param {number[][]} vecs
+   * @returns {number[][] | null}
+   */
   const transposeVectors = (vecs) => {
     if (!vecs || vecs.length === 0) return null
     const numRows = vecs[0].length

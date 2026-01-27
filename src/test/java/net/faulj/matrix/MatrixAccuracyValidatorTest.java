@@ -22,6 +22,12 @@ public class MatrixAccuracyValidatorTest {
 
     private static final Random RNG = new Random(42);
 
+    /**
+     * Convert a row-major array to a column-based Matrix.
+     *
+     * @param a row-major data
+     * @return matrix instance
+     */
     private static Matrix fromRowMajor(double[][] a) {
         int rows = a.length;
         int cols = a[0].length;
@@ -34,6 +40,13 @@ public class MatrixAccuracyValidatorTest {
         return new Matrix(colsV);
     }
 
+    /**
+     * Create a deterministic random square matrix.
+     *
+     * @param n dimension
+     * @param seed RNG seed
+     * @return random matrix
+     */
     private static Matrix randomMatrix(int n, long seed) {
         Random rnd = new Random(seed);
         double[][] a = new double[n][n];
@@ -45,6 +58,9 @@ public class MatrixAccuracyValidatorTest {
         return fromRowMajor(a);
     }
 
+    /**
+     * Validate QR reconstruction accuracy across multiple sizes.
+     */
     @Test
     public void testQRDecomposition_ExcellentAccuracy() {
         System.out.println("\n=== QR Decomposition Validation ===");
@@ -69,6 +85,9 @@ public class MatrixAccuracyValidatorTest {
         }
     }
 
+    /**
+     * Validate orthogonality of Q from QR decomposition.
+     */
     @Test
     public void testOrthogonalityValidation() {
         System.out.println("\n=== Orthogonality Validation ===");
@@ -90,6 +109,9 @@ public class MatrixAccuracyValidatorTest {
                   orthError < tol);
     }
 
+    /**
+     * Verify perfect reconstruction for identity matrices.
+     */
     @Test
     public void testPerfectReconstruction() {
         System.out.println("\n=== Perfect Reconstruction (Identity) ===");
@@ -108,6 +130,9 @@ public class MatrixAccuracyValidatorTest {
         assertFalse("Should not warn", result.shouldWarn);
     }
 
+    /**
+     * Validate adaptive thresholds under varying condition estimates.
+     */
     @Test
     public void testConditionNumberAdaptation() {
         System.out.println("\n=== Condition Number Adaptation ===");
@@ -129,6 +154,9 @@ public class MatrixAccuracyValidatorTest {
         }
     }
 
+    /**
+     * Validate scaling behavior across matrix sizes.
+     */
     @Test
     public void testSizeScaling() {
         System.out.println("\n=== Matrix Size Scaling ===");
@@ -154,6 +182,9 @@ public class MatrixAccuracyValidatorTest {
         }
     }
 
+    /**
+     * Compare localized versus global error detection.
+     */
     @Test
     public void testLocalizedVsGlobalErrors() {
         System.out.println("\n=== Localized vs Global Error Detection ===");
@@ -186,6 +217,9 @@ public class MatrixAccuracyValidatorTest {
         System.out.println("\nGlobal error:\n" + global.message);
     }
 
+    /**
+     * Validate reconstruction accuracy for Schur decomposition.
+     */
     @Test
     public void testSchurDecomposition() {
         System.out.println("\n=== Schur Decomposition Validation ===");
@@ -212,6 +246,9 @@ public class MatrixAccuracyValidatorTest {
         }
     }
 
+    /**
+     * Ensure validateOrThrow succeeds for accurate reconstructions.
+     */
     @Test
     public void testValidateOrThrow_Success() {
         Matrix A = randomMatrix(10, 555);
@@ -222,6 +259,9 @@ public class MatrixAccuracyValidatorTest {
         MatrixAccuracyValidator.validateOrThrow(A, reconstructed, "QR test");
     }
 
+    /**
+     * Ensure validateOrThrow throws on critical failures.
+     */
     @Test(expected = IllegalStateException.class)
     public void testValidateOrThrow_Failure() {
         Matrix A = Matrix.Identity(5);
@@ -231,6 +271,9 @@ public class MatrixAccuracyValidatorTest {
         MatrixAccuracyValidator.validateOrThrow(A, B, "Identity vs Zero");
     }
 
+    /**
+     * Validate overall accuracy level aggregation.
+     */
     @Test
     public void testOverallLevel() {
         Matrix A = Matrix.Identity(10);
@@ -243,6 +286,9 @@ public class MatrixAccuracyValidatorTest {
                     AccuracyLevel.EXCELLENT, overall);
     }
 
+    /**
+     * Print a summary table for multiple decompositions.
+     */
     @Test
     public void testAccuracySummary_MultipleDecompositions() {
         System.out.println("\n=== Comprehensive Accuracy Summary ===");

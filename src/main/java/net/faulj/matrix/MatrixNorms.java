@@ -5,6 +5,12 @@ package net.faulj.matrix;
  */
 public class MatrixNorms {
 
+	/**
+	 * Compute the Frobenius norm of a matrix.
+	 *
+	 * @param m matrix to measure
+	 * @return Frobenius norm
+	 */
 	public static double frobeniusNorm(Matrix m) {
 		double sum = 0.0;
 		double[] real = m.getRawData();
@@ -23,6 +29,12 @@ public class MatrixNorms {
 		return Math.sqrt(sum);
 	}
 
+	/**
+	 * Compute the induced 1-norm (maximum column sum).
+	 *
+	 * @param m matrix to measure
+	 * @return 1-norm
+	 */
 	public static double norm1(Matrix m) {
 		double maxColSum = 0.0;
 		int rows = m.getRowCount();
@@ -47,6 +59,12 @@ public class MatrixNorms {
 		return maxColSum;
 	}
 
+	/**
+	 * Compute the induced infinity norm (maximum row sum).
+	 *
+	 * @param m matrix to measure
+	 * @return infinity norm
+	 */
 	public static double normInf(Matrix m) {
 		double maxRowSum = 0.0;
 		int rows = m.getRowCount();

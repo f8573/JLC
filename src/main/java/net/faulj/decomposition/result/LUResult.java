@@ -110,6 +110,15 @@ public class LUResult {
     private final boolean singular;
     private final double determinant;
 
+    /**
+     * Create an LU result container.
+     *
+     * @param A original matrix
+     * @param L lower-triangular factor
+     * @param U upper-triangular factor
+     * @param P permutation vector
+     * @param singular singular flag
+     */
     public LUResult(Matrix A, Matrix L, Matrix U, PermutationVector P, boolean singular) {
         this.A = A;
         this.L = L;
@@ -128,35 +137,57 @@ public class LUResult {
         return det;
     }
     
+    /**
+     * @return lower-triangular factor L
+     */
     public Matrix getL() { return L; }
+    /**
+     * @return upper-triangular factor U
+     */
     public Matrix getU() { return U; }
+    /**
+     * @return permutation vector P
+     */
     public PermutationVector getP() { return P; }
+    /**
+     * @return true if the matrix is singular
+     */
     public boolean isSingular() { return singular; }
+    /**
+     * @return determinant computed from LU factors
+     */
     public double getDeterminant() { return determinant; }
     
     /**
      * Reconstructs LU (note: PA is obtained by applying P externally if needed).
      */
+    /**
+     * Reconstruct L*U (note: PA = LU if permutation applied externally).
+     *
+     * @return reconstructed matrix
+     */
     public Matrix reconstruct() {
         return L.multiply(U);
     }
 
+    /**
+     * Compute the Frobenius norm residual of the factorization.
+     *
+     * @return residual
+     */
     public double residualNorm() {
         Matrix PA = permuteRows();
-        return MatrixUtils.normResidual(PA, reconstruct(), 1e-10);
+        return MatrixUtils.relativeError(PA, reconstruct());
     }
 
-    public double residualElement() {
-        Matrix PA = permuteRows();
-        return MatrixUtils.backwardErrorComponentwise(PA, reconstruct(), 1e-10);
-    }
-
+    /**
+     * Verify orthogonality of a matrix against the identity.
+     *
+     * @param O matrix to verify
+     * @return array with {orthogonalityError}
+     */
     public double[] verifyOrthogonality(Matrix O) {
-        Matrix I = Matrix.Identity(O.getRowCount());
-        O = O.multiply(O.transpose());
-        double n = MatrixUtils.normResidual(I, O, 1e-10);
-        double e = MatrixUtils.backwardErrorComponentwise(I, O, 1e-10);
-        return new double[]{n, e};
+        return new double[]{MatrixUtils.orthogonalityError(O)};
     }
     
     private Matrix permuteRows() {

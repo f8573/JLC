@@ -108,6 +108,14 @@ public class GivensBidiagonal {
         return new BidiagonalizationResult(A, U, B, V);
     }
     
+    /**
+     * Apply a Givens rotation transpose on the right (column update).
+     *
+     * @param M matrix to update
+     * @param G rotation parameters
+     * @param i first column index
+     * @param k second column index
+     */
     private void applyGivensTransposeRight(Matrix M, GivensRotation G, int i, int k) {
         int m = M.getRowCount();
         for (int row = 0; row < m; row++) {
@@ -118,6 +126,14 @@ public class GivensBidiagonal {
         }
     }
     
+    /**
+     * Apply a Givens rotation on the right (column update).
+     *
+     * @param M matrix to update
+     * @param G rotation parameters
+     * @param i first column index
+     * @param k second column index
+     */
     private void applyGivensRight(Matrix M, GivensRotation G, int i, int k) {
         int m = M.getRowCount();
         for (int row = 0; row < m; row++) {
@@ -128,6 +144,12 @@ public class GivensBidiagonal {
         }
     }
     
+    /**
+     * Zero out small values to improve numerical cleanliness.
+     *
+     * @param M matrix to clean
+     * @param tol absolute tolerance
+     */
     private void cleanupSmallValues(Matrix M, double tol) {
         int m = M.getRowCount();
         int n = M.getColumnCount();

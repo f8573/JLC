@@ -1,5 +1,12 @@
 import React from 'react'
 
+/**
+ * Summary list item for key diagnostics.
+ *
+ * @param {Object} props
+ * @param {React.ReactNode} props.title
+ * @param {React.ReactNode} props.description
+ */
 export default function SummaryItem({ title, description }) {
   return (
     <li className="flex items-start gap-3">

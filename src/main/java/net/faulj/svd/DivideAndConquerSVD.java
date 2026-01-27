@@ -23,6 +23,9 @@ import net.faulj.decomposition.result.SVDResult;
 public class DivideAndConquerSVD {
     private static final double TOL = 1e-12;
 
+    /**
+     * Create a divide-and-conquer SVD solver.
+     */
     public DivideAndConquerSVD() {
     }
 
@@ -46,6 +49,13 @@ public class DivideAndConquerSVD {
         return decomposeInternal(A, false);
     }
 
+    /**
+     * Internal decomposition routine.
+     *
+     * @param A input matrix
+     * @param full whether to return full orthonormal factors
+     * @return SVD result
+     */
     private SVDResult decomposeInternal(Matrix A, boolean full) {
         if (A == null) {
             throw new IllegalArgumentException("Matrix must not be null");
@@ -72,6 +82,13 @@ public class DivideAndConquerSVD {
         return new SVDResult(A, U, singularValues, V);
     }
 
+    /**
+     * Compute the SVD of a bidiagonal matrix.
+     *
+     * @param B bidiagonal matrix
+     * @param full whether to complete orthonormal bases
+     * @return bidiagonal SVD result
+     */
     private static BidiagonalSVDResult computeBidiagonalSvd(Matrix B, boolean full) {
         int m = B.getRowCount();
         int n = B.getColumnCount();
@@ -99,6 +116,13 @@ public class DivideAndConquerSVD {
         return new BidiagonalSVDResult(U, V, sigma);
     }
 
+    /**
+     * Extract the main diagonal from a matrix.
+     *
+     * @param B matrix
+     * @param len length to extract
+     * @return diagonal array
+     */
     private static double[] extractDiagonal(Matrix B, int len) {
         double[] diag = new double[len];
         for (int i = 0; i < len; i++) {
@@ -107,6 +131,13 @@ public class DivideAndConquerSVD {
         return diag;
     }
 
+    /**
+     * Extract the superdiagonal from a matrix.
+     *
+     * @param B matrix
+     * @param len length to extract
+     * @return superdiagonal array
+     */
     private static double[] extractSuperDiagonal(Matrix B, int len) {
         if (len <= 1) return new double[0];
         double[] sup = new double[len - 1];
@@ -116,6 +147,13 @@ public class DivideAndConquerSVD {
         return sup;
     }
 
+    /**
+     * Extract the subdiagonal from a matrix.
+     *
+     * @param B matrix
+     * @param len length to extract
+     * @return subdiagonal array
+     */
     private static double[] extractSubDiagonal(Matrix B, int len) {
         if (len <= 1) return new double[0];
         double[] sub = new double[len - 1];
@@ -125,6 +163,13 @@ public class DivideAndConquerSVD {
         return sub;
     }
 
+    /**
+     * Build tridiagonal data from upper bidiagonal entries.
+     *
+     * @param d main diagonal
+     * @param e superdiagonal
+     * @return tridiagonal data
+     */
     private static TridiagonalData buildTridiagonalFromUpper(double[] d, double[] e) {
         int n = d.length;
         double[] diag = new double[n];
@@ -140,6 +185,13 @@ public class DivideAndConquerSVD {
         return new TridiagonalData(diag, off);
     }
 
+    /**
+     * Build tridiagonal data from lower bidiagonal entries.
+     *
+     * @param d main diagonal
+     * @param f subdiagonal
+     * @return tridiagonal data
+     */
     private static TridiagonalData buildTridiagonalFromLower(double[] d, double[] f) {
         int n = d.length;
         double[] diag = new double[n];
@@ -155,6 +207,12 @@ public class DivideAndConquerSVD {
         return new TridiagonalData(diag, off);
     }
 
+    /**
+     * Convert eigenvalues of B^T B to singular values.
+     *
+     * @param eigenvalues eigenvalues of the tridiagonal form
+     * @return singular values
+     */
     private static double[] toSingularValues(double[] eigenvalues) {
         double[] sigma = new double[eigenvalues.length];
         for (int i = 0; i < eigenvalues.length; i++) {
@@ -167,6 +225,13 @@ public class DivideAndConquerSVD {
         return sigma;
     }
 
+    /**
+     * Scale columns by singular values to form singular vectors.
+     *
+     * @param M matrix to scale
+     * @param sigma singular values
+     * @return scaled matrix
+     */
     private static Matrix scaleColumns(Matrix M, double[] sigma) {
         int cols = M.getColumnCount();
         net.faulj.vector.Vector[] data = new net.faulj.vector.Vector[cols];
@@ -184,6 +249,12 @@ public class DivideAndConquerSVD {
         return new Matrix(data);
     }
 
+    /**
+     * Complete an orthonormal basis to full size.
+     *
+     * @param thin thin orthonormal matrix
+     * @return completed orthonormal matrix
+     */
     private static Matrix completeOrthonormalBasis(Matrix thin) {
         int rows = thin.getRowCount();
         int cols = thin.getColumnCount();
@@ -248,6 +319,13 @@ public class DivideAndConquerSVD {
         return new Matrix(basis);
     }
 
+    /**
+     * Orthogonalize a vector against an existing basis.
+     *
+     * @param v input vector
+     * @param basis existing orthonormal basis
+     * @return orthogonalized vector
+     */
     private static net.faulj.vector.Vector orthogonalize(
             net.faulj.vector.Vector v,
             java.util.List<net.faulj.vector.Vector> basis) {
@@ -264,6 +342,12 @@ public class DivideAndConquerSVD {
         return result;
     }
 
+    /**
+     * Sort indices by descending values.
+     *
+     * @param values input values
+     * @return index order
+     */
     private static int[] sortIndicesDescending(double[] values) {
         Integer[] order = new Integer[values.length];
         for (int i = 0; i < values.length; i++) {
@@ -277,6 +361,13 @@ public class DivideAndConquerSVD {
         return result;
     }
 
+    /**
+     * Reorder values by an index order.
+     *
+     * @param values input values
+     * @param order index order
+     * @return reordered values
+     */
     private static double[] reorderValues(double[] values, int[] order) {
         double[] reordered = new double[values.length];
         for (int i = 0; i < order.length; i++) {
@@ -285,6 +376,14 @@ public class DivideAndConquerSVD {
         return reordered;
     }
 
+    /**
+     * Reorder matrix columns according to an index order.
+     *
+     * @param M matrix to reorder
+     * @param order index order
+     * @param reorderCount number of columns to reorder
+     * @return reordered matrix
+     */
     private static Matrix reorderColumns(Matrix M, int[] order, int reorderCount) {
         int cols = M.getColumnCount();
         net.faulj.vector.Vector[] data = new net.faulj.vector.Vector[cols];
@@ -297,6 +396,13 @@ public class DivideAndConquerSVD {
         return new Matrix(data);
     }
 
+    /**
+     * Compute eigenpairs of a symmetric tridiagonal matrix using divide-and-conquer.
+     *
+     * @param diag diagonal entries
+     * @param off off-diagonal entries
+     * @return eigen decomposition
+     */
     private static EigenDecomposition tridiagonalEigenDecompose(double[] diag, double[] off) {
         int n = diag.length;
         if (n == 1) {
@@ -410,6 +516,15 @@ public class DivideAndConquerSVD {
         return new EigenDecomposition(finalValues, new Matrix(finalVectors));
     }
 
+    /**
+     * Compute a normalized eigenvector for a 2x2 symmetric matrix.
+     *
+     * @param d0 first diagonal
+     * @param d1 second diagonal
+     * @param e off-diagonal
+     * @param lambda eigenvalue
+     * @return normalized eigenvector
+     */
     private static double[] eigenvector2x2(double d0, double d1, double e, double lambda) {
         double a = d0 - lambda;
         double b = e;
@@ -429,6 +544,15 @@ public class DivideAndConquerSVD {
         return new double[]{x / norm, y / norm};
     }
 
+    /**
+     * Solve the secular equation for a rank-one update.
+     *
+     * @param d diagonal values
+     * @param z coupling vector
+     * @param rho rank-one scalar
+     * @param index root index
+     * @return eigenvalue root
+     */
     private static double solveSecular(double[] d, double[] z, double rho, int index) {
         int n = d.length;
         double eps = 1e-12;
@@ -477,6 +601,15 @@ public class DivideAndConquerSVD {
         return 0.5 * (left + right);
     }
 
+    /**
+     * Evaluate the secular function at a candidate lambda.
+     *
+     * @param lambda candidate eigenvalue
+     * @param d diagonal values
+     * @param z coupling vector
+     * @param rho rank-one scalar
+     * @return secular function value
+     */
     private static double secularValue(double lambda, double[] d, double[] z, double rho) {
         double sum = 1.0;
         for (int i = 0; i < d.length; i++) {
@@ -486,6 +619,13 @@ public class DivideAndConquerSVD {
         return sum;
     }
 
+    /**
+     * Multiply a matrix by a vector (column-major access).
+     *
+     * @param M matrix
+     * @param v vector
+     * @return result vector
+     */
     private static double[] multiplyMatrixVector(Matrix M, double[] v) {
         int rows = M.getRowCount();
         int cols = M.getColumnCount();
@@ -503,6 +643,13 @@ public class DivideAndConquerSVD {
         return result;
     }
 
+    /**
+     * Build a block-diagonal matrix from two matrices.
+     *
+     * @param A upper-left block
+     * @param B lower-right block
+     * @return block-diagonal matrix
+     */
     private static Matrix blockDiagonal(Matrix A, Matrix B) {
         int rowsA = A.getRowCount();
         int rowsB = B.getRowCount();
@@ -528,6 +675,13 @@ public class DivideAndConquerSVD {
         return new Matrix(data);
     }
 
+    /**
+     * Concatenate two arrays.
+     *
+     * @param a first array
+     * @param b second array
+     * @return concatenated array
+     */
     private static double[] concat(double[] a, double[] b) {
         double[] result = new double[a.length + b.length];
         System.arraycopy(a, 0, result, 0, a.length);
@@ -535,6 +689,14 @@ public class DivideAndConquerSVD {
         return result;
     }
 
+    /**
+     * Sort eigenvalues and reorder vectors and z accordingly.
+     *
+     * @param values eigenvalues
+     * @param vectors eigenvectors
+     * @param z coupling vector
+     * @return sorted eigen data
+     */
     private static SortedEigenData sortEigenData(double[] values, Matrix vectors, double[] z) {
         int n = values.length;
         Integer[] order = new Integer[n];
@@ -554,11 +716,21 @@ public class DivideAndConquerSVD {
         return new SortedEigenData(sortedValues, new Matrix(sortedVectors), sortedZ);
     }
 
+    /**
+     * Container for bidiagonal SVD results.
+     */
     private static final class BidiagonalSVDResult {
         private final Matrix U;
         private final Matrix V;
         private final double[] singularValues;
 
+        /**
+         * Create a bidiagonal SVD result.
+         *
+         * @param U left singular vectors
+         * @param V right singular vectors
+         * @param singularValues singular values
+         */
         private BidiagonalSVDResult(Matrix U, Matrix V, double[] singularValues) {
             this.U = U;
             this.V = V;
@@ -566,31 +738,59 @@ public class DivideAndConquerSVD {
         }
     }
 
+    /**
+     * Container for tridiagonal matrix data.
+     */
     private static final class TridiagonalData {
         private final double[] diagonal;
         private final double[] offDiagonal;
 
+        /**
+         * Create a tridiagonal data container.
+         *
+         * @param diagonal diagonal entries
+         * @param offDiagonal off-diagonal entries
+         */
         private TridiagonalData(double[] diagonal, double[] offDiagonal) {
             this.diagonal = diagonal;
             this.offDiagonal = offDiagonal;
         }
     }
 
+    /**
+     * Container for eigenvalues and eigenvectors.
+     */
     private static final class EigenDecomposition {
         private final double[] values;
         private final Matrix vectors;
 
+        /**
+         * Create an eigen decomposition container.
+         *
+         * @param values eigenvalues
+         * @param vectors eigenvectors
+         */
         private EigenDecomposition(double[] values, Matrix vectors) {
             this.values = values;
             this.vectors = vectors;
         }
     }
 
+    /**
+     * Container for sorted eigen data.
+     */
     private static final class SortedEigenData {
         private final double[] values;
         private final Matrix vectors;
         private final double[] z;
 
+        /**
+         * Create sorted eigen data.
+         *
+         * @param values sorted eigenvalues
+         * @param vectors reordered eigenvectors
+         * @param z reordered coupling vector
+         */
         private SortedEigenData(double[] values, Matrix vectors, double[] z) {
             this.values = values;
             this.vectors = vectors;
@@ -598,10 +798,19 @@ public class DivideAndConquerSVD {
         }
     }
 
+    /**
+     * Pair of eigenvalue and eigenvector.
+     */
     private static final class EigenPair {
         private final double value;
         private final net.faulj.vector.Vector vector;
 
+        /**
+         * Create an eigen pair.
+         *
+         * @param value eigenvalue
+         * @param vector eigenvector
+         */
         private EigenPair(double value, net.faulj.vector.Vector vector) {
             this.value = value;
             this.vector = vector;

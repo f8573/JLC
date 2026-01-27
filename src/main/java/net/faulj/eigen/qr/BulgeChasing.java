@@ -106,7 +106,14 @@ public class BulgeChasing {
     }
 
     /**
-     * Applies Householder reflector from the left with column range limiting.
+     * Apply a Householder reflector from the left with column range limiting.
+     *
+     * @param A matrix to update
+     * @param row top row index of the reflector
+     * @param colEnd last column index to update
+     * @param v0 first reflector component
+     * @param v1 second reflector component
+     * @param v2 third reflector component
      */
     private static void applyReflectorLeft(Matrix A, int row, int colEnd, double v0, double v1, double v2) {
         int n = A.getColumnCount();
@@ -123,7 +130,14 @@ public class BulgeChasing {
     }
 
     /**
-     * Applies Householder reflector from the right with row range limiting.
+     * Apply a Householder reflector from the right with row range limiting.
+     *
+     * @param A matrix to update
+     * @param col left column index of the reflector
+     * @param rowEnd last row index to update
+     * @param v0 first reflector component
+     * @param v1 second reflector component
+     * @param v2 third reflector component
      */
     private static void applyReflectorRight(Matrix A, int col, int rowEnd, double v0, double v1, double v2) {
         int maxRow = Math.min(A.getRowCount(), rowEnd + 1);

@@ -1,6 +1,13 @@
 import React from 'react'
 import Button from '../ui/Button'
 
+/**
+ * Action bar for analyzing and transposing matrices.
+ *
+ * @param {Object} props
+ * @param {() => void} [props.onAnalyze]
+ * @param {() => void} [props.onTranspose]
+ */
 export default function MatrixActions({ onAnalyze, onTranspose }) {
   return (
     <div className="flex flex-col sm:flex-row items-center justify-center gap-5 w-full max-w-md">

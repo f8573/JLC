@@ -1,5 +1,11 @@
 import React from 'react'
 
+/**
+ * Sidebar for matrix analysis sections.
+ *
+ * @param {Object} props
+ * @param {string} [props.active='analysis']
+ */
 export default function MatrixSidebar({ active = 'analysis' }) {
   function itemClass(id) {
     return `flex items-center gap-3 px-3 py-2 rounded-lg transition-colors group ${

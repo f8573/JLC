@@ -11,6 +11,12 @@ import net.faulj.matrix.Matrix;
 public class PivotedQR {
     private static final double EPS = 1e-12;
 
+    /**
+     * Compute a column-pivoted QR decomposition.
+     *
+     * @param A matrix to decompose
+     * @return pivoted QR result containing Q, R, and permutation P
+     */
     public static PivotedQRResult decompose(Matrix A) {
         if (A == null) {
             throw new IllegalArgumentException("Matrix must not be null");
@@ -74,6 +80,13 @@ public class PivotedQR {
         return new PivotedQRResult(A, Q, R, P);
     }
 
+    /**
+     * Select the pivot column based on remaining column norms.
+     *
+     * @param R working matrix
+     * @param startCol starting column index
+     * @return pivot column index
+     */
     private static int selectPivotColumn(Matrix R, int startCol) {
         int m = R.getRowCount();
         int n = R.getColumnCount();
@@ -93,6 +106,13 @@ public class PivotedQR {
         return pivot;
     }
 
+    /**
+     * Swap two columns in-place.
+     *
+     * @param M matrix to update
+     * @param c1 first column index
+     * @param c2 second column index
+     */
     private static void swapColumns(Matrix M, int c1, int c2) {
         if (c1 == c2) {
             return;
@@ -105,6 +125,14 @@ public class PivotedQR {
         }
     }
 
+    /**
+     * Apply a Householder reflector to R from the left.
+     *
+     * @param R matrix to update
+     * @param v Householder vector
+     * @param tau Householder scalar
+     * @param k column/row index
+     */
     private static void applyHouseholderToR(Matrix R, double[] v, double tau, int k) {
         int m = R.getRowCount();
         int n = R.getColumnCount();
@@ -122,6 +150,14 @@ public class PivotedQR {
         }
     }
 
+    /**
+     * Apply a Householder reflector to Q from the right (accumulation).
+     *
+     * @param Q matrix to update
+     * @param v Householder vector
+     * @param tau Householder scalar
+     * @param k column/row index
+     */
     private static void applyHouseholderToQ(Matrix Q, double[] v, double tau, int k) {
         int m = Q.getRowCount();
         int len = v.length;
@@ -138,6 +174,11 @@ public class PivotedQR {
         }
     }
 
+    /**
+     * Zero out small values below the diagonal in R.
+     *
+     * @param R matrix to clean
+     */
     private static void cleanupLower(Matrix R) {
         int m = R.getRowCount();
         int n = R.getColumnCount();

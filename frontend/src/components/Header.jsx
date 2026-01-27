@@ -4,6 +4,9 @@ import SearchBar from './ui/SearchBar'
 import IconButton from './ui/IconButton'
 import UserAvatar from './ui/UserAvatar'
 
+/**
+ * Top navigation header for the landing experience.
+ */
 export default function Header() {
   return (
     <header className="flex items-center justify-between border-b border-border-color bg-white px-6 py-2.5 shrink-0">

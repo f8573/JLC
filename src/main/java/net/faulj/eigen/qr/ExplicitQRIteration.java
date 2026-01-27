@@ -105,6 +105,14 @@ public class ExplicitQRIteration {
         return new Matrix[]{T, Q};
     }
 
+    /**
+     * Check convergence by inspecting subdiagonal entries.
+     *
+     * @param T working matrix
+     * @param tol tolerance for deflation
+     * @param symmetric whether to enforce strict tridiagonal structure
+     * @return true if converged
+     */
     private static boolean isConverged(Matrix T, double tol, boolean symmetric) {
         int n = T.getRowCount();
         for (int i = 2; i < n; i++) {
@@ -124,6 +132,13 @@ public class ExplicitQRIteration {
         return true;
     }
 
+    /**
+     * Check whether a matrix is symmetric within tolerance.
+     *
+     * @param A matrix to test
+     * @param tol tolerance
+     * @return true if symmetric
+     */
     private static boolean isSymmetric(Matrix A, double tol) {
         int n = A.getRowCount();
         for (int i = 0; i < n; i++) {
@@ -136,6 +151,12 @@ public class ExplicitQRIteration {
         return true;
     }
 
+    /**
+     * Compute the Wilkinson shift from the trailing 2x2 block.
+     *
+     * @param T working matrix
+     * @return shift value
+     */
     private static double computeWilkinsonShift(Matrix T) {
         int n = T.getRowCount();
         if (n < 2) {

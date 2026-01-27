@@ -1,5 +1,15 @@
 import React from 'react'
 
+/**
+ * Primary button component with optional icon.
+ *
+ * @param {Object} props
+ * @param {React.ReactNode} props.children
+ * @param {(event: React.MouseEvent<HTMLButtonElement>) => void} [props.onClick]
+ * @param {'primary'|'secondary'} [props.variant='primary']
+ * @param {string} [props.icon]
+ * @param {string} [props.className='']
+ */
 export default function Button({ 
   children, 
   onClick, 

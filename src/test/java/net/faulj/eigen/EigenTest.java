@@ -7,7 +7,6 @@ import net.faulj.eigen.qr.ImplicitQRFrancis;
 import net.faulj.eigen.schur.RealSchurDecomposition;
 import net.faulj.matrix.Matrix;
 import net.faulj.determinant.LUDeterminant;
-import net.faulj.scalar.Complex;
 import net.faulj.vector.Vector;
 import org.junit.Test;
 
@@ -148,6 +147,9 @@ public class EigenTest {
 
     // ========== Real Schur Decomposition Tests - Small Matrices ==========
 
+    /**
+     * Runs implicit QR on small random matrices.
+     */
     @Test
     public void testImplicitQR_SmallRandom() {
         System.out.println("\n=== Implicit QR: Small Random Matrices ===");
@@ -157,6 +159,9 @@ public class EigenTest {
         }
     }
 
+    /**
+     * Runs implicit QR on small symmetric matrices.
+     */
     @Test
     public void testImplicitQR_SmallSymmetric() {
         System.out.println("\n=== Implicit QR: Small Symmetric Matrices ===");
@@ -168,6 +173,9 @@ public class EigenTest {
 
     // ========== Implicit QR Tests - Medium Matrices ==========
 
+    /**
+     * Runs implicit QR on medium random matrices.
+     */
     @Test
     public void testImplicitQR_MediumRandom() {
         System.out.println("\n=== Implicit QR: Medium Random Matrices ===");
@@ -177,6 +185,9 @@ public class EigenTest {
         }
     }
 
+    /**
+     * Runs implicit QR on medium symmetric matrices.
+     */
     @Test
     public void testImplicitQR_MediumSymmetric() {
         System.out.println("\n=== Implicit QR: Medium Symmetric Matrices ===");
@@ -188,6 +199,9 @@ public class EigenTest {
 
     // ========== Implicit QR Tests - Huge Matrices ==========
 
+    /**
+     * Runs implicit QR on large random matrices and logs timing.
+     */
     @Test
     public void testImplicitQR_HugeRandom() {
         System.out.println("\n=== Implicit QR: Huge Random Matrices ===");
@@ -200,6 +214,9 @@ public class EigenTest {
         }
     }
 
+    /**
+     * Runs implicit QR on large symmetric matrices and logs timing.
+     */
     @Test
     public void testImplicitQR_HugeSymmetric() {
         System.out.println("\n=== Implicit QR: Huge Symmetric Matrices ===");
@@ -213,7 +230,11 @@ public class EigenTest {
     }
 
     /**
-     * Core Implicit QR (Francis) test using matrix norms
+     * Core implicit QR (Francis) test using matrix norms.
+     *
+     * @param A input matrix
+     * @param n size of the matrix
+     * @param context label for assertions
      */
     private void testImplicitQR(Matrix A, int n, String context) {
         SchurResult result = ImplicitQRFrancis.decompose(A);
@@ -252,6 +273,9 @@ public class EigenTest {
 
     // ========== Explicit QR Tests - Small Matrices ==========
 
+    /**
+     * Runs explicit QR on small random matrices.
+     */
     @Test
     public void testExplicitQR_SmallRandom() {
         System.out.println("\n=== Explicit QR: Small Random Matrices ===");
@@ -261,6 +285,9 @@ public class EigenTest {
         }
     }
 
+    /**
+     * Runs explicit QR on small symmetric matrices.
+     */
     @Test
     public void testExplicitQR_SmallSymmetric() {
         System.out.println("\n=== Explicit QR: Small Symmetric Matrices ===");
@@ -272,6 +299,9 @@ public class EigenTest {
 
     // ========== Explicit QR Tests - Medium Matrices ==========
 
+    /**
+     * Runs explicit QR on medium random matrices.
+     */
     @Test
     public void testExplicitQR_MediumRandom() {
         System.out.println("\n=== Explicit QR: Medium Random Matrices ===");
@@ -282,7 +312,11 @@ public class EigenTest {
     }
 
     /**
-     * Core Explicit QR test using matrix norms
+     * Core explicit QR test using matrix norms.
+     *
+     * @param A input matrix
+     * @param n size of the matrix
+     * @param context label for assertions
      */
     private void testExplicitQR(Matrix A, int n, String context) {
         Matrix[] result = ExplicitQRIteration.decompose(A);
@@ -313,6 +347,9 @@ public class EigenTest {
 
     // ========== Identity Matrix Tests (All Sizes) ==========
 
+    /**
+     * Verifies identity matrices produce unit eigenvalues and orthogonal $U$.
+     */
     @Test
     public void testIdentityMatrices_AllSizes() {
         System.out.println("\n=== Identity Matrix Tests ===");
@@ -341,6 +378,9 @@ public class EigenTest {
 
     // ========== Diagonal Matrix Tests ==========
 
+    /**
+     * Validates diagonal eigenvalues for small sizes.
+     */
     @Test
     public void testDiagonalMatrices_SmallSizes() {
         System.out.println("\n=== Diagonal Matrix Tests: Small ===");
@@ -350,6 +390,9 @@ public class EigenTest {
         }
     }
 
+    /**
+     * Validates diagonal eigenvalues for medium sizes.
+     */
     @Test
     public void testDiagonalMatrices_MediumSizes() {
         System.out.println("\n=== Diagonal Matrix Tests: Medium ===");
@@ -359,6 +402,9 @@ public class EigenTest {
         }
     }
 
+    /**
+     * Validates diagonal eigenvalues for large sizes.
+     */
     @Test
     public void testDiagonalMatrices_HugeSizes() {
         System.out.println("\n=== Diagonal Matrix Tests: Huge ===");
@@ -368,6 +414,12 @@ public class EigenTest {
         }
     }
 
+    /**
+     * Compares expected diagonal eigenvalues to computed values.
+     *
+     * @param D diagonal matrix
+     * @param n size of the matrix
+     */
     private void testDiagonalMatrix(Matrix D, int n) {
         SchurResult schur = RealSchurDecomposition.decompose(D);
         double tol = getTolerance(n);
@@ -397,6 +449,9 @@ public class EigenTest {
 
     // ========== Determinant Preservation Tests ==========
 
+    /**
+     * Checks determinant preservation on small random matrices.
+     */
     @Test
     public void testDeterminantPreservation_SmallSizes() {
         System.out.println("\n=== Determinant Preservation: Small ===");
@@ -406,6 +461,9 @@ public class EigenTest {
         }
     }
 
+    /**
+     * Checks determinant preservation on medium random matrices.
+     */
     @Test
     public void testDeterminantPreservation_MediumSizes() {
         System.out.println("\n=== Determinant Preservation: Medium ===");
@@ -415,6 +473,13 @@ public class EigenTest {
         }
     }
 
+    /**
+     * Compares determinants between $A$ and its Schur form $T$.
+     *
+     * @param A input matrix
+     * @param n size of the matrix
+     * @param type label for assertions
+     */
     private void testDeterminantPreservation(Matrix A, int n, String type) {
         double detA = LUDeterminant.compute(A);
         
@@ -432,6 +497,9 @@ public class EigenTest {
 
     // ========== Near-Singular Matrix Tests ==========
 
+    /**
+     * Validates behavior on near-singular matrices with small eigenvalues.
+     */
     @Test
     public void testNearSingularMatrices() {
         System.out.println("\n=== Near-Singular Matrix Tests ===");
@@ -479,6 +547,9 @@ public class EigenTest {
 
     // ========== Symmetric Positive Definite Matrix Tests ==========
 
+    /**
+     * Validates eigenvalues and reconstruction for SPD matrices.
+     */
     @Test
     public void testSymmetricPositiveDefinite_AllSizes() {
         System.out.println("\n=== Symmetric Positive Definite Matrices ===");
@@ -514,6 +585,9 @@ public class EigenTest {
 
     // ========== Accuracy Summary Test ==========
 
+    /**
+     * Prints accuracy summaries across a range of sizes.
+     */
     @Test
     public void testAccuracySummary_AllSizes() {
         System.out.println("\n=== ACCURACY SUMMARY: Schur Decomposition ===");

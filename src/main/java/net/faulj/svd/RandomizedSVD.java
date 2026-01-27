@@ -19,14 +19,34 @@ public class RandomizedSVD {
     private final int powerIterations;
     private final Random rng;
 
+    /**
+     * Create a randomized SVD with a target rank.
+     *
+     * @param rank target rank
+     */
     public RandomizedSVD(int rank) {
         this(rank, 5, 2, new Random());
     }
 
+    /**
+     * Create a randomized SVD with custom oversampling and power iterations.
+     *
+     * @param rank target rank
+     * @param oversample oversampling parameter
+     * @param powerIterations number of power iterations
+     */
     public RandomizedSVD(int rank, int oversample, int powerIterations) {
         this(rank, oversample, powerIterations, new Random());
     }
 
+    /**
+     * Create a randomized SVD with a custom RNG.
+     *
+     * @param rank target rank
+     * @param oversample oversampling parameter
+     * @param powerIterations number of power iterations
+     * @param rng random generator
+     */
     public RandomizedSVD(int rank, int oversample, int powerIterations, Random rng) {
         if (rank <= 0) {
             throw new IllegalArgumentException("Rank must be positive");
@@ -89,11 +109,25 @@ public class RandomizedSVD {
         return new SVDResult(A, U, sigma, V);
     }
 
+    /**
+     * Orthonormalize a matrix using thin QR.
+     *
+     * @param A input matrix
+     * @return orthonormal basis
+     */
     private static Matrix orthonormalize(Matrix A) {
         QRResult qr = HouseholderQR.decomposeThin(A);
         return qr.getQ();
     }
 
+    /**
+     * Generate a Gaussian random matrix.
+     *
+     * @param rows row count
+     * @param cols column count
+     * @param rng random generator
+     * @return random matrix
+     */
     private static Matrix gaussianMatrix(int rows, int cols, Random rng) {
         Matrix m = new Matrix(rows, cols);
         for (int i = 0; i < rows; i++) {

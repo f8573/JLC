@@ -27,6 +27,12 @@ public class GivensUtilitiesTest {
 
     // ========== Helper Methods ==========
 
+    /**
+     * Builds a matrix from row-major input.
+     *
+     * @param a row-major values
+     * @return matrix with matching entries
+     */
     private static Matrix fromRowMajor(double[][] a) {
         int rows = a.length;
         int cols = a[0].length;
@@ -39,6 +45,14 @@ public class GivensUtilitiesTest {
         return new Matrix(colsV);
     }
 
+    /**
+     * Generates a random matrix with entries in $[-1, 1]$.
+     *
+     * @param rows number of rows
+     * @param cols number of columns
+     * @param seed RNG seed
+     * @return random matrix
+     */
     private static Matrix randomMatrix(int rows, int cols, long seed) {
         Random rnd = new Random(seed);
         double[][] a = new double[rows][cols];
@@ -50,6 +64,13 @@ public class GivensUtilitiesTest {
         return fromRowMajor(a);
     }
 
+    /**
+     * Generates a random symmetric matrix with entries in $[-1, 1]$.
+     *
+     * @param n size of the matrix
+     * @param seed RNG seed
+     * @return symmetric matrix
+     */
     private static Matrix randomSymmetric(int n, long seed) {
         Random rnd = new Random(seed);
         double[][] a = new double[n][n];
@@ -63,6 +84,13 @@ public class GivensUtilitiesTest {
         return fromRowMajor(a);
     }
 
+    /**
+     * Checks whether a matrix is bidiagonal within tolerance.
+     *
+     * @param B matrix to inspect
+     * @param tol tolerance for off-bidiagonal entries
+     * @return true when bidiagonal
+     */
     private boolean isBidiagonal(Matrix B, double tol) {
         int m = B.getRowCount();
         int n = B.getColumnCount();
@@ -81,6 +109,13 @@ public class GivensUtilitiesTest {
         return true;
     }
 
+    /**
+     * Checks whether a matrix is tridiagonal within tolerance.
+     *
+     * @param T matrix to inspect
+     * @param tol tolerance for off-tridiagonal entries
+     * @return true when tridiagonal
+     */
     private boolean isTridiagonal(Matrix T, double tol) {
         int n = T.getRowCount();
         
@@ -100,6 +135,9 @@ public class GivensUtilitiesTest {
 
     // ========== GivensBidiagonal Tests ==========
 
+    /**
+     * Validates bidiagonalization on a small rectangular matrix.
+     */
     @Test
     public void testBidiagonal_SmallMatrix() {
         System.out.println("\n=== Givens Bidiagonal: Small Matrix ===");
@@ -138,6 +176,9 @@ public class GivensUtilitiesTest {
         System.out.println("  4x3 matrix: PASSED");
     }
 
+    /**
+     * Exercises bidiagonalization on random rectangular matrices.
+     */
     @Test
     public void testBidiagonal_RandomRectangular() {
         System.out.println("\n=== Givens Bidiagonal: Random Rectangular ===");
@@ -161,6 +202,9 @@ public class GivensUtilitiesTest {
         }
     }
 
+    /**
+     * Exercises bidiagonalization on a random square matrix.
+     */
     @Test
     public void testBidiagonal_SquareMatrix() {
         System.out.println("\n=== Givens Bidiagonal: Square Matrix ===");
@@ -184,6 +228,9 @@ public class GivensUtilitiesTest {
 
     // ========== GivensTridiagonal Tests ==========
 
+    /**
+     * Validates tridiagonalization on a small symmetric matrix.
+     */
     @Test
     public void testTridiagonal_SmallSymmetric() {
         System.out.println("\n=== Givens Tridiagonal: Small Symmetric ===");
@@ -216,6 +263,9 @@ public class GivensUtilitiesTest {
         System.out.println("  4x4 tridiagonal: PASSED");
     }
 
+    /**
+     * Exercises tridiagonalization on random symmetric matrices.
+     */
     @Test
     public void testTridiagonal_RandomSymmetric() {
         System.out.println("\n=== Givens Tridiagonal: Random Symmetric ===");
@@ -245,6 +295,9 @@ public class GivensUtilitiesTest {
         }
     }
 
+    /**
+     * Confirms tridiagonalization preserves an already tridiagonal matrix.
+     */
     @Test
     public void testTridiagonal_AlreadyTridiagonal() {
         System.out.println("\n=== Givens Tridiagonal: Already Tridiagonal ===");
@@ -278,6 +331,9 @@ public class GivensUtilitiesTest {
 
     // ========== QRUpdateDowndate Tests ==========
 
+    /**
+     * Tests QR update by appending a row to an existing factorization.
+     */
     @Test
     public void testQRUpdate_AppendRow() {
         System.out.println("\n=== QR Update: Append Row ===");
@@ -309,6 +365,9 @@ public class GivensUtilitiesTest {
         System.out.println("  Append row: PASSED");
     }
 
+    /**
+     * Tests QR rank-one update for maintaining upper triangular structure.
+     */
     @Test
     public void testQRUpdate_RankOneUpdate() {
         System.out.println("\n=== QR Update: Rank-One Update ===");
@@ -343,6 +402,9 @@ public class GivensUtilitiesTest {
         System.out.println("  Rank-one update: PASSED");
     }
 
+    /**
+     * Applies sequential QR rank-one updates and checks orthogonality.
+     */
     @Test
     public void testQRUpdate_MultipleUpdates() {
         System.out.println("\n=== QR Update: Multiple Sequential Updates ===");
@@ -376,6 +438,9 @@ public class GivensUtilitiesTest {
 
     // ========== Edge Cases ==========
 
+    /**
+     * Ensures bidiagonalization handles a single-column matrix.
+     */
     @Test
     public void testBidiagonal_SingleColumn() {
         System.out.println("\n=== Edge Case: Single Column Bidiagonal ===");
@@ -392,6 +457,9 @@ public class GivensUtilitiesTest {
         System.out.println("  Single column bidiagonal: PASSED");
     }
 
+    /**
+     * Ensures tridiagonalization handles a $2\times2$ matrix.
+     */
     @Test
     public void testTridiagonal_TwoByTwo() {
         System.out.println("\n=== Edge Case: 2x2 Tridiagonal ===");
@@ -411,6 +479,9 @@ public class GivensUtilitiesTest {
 
     // ========== Performance Tests ==========
 
+    /**
+     * Measures bidiagonalization runtime across increasing sizes.
+     */
     @Test
     public void testBidiagonal_Performance() {
         System.out.println("\n=== Bidiagonal Performance ===");
@@ -431,6 +502,9 @@ public class GivensUtilitiesTest {
         }
     }
 
+    /**
+     * Measures tridiagonalization runtime across increasing sizes.
+     */
     @Test
     public void testTridiagonal_Performance() {
         System.out.println("\n=== Tridiagonal Performance ===");

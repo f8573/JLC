@@ -17,6 +17,14 @@ public class PivotedQRResult {
     private final Matrix R;
     private final PermutationVector P;
 
+    /**
+     * Create a column-pivoted QR result container.
+     *
+     * @param A original matrix
+     * @param Q orthogonal factor
+     * @param R upper trapezoidal factor
+     * @param P column permutation vector
+     */
     public PivotedQRResult(Matrix A, Matrix Q, Matrix R, PermutationVector P) {
         this.A = A;
         this.Q = Q;
@@ -24,16 +32,25 @@ public class PivotedQRResult {
         this.P = P;
     }
 
+    /**
+     * @return orthogonal factor Q
+     */
     public Matrix getQ() {
         return Q;
     }
 
+    /**
+     * @return upper trapezoidal factor R
+     */
     public Matrix getR() {
         return R;
     }
 
     /**
      * Column permutation used for A * P = Q * R.
+     */
+    /**
+     * @return column permutation vector
      */
     public PermutationVector getP() {
         return P;
@@ -42,6 +59,11 @@ public class PivotedQRResult {
     /**
      * Returns A with columns permuted by P (i.e., A * P).
      */
+    /**
+     * Apply the stored permutation to A (A * P).
+     *
+     * @return permuted matrix
+     */
     public Matrix permutedA() {
         return applyColumnPermutation(A);
     }
@@ -49,20 +71,32 @@ public class PivotedQRResult {
     /**
      * Reconstructs Q * R (equals A * P).
      */
+    /**
+     * Reconstruct Q * R (equals A * P).
+     *
+     * @return reconstructed matrix
+     */
     public Matrix reconstruct() {
         return Q.multiply(R);
     }
 
+    /**
+     * Compute the Frobenius norm residual of the factorization.
+     *
+     * @return residual
+     */
     public double residualNorm() {
-        return MatrixUtils.normResidual(permutedA(), reconstruct(), 1e-10);
-    }
-
-    public double residualElement() {
-        return MatrixUtils.backwardErrorComponentwise(permutedA(), reconstruct(), 1e-10);
+        return MatrixUtils.relativeError(permutedA(), reconstruct());
     }
 
     /**
      * Apply the stored column permutation to an arbitrary matrix.
+     */
+    /**
+     * Apply the stored column permutation to an arbitrary matrix.
+     *
+     * @param M matrix to permute
+     * @return permuted matrix
      */
     public Matrix applyColumnPermutation(Matrix M) {
         int m = M.getRowCount();

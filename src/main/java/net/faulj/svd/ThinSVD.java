@@ -57,10 +57,18 @@ import net.faulj.decomposition.result.SVDResult;
 public class ThinSVD {
 	private final SVDAlgorithm algorithm;
 
+	/**
+	 * Create a thin SVD solver using the default algorithm.
+	 */
 	public ThinSVD() {
 		this(SVDAlgorithm.DIVIDE_AND_CONQUER);
 	}
 
+	/**
+	 * Create a thin SVD solver using a specific algorithm.
+	 *
+	 * @param algorithm algorithm selection
+	 */
 	public ThinSVD(SVDAlgorithm algorithm) {
 		if (algorithm == null) {
 			throw new IllegalArgumentException("Algorithm must not be null");
@@ -68,6 +76,12 @@ public class ThinSVD {
 		this.algorithm = algorithm;
 	}
 
+	/**
+	 * Compute the thin SVD of a matrix.
+	 *
+	 * @param A matrix to decompose
+	 * @return SVD result
+	 */
 	public SVDResult decompose(Matrix A) {
 		if (A == null) {
 			throw new IllegalArgumentException("Matrix must not be null");

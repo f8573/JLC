@@ -8,6 +8,12 @@ import net.faulj.matrix.Matrix;
  * where k = min(m, n).
  */
 public class ThinQR {
+    /**
+     * Compute an economy-size QR decomposition.
+     *
+     * @param A matrix to decompose
+     * @return QR result containing thin Q and R
+     */
     public static QRResult decompose(Matrix A) {
         return HouseholderQR.decomposeThin(A);
     }

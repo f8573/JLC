@@ -44,6 +44,9 @@ import net.faulj.vector.Vector;
  * @see SubspaceBasis
  */
 public class CoordinateMapping {
+	/**
+	 * Create a coordinate mapping (placeholder implementation).
+	 */
 	public CoordinateMapping() {
 		throw new RuntimeException("Class unfinished");
 	}

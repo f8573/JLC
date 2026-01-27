@@ -13,10 +13,18 @@ import net.faulj.matrix.Matrix;
 public class SVDecomposition {
     private final SVDAlgorithm algorithm;
 
+    /**
+     * Create an SVD decomposer using the default algorithm.
+     */
     public SVDecomposition() {
         this(SVDAlgorithm.DIVIDE_AND_CONQUER);
     }
 
+    /**
+     * Create an SVD decomposer with a specific algorithm.
+     *
+     * @param algorithm algorithm selection
+     */
     public SVDecomposition(SVDAlgorithm algorithm) {
         if (algorithm == null) {
             throw new IllegalArgumentException("Algorithm must not be null");
@@ -24,6 +32,12 @@ public class SVDecomposition {
         this.algorithm = algorithm;
     }
 
+    /**
+     * Compute the SVD of a matrix.
+     *
+     * @param A matrix to decompose
+     * @return SVD result
+     */
     public SVDResult decompose(Matrix A) {
         if (A == null) {
             throw new IllegalArgumentException("Matrix must not be null");

@@ -103,6 +103,15 @@ public class TriangularSolver {
         return x;
     }
 
+    /**
+     * Handle overdetermined lower-triangular systems by checking consistency.
+     *
+     * @param L lower triangular matrix
+     * @param b right-hand side vector
+     * @param m row count
+     * @param n column count
+     * @return solution vector
+     */
     private static Vector handleOverdeterminedForward(Matrix L, Vector b, int m, int n) {
         Vector x = new Vector(new double[n]);
 
@@ -134,6 +143,15 @@ public class TriangularSolver {
         return x;
     }
 
+    /**
+     * Handle overdetermined upper-triangular systems by checking consistency.
+     *
+     * @param U upper triangular matrix
+     * @param b right-hand side vector
+     * @param m row count
+     * @param n column count
+     * @return solution vector
+     */
     private static Vector handleOverdeterminedBackward(Matrix U, Vector b, int m, int n) {
         Vector x = new Vector(new double[n]);
 
@@ -166,6 +184,17 @@ public class TriangularSolver {
         return x;
     }
 
+    /**
+     * Handle singular lower-triangular systems by consistency checks and free variables.
+     *
+     * @param L lower triangular matrix
+     * @param b right-hand side vector
+     * @param x solution vector under construction
+     * @param singularRow row with zero pivot
+     * @param m row count
+     * @param n column count
+     * @return solution vector
+     */
     private static Vector handleSingularForward(Matrix L, Vector b, Vector x, int singularRow, int m, int n) {
         // Check if the equation is consistent (0 = b[i] - sum)
         double sum = b.get(singularRow);
@@ -197,6 +226,17 @@ public class TriangularSolver {
         return x;
     }
 
+    /**
+     * Handle singular upper-triangular systems by consistency checks and free variables.
+     *
+     * @param U upper triangular matrix
+     * @param b right-hand side vector
+     * @param x solution vector under construction
+     * @param singularRow row with zero pivot
+     * @param m row count
+     * @param n column count
+     * @return solution vector
+     */
     private static Vector handleSingularBackward(Matrix U, Vector b, Vector x, int singularRow, int m, int n) {
         // Check if the equation is consistent
         double sum = b.get(singularRow);

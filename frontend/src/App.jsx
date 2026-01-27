@@ -10,6 +10,13 @@ import FavoritesPage from './pages/FavoritesPage'
 import HistoryPage from './pages/HistoryPage'
 import SettingsPage from './pages/SettingsPage'
 
+/**
+ * Root application component that handles lightweight client-side routing.
+ *
+ * The router is implemented with `window.location` and `popstate` to keep the
+ * build dependency-free while still supporting deep links into matrix analysis
+ * sections.
+ */
 export default function App() {
   useEffect(() => {
     document.documentElement.classList.add('light')

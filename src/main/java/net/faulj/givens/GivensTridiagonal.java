@@ -99,6 +99,14 @@ public class GivensTridiagonal {
         return new Matrix[]{T, Q};
     }
     
+    /**
+     * Apply a Givens rotation on the right (column update).
+     *
+     * @param M matrix to update
+     * @param G rotation parameters
+     * @param i first column index
+     * @param k second column index
+     */
     private static void applyGivensRight(Matrix M, GivensRotation G, int i, int k) {
         int m = M.getRowCount();
         for (int row = 0; row < m; row++) {
@@ -109,6 +117,12 @@ public class GivensTridiagonal {
         }
     }
     
+    /**
+     * Zero out small values to improve numerical cleanliness.
+     *
+     * @param M matrix to clean
+     * @param tol absolute tolerance
+     */
     private static void cleanupSmallValues(Matrix M, double tol) {
         int m = M.getRowCount();
         int n = M.getColumnCount();

@@ -27,8 +27,14 @@ import static jcuda.runtime.JCuda.cudaGetDeviceProperties;
 import static jcuda.runtime.JCuda.cudaSetDevice;
 import jcuda.runtime.cudaDeviceProp;
 
+/**
+ * Integration tests for CUDA device probing and memory transfers.
+ */
 public class CudaProbeTest {
 
+    /**
+     * Print CUDA availability diagnostics.
+     */
     @Test
     public void probe() {
         System.out.printf("faulj.cuda.enabled=%s%n", System.getProperty("faulj.cuda.enabled", "not set"));

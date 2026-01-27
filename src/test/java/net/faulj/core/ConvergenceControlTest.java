@@ -6,8 +6,14 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+/**
+ * Tests for convergence control state transitions.
+ */
 public class ConvergenceControlTest {
 
+    /**
+     * Verify convergence on absolute tolerance.
+     */
     @Test
     public void testConvergesOnAbsoluteTolerance() {
         ConvergenceControl control = ConvergenceControl.builder()
@@ -25,6 +31,9 @@ public class ConvergenceControlTest {
         assertTrue(control.shouldStop());
     }
 
+    /**
+     * Verify stagnation detection stops iterations.
+     */
     @Test
     public void testStagnationStopsIterations() {
         ConvergenceControl control = ConvergenceControl.builder()
@@ -45,6 +54,9 @@ public class ConvergenceControlTest {
         assertFalse(control.isConverged());
     }
 
+    /**
+     * Verify divergence detection stops iterations.
+     */
     @Test
     public void testDivergenceStopsIterations() {
         ConvergenceControl control = ConvergenceControl.builder()
@@ -64,6 +76,9 @@ public class ConvergenceControlTest {
         assertTrue(control.shouldStop());
     }
 
+    /**
+     * Verify max iteration limit stops iterations.
+     */
     @Test
     public void testMaxIterationsStops() {
         ConvergenceControl control = ConvergenceControl.builder()
@@ -83,6 +98,9 @@ public class ConvergenceControlTest {
         assertTrue(control.shouldStop());
     }
 
+    /**
+     * Verify residual tolerance convergence.
+     */
     @Test
     public void testResidualToleranceConvergence() {
         ConvergenceControl control = ConvergenceControl.builder()
@@ -99,6 +117,9 @@ public class ConvergenceControlTest {
         assertTrue(control.isConverged());
     }
 
+    /**
+     * Verify reset clears state and counters.
+     */
     @Test
     public void testResetClearsState() {
         ConvergenceControl control = ConvergenceControl.builder()

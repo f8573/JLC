@@ -72,24 +72,51 @@ public class Vector {
         this.stride = matrix.getColumnCount();
     }
 
+    /**
+     * Get the number of elements in this vector.
+     *
+     * @return vector dimension
+     */
     public int dimension() {
         return size;
     }
 
+    /**
+     * Create a deep copy of this vector.
+     *
+     * @return copied vector
+     */
     public Vector copy() {
         double[] real = getData();
         double[] imag = hasImag() ? getImagData() : null;
         return new Vector(Arrays.copyOf(real, size), imag == null ? null : Arrays.copyOf(imag, size));
     }
 
+    /**
+     * Get the real part at the given index.
+     *
+     * @param index element index
+     * @return real value
+     */
     public double get(int index) {
         return matrix.get(index, column);
     }
 
+    /**
+     * Get the imaginary part at the given index.
+     *
+     * @param index element index
+     * @return imaginary value
+     */
     public double getImag(int index) {
         return matrix.getImag(index, column);
     }
 
+    /**
+     * Get the real data as a dense array (copied if needed).
+     *
+     * @return real data array
+     */
     public double[] getData() {
         if (stride == 1 && column == 0) {
             return matrix.getRawData();
@@ -104,6 +131,11 @@ public class Vector {
         return out;
     }
 
+    /**
+     * Get the imaginary data as a dense array (zeros if none).
+     *
+     * @return imaginary data array
+     */
     public double[] getImagData() {
         double[] imag = matrix.getRawImagData();
         if (imag == null) {
@@ -121,6 +153,11 @@ public class Vector {
         return out;
     }
 
+    /**
+     * Set the real data for this vector.
+     *
+     * @param data real data array
+     */
     public void setData(double[] data) {
         if (data == null) {
             throw new IllegalArgumentException("Vector data must not be null");
@@ -140,6 +177,11 @@ public class Vector {
         }
     }
 
+    /**
+     * Set the imaginary data for this vector.
+     *
+     * @param imag imaginary data array
+     */
     public void setImagData(double[] imag) {
         if (imag == null) {
             return;
@@ -156,18 +198,43 @@ public class Vector {
         }
     }
 
+    /**
+     * Set the real part at an index.
+     *
+     * @param index element index
+     * @param value real value
+     */
     public void set(int index, double value) {
         matrix.set(index, column, value);
     }
 
+    /**
+     * Set the imaginary part at an index.
+     *
+     * @param index element index
+     * @param value imaginary value
+     */
     public void setImag(int index, double value) {
         matrix.setImag(index, column, value);
     }
 
+    /**
+     * Set both real and imaginary parts at an index.
+     *
+     * @param index element index
+     * @param real real value
+     * @param imag imaginary value
+     */
     public void setComplex(int index, double real, double imag) {
         matrix.setComplex(index, column, real, imag);
     }
 
+    /**
+     * Add another vector to this vector.
+     *
+     * @param vector vector to add
+     * @return sum vector
+     */
     public Vector add(Vector vector) {
         Vector[] vectors = equalize(vector);
         Vector left = vectors[0];
@@ -200,6 +267,12 @@ public class Vector {
         return left;
     }
 
+    /**
+     * Subtract another vector from this vector.
+     *
+     * @param vector vector to subtract
+     * @return difference vector
+     */
     public Vector subtract(Vector vector) {
         Vector[] vectors = equalize(vector);
         Vector left = vectors[0];
@@ -232,6 +305,12 @@ public class Vector {
         return left;
     }
 
+    /**
+     * Compute the dot product with another vector.
+     *
+     * @param vector other vector
+     * @return dot product
+     */
     public double dot(Vector vector) {
         if (vector == null) {
             throw new IllegalArgumentException("Vector must not be null");
@@ -268,22 +347,48 @@ public class Vector {
         return sum;
     }
 
+    /**
+     * Compute the 1-norm of this vector.
+     *
+     * @return 1-norm
+     */
     public double norm1() {
         return VectorNorms.norm1(this);
     }
 
+    /**
+     * Compute the Euclidean norm of this vector.
+     *
+     * @return 2-norm
+     */
     public double norm2() {
         return VectorNorms.norm2(this);
     }
 
+    /**
+     * Compute the infinity norm of this vector.
+     *
+     * @return infinity norm
+     */
     public double normInf() {
         return VectorNorms.normInf(this);
     }
 
+    /**
+     * Normalize this vector to unit length.
+     *
+     * @return normalized vector
+     */
     public Vector normalize() {
         return VectorNorms.normalize(this);
     }
 
+    /**
+     * Ensure both vectors share complex storage when required.
+     *
+     * @param other other vector
+     * @return array of equalized vectors
+     */
     public Vector[] equalize(Vector other) {
         if (other == null) {
             throw new IllegalArgumentException("Vector must not be null");
@@ -300,6 +405,11 @@ public class Vector {
         return new Vector[]{v, o};
     }
 
+    /**
+     * Check whether the vector is (near) zero within tolerance.
+     *
+     * @return true if zero
+     */
     public boolean isZero() {
         double[] real = getData();
         double[] imag = hasImag() ? getImagData() : null;
@@ -314,6 +424,12 @@ public class Vector {
         return true;
     }
 
+    /**
+     * Compare with another vector using tolerance.
+     *
+     * @param other other vector
+     * @return true if equal within tolerance
+     */
     public boolean equals(Vector other) {
         if (other == null || other.dimension() != size) {
             return false;
@@ -335,6 +451,11 @@ public class Vector {
         return true;
     }
 
+    /**
+     * Check whether this vector is a unit vector.
+     *
+     * @return true if unit length
+     */
     public boolean isUnitVector() {
         if (!isReal()) {
             return false;
@@ -350,6 +471,11 @@ public class Vector {
         return sum == 1;
     }
 
+    /**
+     * Negate this vector.
+     *
+     * @return negated vector
+     */
     public Vector negate() {
         Vector v = this.copy();
         double[] real = v.matrix.getRawData();
@@ -365,6 +491,12 @@ public class Vector {
         return v;
     }
 
+    /**
+     * Resize this vector to a new dimension.
+     *
+     * @param n new dimension
+     * @return resized vector
+     */
     public Vector resize(int n) {
         double[] real = new double[n];
         double[] imag = hasImag() ? new double[n] : null;
@@ -380,6 +512,11 @@ public class Vector {
         return new Vector(real, imag);
     }
 
+    /**
+     * Render the vector as a string.
+     *
+     * @return string representation
+     */
     @Override
     public String toString() {
         if (isReal()) {
@@ -406,6 +543,12 @@ public class Vector {
         return s.toString();
     }
 
+    /**
+     * Multiply this vector by a scalar.
+     *
+     * @param scalar scalar value
+     * @return scaled vector
+     */
     public Vector multiplyScalar(double scalar) {
         Vector v = this.copy();
         double[] real = v.matrix.getRawData();
@@ -421,10 +564,21 @@ public class Vector {
         return v;
     }
 
+    /**
+     * Convert this vector into a row matrix.
+     *
+     * @return transposed matrix
+     */
     public Matrix transpose() {
         return toMatrix().transpose();
     }
 
+    /**
+     * Multiply this vector (as a row) by a matrix.
+     *
+     * @param matrix matrix to multiply
+     * @return resulting matrix
+     */
     public Matrix multiply(Matrix matrix) {
         if (1 != matrix.getRowCount()) {
             throw new ArithmeticException("Vector dimension must match matrix row count for multiplication");
@@ -433,10 +587,20 @@ public class Vector {
         return m.multiply(matrix);
     }
 
+    /**
+     * Convert this vector into a column matrix.
+     *
+     * @return column matrix
+     */
     public Matrix toMatrix() {
         return new Matrix(new Vector[]{this});
     }
 
+    /**
+     * Round components close to zero based on tolerance.
+     *
+     * @return rounded vector
+     */
     public Vector round() {
         double[] real = getData();
         double[] imag = hasImag() ? getImagData() : null;
@@ -452,6 +616,12 @@ public class Vector {
         return new Vector(real, imag);
     }
 
+    /**
+     * Project this vector onto another vector.
+     *
+     * @param u target vector
+     * @return projection vector
+     */
     public Vector project(Vector u) {
         Vector v = this.copy();
         u = u.copy();
@@ -460,6 +630,11 @@ public class Vector {
         return u.multiplyScalar(n / d);
     }
 
+    /**
+     * Conjugate the vector (negate imaginary parts).
+     *
+     * @return conjugated vector
+     */
     public Vector conjugate() {
         if (!hasImag()) {
             return copy();
@@ -472,6 +647,11 @@ public class Vector {
         return v;
     }
 
+    /**
+     * Check if this vector has no imaginary part.
+     *
+     * @return true if real
+     */
     public boolean isReal() {
         double[] imag = matrix.getRawImagData();
         if (imag == null) {
@@ -487,6 +667,11 @@ public class Vector {
         return true;
     }
 
+    /**
+     * Check if this vector stores any imaginary data.
+     *
+     * @return true if complex storage exists
+     */
     public boolean hasImag() {
         return matrix.hasImagData();
     }

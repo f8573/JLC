@@ -29,6 +29,12 @@ public class GramSchmidtTest {
 
     // ========== Helper Methods ==========
 
+    /**
+     * Builds a matrix from row-major input.
+     *
+     * @param a row-major values
+     * @return matrix with matching entries
+     */
     private static Matrix fromRowMajor(double[][] a) {
         int rows = a.length;
         int cols = a[0].length;
@@ -41,6 +47,14 @@ public class GramSchmidtTest {
         return new Matrix(colsV);
     }
 
+    /**
+     * Generates a random matrix with entries in $[-1, 1]$ using a fixed seed.
+     *
+     * @param rows number of rows
+     * @param cols number of columns
+     * @param seed RNG seed
+     * @return random matrix
+     */
     private static Matrix randomMatrix(int rows, int cols, long seed) {
         Random rnd = new Random(seed);
         double[][] a = new double[rows][cols];
@@ -52,6 +66,14 @@ public class GramSchmidtTest {
         return fromRowMajor(a);
     }
 
+    /**
+     * Checks orthonormality, triangularity, and reconstruction error for $A=QR$.
+     *
+     * @param A original matrix
+     * @param result QR factorization
+     * @param tol tolerance for error checks
+     * @param context label for assertion messages
+     */
     private void verifyQR(Matrix A, QRResult result, double tol, String context) {
         Matrix Q = result.getQ();
         Matrix R = result.getR();
@@ -82,6 +104,9 @@ public class GramSchmidtTest {
 
     // ========== Classical Gram-Schmidt Tests ==========
 
+    /**
+     * Confirms classical Gram-Schmidt on a small, well-conditioned square matrix.
+     */
     @Test
     public void testClassicalGS_SmallWellConditioned() {
         System.out.println("\n=== Classical GS: Small Well-Conditioned Matrices ===");
@@ -98,6 +123,9 @@ public class GramSchmidtTest {
         System.out.println("  3x3 well-conditioned: PASSED");
     }
 
+    /**
+     * Exercises classical Gram-Schmidt on random square matrices.
+     */
     @Test
     public void testClassicalGS_RandomSquare() {
         System.out.println("\n=== Classical GS: Random Square Matrices ===");
@@ -111,6 +139,9 @@ public class GramSchmidtTest {
         }
     }
 
+    /**
+     * Exercises classical Gram-Schmidt on random rectangular matrices.
+     */
     @Test
     public void testClassicalGS_RandomRectangular() {
         System.out.println("\n=== Classical GS: Random Rectangular Matrices ===");
@@ -125,6 +156,9 @@ public class GramSchmidtTest {
         }
     }
 
+    /**
+     * Verifies classical Gram-Schmidt reproduces an orthogonal input.
+     */
     @Test
     public void testClassicalGS_OrthogonalMatrix() {
         System.out.println("\n=== Classical GS: Orthogonal Matrix ===");
@@ -148,6 +182,9 @@ public class GramSchmidtTest {
 
     // ========== Modified Gram-Schmidt Tests ==========
 
+    /**
+     * Confirms modified Gram-Schmidt on a standard $3\times3$ example.
+     */
     @Test
     public void testModifiedGS_SmallWellConditioned() {
         System.out.println("\n=== Modified GS: Small Well-Conditioned Matrices ===");
@@ -163,6 +200,9 @@ public class GramSchmidtTest {
         System.out.println("  3x3 standard example: PASSED");
     }
 
+    /**
+     * Exercises modified Gram-Schmidt on random square matrices.
+     */
     @Test
     public void testModifiedGS_RandomSquare() {
         System.out.println("\n=== Modified GS: Random Square Matrices ===");
@@ -176,6 +216,9 @@ public class GramSchmidtTest {
         }
     }
 
+    /**
+     * Exercises modified Gram-Schmidt on random rectangular matrices.
+     */
     @Test
     public void testModifiedGS_RandomRectangular() {
         System.out.println("\n=== Modified GS: Random Rectangular Matrices ===");
@@ -189,6 +232,9 @@ public class GramSchmidtTest {
         }
     }
 
+    /**
+     * Validates modified Gram-Schmidt on tall-skinny shapes.
+     */
     @Test
     public void testModifiedGS_TallSkinny() {
         System.out.println("\n=== Modified GS: Tall-Skinny Matrices ===");
@@ -205,6 +251,9 @@ public class GramSchmidtTest {
 
     // ========== Comparison Tests ==========
 
+    /**
+     * Compares orthogonality errors between classical and modified variants.
+     */
     @Test
     public void testStabilityComparison() {
         System.out.println("\n=== Stability Comparison: Classical vs Modified GS ===");
@@ -232,6 +281,9 @@ public class GramSchmidtTest {
 
     // ========== Edge Cases ==========
 
+    /**
+     * Ensures rank-deficient inputs still produce a valid QR result.
+     */
     @Test
     public void testSingularMatrix() {
         System.out.println("\n=== Edge Case: Rank-Deficient Matrix ===");
@@ -252,6 +304,9 @@ public class GramSchmidtTest {
         System.out.println("  Rank-deficient matrix: PASSED");
     }
 
+    /**
+     * Checks stability on a near-singular $2\times2$ matrix.
+     */
     @Test
     public void testNearSingularMatrix() {
         System.out.println("\n=== Edge Case: Near-Singular Matrix ===");
@@ -284,6 +339,9 @@ public class GramSchmidtTest {
         System.out.println("  Near-singular matrix: PASSED");
     }
 
+    /**
+     * Verifies that identity input yields identity factors.
+     */
     @Test
     public void testIdentityMatrix() {
         System.out.println("\n=== Edge Case: Identity Matrix ===");
@@ -300,6 +358,9 @@ public class GramSchmidtTest {
         System.out.println("  Identity matrix: PASSED");
     }
 
+    /**
+     * Confirms normalization behavior for a single-column matrix.
+     */
     @Test
     public void testSingleColumn() {
         System.out.println("\n=== Edge Case: Single Column Matrix ===");
@@ -320,6 +381,9 @@ public class GramSchmidtTest {
         System.out.println("  Single column matrix: PASSED");
     }
 
+    /**
+     * Ensures QR decomposition handles a single-row matrix.
+     */
     @Test
     public void testSingleRow() {
         System.out.println("\n=== Edge Case: Single Row Matrix ===");
@@ -334,6 +398,9 @@ public class GramSchmidtTest {
 
     // ========== Performance Comparison ==========
 
+    /**
+     * Compares runtime between classical and modified Gram-Schmidt.
+     */
     @Test
     public void testPerformanceComparison() {
         System.out.println("\n=== Performance Comparison ===");

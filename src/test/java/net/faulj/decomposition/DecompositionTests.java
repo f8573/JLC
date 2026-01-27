@@ -259,10 +259,25 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Computes a base SVD tolerance scaled by matrix size.
+     *
+     * @param m rows
+     * @param n columns
+     * @return base tolerance
+     */
     private double svdBaseTolerance(int m, int n) {
         return getTolerance(Math.max(m, n)) * 100;
     }
 
+    /**
+     * Extracts a contiguous column slice from a matrix.
+     *
+     * @param M source matrix
+     * @param startCol start column (inclusive)
+     * @param endCol end column (exclusive)
+     * @return column-sliced matrix
+     */
     private static Matrix columnSlice(Matrix M, int startCol, int endCol) {
         if (startCol < 0 || endCol > M.getColumnCount() || startCol >= endCol) {
             throw new IllegalArgumentException("Invalid column slice");
@@ -275,6 +290,13 @@ public class DecompositionTests {
         return new Matrix(cols);
     }
 
+    /**
+     * Builds a diagonal matrix from the first {@code count} values.
+     *
+     * @param values diagonal values
+     * @param count number of diagonal entries
+     * @return diagonal matrix
+     */
     private static Matrix diagonalMatrix(double[] values, int count) {
         Matrix d = new Matrix(count, count);
         for (int i = 0; i < count; i++) {
@@ -283,12 +305,26 @@ public class DecompositionTests {
         return d;
     }
 
+    /**
+     * Computes the spectral norm via SVD.
+     *
+     * @param A input matrix
+     * @return spectral norm
+     */
     private static double spectralNorm(Matrix A) {
         SVDResult svd = new SVDecomposition().decompose(A);
         double[] sigma = svd.getSingularValues();
         return sigma.length == 0 ? 0.0 : Math.abs(sigma[0]);
     }
 
+    /**
+     * Estimates singular values via eigenvalues of $A^T A$ or $A A^T$.
+     *
+     * @param A input matrix
+     * @param tol tolerance for eigenvalue checks
+     * @param context label for assertions
+     * @return singular values sorted descending
+     */
     private double[] singularValuesFromEigen(Matrix A, double tol, String context) {
         int m = A.getRowCount();
         int n = A.getColumnCount();
@@ -318,6 +354,16 @@ public class DecompositionTests {
         return sigma;
     }
 
+    /**
+     * Validates that null-space columns in full SVD are consistent.
+     *
+     * @param A input matrix
+     * @param U left singular vectors
+     * @param V right singular vectors
+     * @param r rank estimate
+     * @param tol tolerance for null-space checks
+     * @param context label for assertions
+     */
     private void validateFullSvdNullspace(Matrix A, Matrix U, Matrix V, int r, double tol, String context) {
         int m = A.getRowCount();
         int n = A.getColumnCount();
@@ -340,6 +386,14 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Validates SVD factorization, orthogonality, and singular values.
+     *
+     * @param A original matrix
+     * @param result SVD result
+     * @param thin whether thin SVD is expected
+     * @param context label for assertions
+     */
     private void validateSvd(Matrix A, SVDResult result, boolean thin, String context) {
         int m = A.getRowCount();
         int n = A.getColumnCount();
@@ -399,6 +453,9 @@ public class DecompositionTests {
 
     // ========== QR Decomposition Tests ==========
 
+    /**
+     * Runs QR decomposition on small random square matrices.
+     */
     @Test
     public void testQR_SmallRandom() {
         System.out.println("\n=== QR Decomposition: Small Random Matrices ===");
@@ -408,6 +465,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Runs QR decomposition on medium random square matrices.
+     */
     @Test
     public void testQR_MediumRandom() {
         System.out.println("\n=== QR Decomposition: Medium Random Matrices ===");
@@ -417,6 +477,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Runs QR decomposition on large random square matrices and logs timing.
+     */
     @Test
     public void testQR_HugeRandom() {
         System.out.println("\n=== QR Decomposition: Huge Random Matrices ===");
@@ -429,6 +492,13 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Validates orthogonality, triangularity, and reconstruction for QR.
+     *
+     * @param A input matrix
+     * @param n size of the matrix
+     * @param context label for assertions
+     */
     private void testQRDecomposition(Matrix A, int n, String context) {
         QRResult res = HouseholderQR.decompose(A);
         assertNotNull(context + ": QR result", res);
@@ -459,6 +529,9 @@ public class DecompositionTests {
 
     // ========== Extended QR Variants ==========
 
+    /**
+     * Compares full and thin QR on rectangular random matrices.
+     */
     @Test
     public void testQR_FullAndThin_RectangularRandom() {
         System.out.println("\n=== Full/Thin QR: Rectangular Random Matrices ===");
@@ -475,6 +548,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Exercises pivoted QR on random matrices.
+     */
     @Test
     public void testQR_Pivoted_Random() {
         System.out.println("\n=== Pivoted QR: Random Matrices ===");
@@ -489,6 +565,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Tests strong rank-revealing QR on a near-singular matrix.
+     */
     @Test
     public void testQR_StrongRankRevealing_NearSingular() {
         System.out.println("\n=== Strong RRQR: Near-Singular Matrices ===");
@@ -501,6 +580,9 @@ public class DecompositionTests {
         testStrongRRQR(A, "Strong RRQR " + n + "x" + n);
     }
 
+    /**
+     * Exercises tall-skinny QR on random tall matrices.
+     */
     @Test
     public void testQR_TallSkinny_Random() {
         System.out.println("\n=== Tall-Skinny QR: Random Matrices ===");
@@ -515,6 +597,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Exercises communication-avoiding QR on random tall matrices.
+     */
     @Test
     public void testQR_CommunicationAvoiding_Random() {
         System.out.println("\n=== CAQR: Random Matrices ===");
@@ -529,6 +614,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Exercises symmetric QR on random symmetric matrices.
+     */
     @Test
     public void testQR_Symmetric_Random() {
         System.out.println("\n=== Symmetric QR: Random Symmetric Matrices ===");
@@ -539,6 +627,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Verifies rank-one update and downdate for QR.
+     */
     @Test
     public void testQR_Updating_Downdating_RankOne() {
         System.out.println("\n=== Updating/Downdating QR: Rank-One Updates ===");
@@ -574,6 +665,12 @@ public class DecompositionTests {
         assertReconstruction(Aminus, down.getQ().multiply(down.getR()), tol * 10, "Rank-one downdate");
     }
 
+    /**
+     * Validates full QR decomposition for rectangular matrices.
+     *
+     * @param A input matrix
+     * @param context label for assertions
+     */
     private void testFullQR(Matrix A, String context) {
         QRResult res = FullQR.decompose(A);
         assertNotNull(context + ": result", res);
@@ -586,6 +683,12 @@ public class DecompositionTests {
         assertReconstruction(A, QR, tol * 10, context);
     }
 
+    /**
+     * Validates thin QR decomposition for rectangular matrices.
+     *
+     * @param A input matrix
+     * @param context label for assertions
+     */
     private void testThinQR(Matrix A, String context) {
         QRResult res = ThinQR.decompose(A);
         assertNotNull(context + ": result", res);
@@ -600,6 +703,12 @@ public class DecompositionTests {
         assertReconstruction(A, QR, tol * 10, context);
     }
 
+    /**
+     * Validates pivoted QR reconstruction on permuted input.
+     *
+     * @param A input matrix
+     * @param context label for assertions
+     */
     private void testPivotedQR(Matrix A, String context) {
         PivotedQRResult res = PivotedQR.decompose(A);
         assertNotNull(context + ": result", res);
@@ -613,6 +722,12 @@ public class DecompositionTests {
         assertReconstruction(AP, QR, tol * 10, context);
     }
 
+    /**
+     * Validates strong rank-revealing QR properties and reconstruction.
+     *
+     * @param A input matrix
+     * @param context label for assertions
+     */
     private void testStrongRRQR(Matrix A, String context) {
         PivotedQRResult res = StrongRankRevealingQR.decompose(A);
         assertNotNull(context + ": result", res);
@@ -637,6 +752,12 @@ public class DecompositionTests {
                 maxDiag == 0.0 || minDiag / maxDiag < 1e-6 || kMax < 2);
     }
 
+    /**
+     * Validates tall-skinny QR decomposition.
+     *
+     * @param A input matrix
+     * @param context label for assertions
+     */
     private void testTallSkinnyQR(Matrix A, String context) {
         QRResult res = TallSkinnyQR.decompose(A);
         assertNotNull(context + ": result", res);
@@ -651,6 +772,12 @@ public class DecompositionTests {
         assertReconstruction(A, QR, tol * 50, context);
     }
 
+    /**
+     * Validates communication-avoiding QR decomposition.
+     *
+     * @param A input matrix
+     * @param context label for assertions
+     */
     private void testCommunicationAvoidingQR(Matrix A, String context) {
         QRResult res = CommunicationAvoidingQR.decompose(A);
         assertNotNull(context + ": result", res);
@@ -665,6 +792,12 @@ public class DecompositionTests {
         assertReconstruction(A, QR, tol * 50, context);
     }
 
+    /**
+     * Validates symmetric QR decomposition.
+     *
+     * @param A symmetric input matrix
+     * @param context label for assertions
+     */
     private void testSymmetricQR(Matrix A, String context) {
         QRResult res = SymmetricQR.decompose(A);
         assertNotNull(context + ": result", res);
@@ -679,6 +812,9 @@ public class DecompositionTests {
 
     // ========== LU Decomposition Tests ==========
 
+    /**
+     * Runs LU decomposition on small diagonally dominant matrices.
+     */
     @Test
     public void testLU_SmallDiagonallyDominant() {
         System.out.println("\n=== LU Decomposition: Small Diagonally Dominant Matrices ===");
@@ -688,6 +824,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Runs LU decomposition on medium diagonally dominant matrices.
+     */
     @Test
     public void testLU_MediumDiagonallyDominant() {
         System.out.println("\n=== LU Decomposition: Medium Diagonally Dominant Matrices ===");
@@ -697,6 +836,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Runs LU decomposition on large diagonally dominant matrices.
+     */
     @Test
     public void testLU_HugeDiagonallyDominant() {
         System.out.println("\n=== LU Decomposition: Huge Diagonally Dominant Matrices ===");
@@ -709,6 +851,13 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Validates LU factorization structure and reconstruction.
+     *
+     * @param A input matrix
+     * @param n size of the matrix
+     * @param context label for assertions
+     */
     private void testLUDecomposition(Matrix A, int n, String context) {
         LUDecomposition lu = new LUDecomposition();
         LUResult res = lu.decompose(A);
@@ -744,6 +893,9 @@ public class DecompositionTests {
 
     // ========== Cholesky Decomposition Tests ==========
 
+    /**
+     * Runs Cholesky decomposition on small SPD matrices.
+     */
     @Test
     public void testCholesky_SmallPositiveDefinite() {
         System.out.println("\n=== Cholesky Decomposition: Small Positive Definite Matrices ===");
@@ -753,6 +905,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Runs Cholesky decomposition on medium SPD matrices.
+     */
     @Test
     public void testCholesky_MediumPositiveDefinite() {
         System.out.println("\n=== Cholesky Decomposition: Medium Positive Definite Matrices ===");
@@ -762,6 +917,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Runs Cholesky decomposition on large SPD matrices.
+     */
     @Test
     public void testCholesky_HugePositiveDefinite() {
         System.out.println("\n=== Cholesky Decomposition: Huge Positive Definite Matrices ===");
@@ -774,6 +932,13 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Validates Cholesky factorization and reconstruction.
+     *
+     * @param A input SPD matrix
+     * @param n size of the matrix
+     * @param context label for assertions
+     */
     private void testCholeskyDecomposition(Matrix A, int n, String context) {
         CholeskyDecomposition cholesky = new CholeskyDecomposition();
         CholeskyResult res = cholesky.decompose(A);
@@ -861,6 +1026,9 @@ public class DecompositionTests {
         return det;
     }
 
+    /**
+     * Confirms Cholesky of identity returns identity.
+     */
     @Test
     public void testCholesky_EdgeCase_Identity() {
         System.out.println("\n=== Cholesky Decomposition: Identity Matrix ===");
@@ -877,6 +1045,9 @@ public class DecompositionTests {
         assertTrue("Identity: L equals I", error < SMALL_TOL);
     }
 
+    /**
+     * Confirms Cholesky of diagonal matrices returns sqrt diagonals.
+     */
     @Test
     public void testCholesky_EdgeCase_Diagonal() {
         System.out.println("\n=== Cholesky Decomposition: Diagonal Matrix ===");
@@ -910,6 +1081,9 @@ public class DecompositionTests {
         assertTrue("Diagonal: reconstruction", reconError < SMALL_TOL);
     }
 
+    /**
+     * Validates Cholesky on a simple $3\times3$ SPD matrix.
+     */
     @Test
     public void testCholesky_EdgeCase_SimpleSymmetric() {
         System.out.println("\n=== Cholesky Decomposition: Simple 3x3 Symmetric ===");
@@ -939,6 +1113,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Ensures non-positive-definite inputs fail for Cholesky.
+     */
     @Test(expected = ArithmeticException.class)
     public void testCholesky_NegativeCase_NotPositiveDefinite() {
         System.out.println("\n=== Cholesky Decomposition: Not Positive Definite (Expected Failure) ===");
@@ -953,6 +1130,9 @@ public class DecompositionTests {
         cholesky.decompose(A); // Should throw ArithmeticException
     }
 
+    /**
+     * Ensures Cholesky rejects non-square matrices.
+     */
     @Test(expected = IllegalArgumentException.class)
     public void testCholesky_NegativeCase_NonSquare() {
         System.out.println("\n=== Cholesky Decomposition: Non-Square Matrix (Expected Failure) ===");
@@ -964,6 +1144,9 @@ public class DecompositionTests {
 
     // ========== Hessenberg Reduction Tests ==========
 
+    /**
+     * Runs Hessenberg reduction on small random matrices.
+     */
     @Test
     public void testHessenberg_SmallRandom() {
         System.out.println("\n=== Hessenberg Reduction: Small Random Matrices ===");
@@ -973,6 +1156,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Runs Hessenberg reduction on medium random matrices.
+     */
     @Test
     public void testHessenberg_MediumRandom() {
         System.out.println("\n=== Hessenberg Reduction: Medium Random Matrices ===");
@@ -982,6 +1168,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Runs Hessenberg reduction on large random matrices.
+     */
     @Test
     public void testHessenberg_HugeRandom() {
         System.out.println("\n=== Hessenberg Reduction: Huge Random Matrices ===");
@@ -994,6 +1183,13 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Validates Hessenberg reduction structure and reconstruction.
+     *
+     * @param A input matrix
+     * @param n size of the matrix
+     * @param context label for assertions
+     */
     private void testHessenbergReduction(Matrix A, int n, String context) {
         HessenbergResult res = HessenbergReduction.decompose(A);
         assertNotNull(context + ": Hessenberg result", res);
@@ -1030,6 +1226,9 @@ public class DecompositionTests {
 
     // ========== Bidiagonalization Tests ==========
 
+    /**
+     * Runs bidiagonalization on square matrices.
+     */
     @Test
     public void testBidiagonalization_Square() {
         System.out.println("\n=== Bidiagonalization: Square Matrices ===");
@@ -1040,6 +1239,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Runs bidiagonalization on tall rectangular matrices.
+     */
     @Test
     public void testBidiagonalization_RectangularTall() {
         System.out.println("\n=== Bidiagonalization: Tall Rectangular Matrices ===");
@@ -1055,6 +1257,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Runs bidiagonalization on wide rectangular matrices.
+     */
     @Test
     public void testBidiagonalization_RectangularWide() {
         System.out.println("\n=== Bidiagonalization: Wide Rectangular Matrices ===");
@@ -1070,6 +1275,12 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Validates orthogonality, structure, and reconstruction for bidiagonalization.
+     *
+     * @param A input matrix
+     * @param context label for assertions
+     */
     private void validateBidiagonalization(Matrix A, String context) {
         int m = A.getRowCount();
         int n = A.getColumnCount();
@@ -1126,6 +1337,9 @@ public class DecompositionTests {
 
     // ========== SVD Tests ==========
 
+    /**
+     * Runs full SVD on square matrices.
+     */
     @Test
     public void testSVD_FullSquare() {
         System.out.println("\n=== SVD: Full Square Matrices ===");
@@ -1137,6 +1351,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Runs full SVD on tall rectangular matrices.
+     */
     @Test
     public void testSVD_FullRectangularTall() {
         System.out.println("\n=== SVD: Full Tall Rectangular Matrices ===");
@@ -1151,6 +1368,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Runs full SVD on wide rectangular matrices.
+     */
     @Test
     public void testSVD_FullRectangularWide() {
         System.out.println("\n=== SVD: Full Wide Rectangular Matrices ===");
@@ -1165,6 +1385,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Runs thin SVD on square matrices.
+     */
     @Test
     public void testSVD_ThinSquare() {
         System.out.println("\n=== SVD: Thin Square Matrices ===");
@@ -1176,6 +1399,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Runs thin SVD on tall rectangular matrices.
+     */
     @Test
     public void testSVD_ThinRectangularTall() {
         System.out.println("\n=== SVD: Thin Tall Rectangular Matrices ===");
@@ -1190,6 +1416,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Runs thin SVD on wide rectangular matrices.
+     */
     @Test
     public void testSVD_ThinRectangularWide() {
         System.out.println("\n=== SVD: Thin Wide Rectangular Matrices ===");
@@ -1204,6 +1433,9 @@ public class DecompositionTests {
         }
     }
 
+    /**
+     * Checks truncated SVD spectral error against next singular value.
+     */
     @Test
     public void testSVD_TruncatedSpectralError() {
         System.out.println("\n=== SVD: Truncated Spectral Error ===");
@@ -1231,6 +1463,9 @@ public class DecompositionTests {
 
     // ========== Identity Matrix Tests ==========
 
+    /**
+     * Validates decompositions on identity matrices across sizes.
+     */
     @Test
     public void testDecompositions_IdentityMatrices() {
         System.out.println("\n=== Decompositions: Identity Matrices ===");
@@ -1256,6 +1491,9 @@ public class DecompositionTests {
 
     // ========== Symmetric Matrix Tests ==========
 
+    /**
+     * Runs decomposition checks on symmetric matrices.
+     */
     @Test
     public void testDecompositions_SymmetricMatrices() {
         System.out.println("\n=== Decompositions: Symmetric Matrices ===");
@@ -1279,6 +1517,9 @@ public class DecompositionTests {
 
     // ========== Accuracy Summary Test ==========
 
+    /**
+     * Prints reconstruction accuracy summary across decompositions.
+     */
     @Test
     public void testAccuracySummary_AllDecompositions() {
         System.out.println("\n=== ACCURACY SUMMARY: All Decompositions ===");

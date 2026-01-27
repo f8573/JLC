@@ -164,6 +164,9 @@ public class OrthogonalTests {
 
     // ========== Orthonormalization Tests ==========
 
+    /**
+     * Exercises orthonormalization on small random bases.
+     */
     @Test
     public void testOrthonormalization_SmallRandom() {
         System.out.println("\n=== Orthonormalization: Small Random Bases ===");
@@ -175,6 +178,9 @@ public class OrthogonalTests {
         }
     }
 
+    /**
+     * Exercises orthonormalization on medium random bases.
+     */
     @Test
     public void testOrthonormalization_MediumRandom() {
         System.out.println("\n=== Orthonormalization: Medium Random Bases ===");
@@ -185,6 +191,9 @@ public class OrthogonalTests {
         }
     }
 
+    /**
+     * Exercises orthonormalization on larger random bases.
+     */
     @Test
     public void testOrthonormalization_LargeRandom() {
         System.out.println("\n=== Orthonormalization: Large Random Bases ===");
@@ -196,6 +205,13 @@ public class OrthogonalTests {
         }
     }
 
+    /**
+     * Validates orthonormality, unit norms, and span preservation.
+     *
+     * @param vectors input basis vectors
+     * @param size ambient dimension
+     * @param context label for assertions
+     */
     private void testOrthonormalization(List<Vector> vectors, int size, String context) {
         Matrix Q = Orthonormalization.createOrthonormalBasis(vectors);
         
@@ -240,6 +256,9 @@ public class OrthogonalTests {
         }
     }
 
+    /**
+     * Ensures single-vector input is normalized correctly.
+     */
     @Test
     public void testOrthonormalization_EdgeCase_SingleVector() {
         System.out.println("\n=== Orthonormalization: Single Vector Edge Case ===");
@@ -259,6 +278,9 @@ public class OrthogonalTests {
         assertTrue("Single vector: direction preserved", error < SMALL_TOL);
     }
 
+    /**
+     * Confirms orthonormalization preserves an orthogonal basis.
+     */
     @Test
     public void testOrthonormalization_EdgeCase_AlreadyOrthogonal() {
         System.out.println("\n=== Orthonormalization: Already Orthogonal Vectors ===");
@@ -276,6 +298,9 @@ public class OrthogonalTests {
 
     // ========== Orthogonal Projection Matrix Tests ==========
 
+    /**
+     * Exercises projection matrix construction on small random subspaces.
+     */
     @Test
     public void testProjectionMatrix_SmallRandom() {
         System.out.println("\n=== Projection Matrix: Small Random Subspaces ===");
@@ -286,6 +311,9 @@ public class OrthogonalTests {
         }
     }
 
+    /**
+     * Exercises projection matrix construction on medium random subspaces.
+     */
     @Test
     public void testProjectionMatrix_MediumRandom() {
         System.out.println("\n=== Projection Matrix: Medium Random Subspaces ===");
@@ -296,6 +324,9 @@ public class OrthogonalTests {
         }
     }
 
+    /**
+     * Exercises projection matrix construction on large random subspaces.
+     */
     @Test
     public void testProjectionMatrix_LargeRandom() {
         System.out.println("\n=== Projection Matrix: Large Random Subspaces ===");
@@ -306,6 +337,13 @@ public class OrthogonalTests {
         }
     }
 
+    /**
+     * Validates projection matrix symmetry, idempotence, and action.
+     *
+     * @param A basis matrix
+     * @param size ambient dimension
+     * @param context label for assertions
+     */
     private void testProjectionMatrix(Matrix A, int size, String context) {
         Matrix P = OrthogonalProjection.createMatrix(A);
         
@@ -347,6 +385,9 @@ public class OrthogonalTests {
         }
     }
 
+    /**
+     * Ensures full-space projection equals identity.
+     */
     @Test
     public void testProjectionMatrix_EdgeCase_FullSpace() {
         System.out.println("\n=== Projection Matrix: Full Space (Identity) ===");
@@ -360,6 +401,9 @@ public class OrthogonalTests {
         assertTrue("Full space projection is identity", error < SMALL_TOL * 10);
     }
 
+    /**
+     * Validates projection onto a one-dimensional subspace.
+     */
     @Test
     public void testProjectionMatrix_EdgeCase_OneDimensional() {
         System.out.println("\n=== Projection Matrix: One-Dimensional Subspace ===");
@@ -382,6 +426,9 @@ public class OrthogonalTests {
 
     // ========== Best Approximation Tests ==========
 
+    /**
+     * Exercises best approximation on small random cases.
+     */
     @Test
     public void testBestApproximation_SmallRandom() {
         System.out.println("\n=== Best Approximation: Small Random Cases ===");
@@ -393,6 +440,9 @@ public class OrthogonalTests {
         }
     }
 
+    /**
+     * Exercises best approximation on medium random cases.
+     */
     @Test
     public void testBestApproximation_MediumRandom() {
         System.out.println("\n=== Best Approximation: Medium Random Cases ===");
@@ -404,6 +454,9 @@ public class OrthogonalTests {
         }
     }
 
+    /**
+     * Exercises best approximation on large random cases.
+     */
     @Test
     public void testBestApproximation_LargeRandom() {
         System.out.println("\n=== Best Approximation: Large Random Cases ===");
@@ -415,6 +468,14 @@ public class OrthogonalTests {
         }
     }
 
+    /**
+     * Validates orthogonality of residual and minimal distance properties.
+     *
+     * @param A basis matrix
+     * @param y target vector
+     * @param size ambient dimension
+     * @param context label for assertions
+     */
     private void testBestApproximation(Matrix A, Vector y, int size, String context) {
         BestApproximation ba = new BestApproximation();
         Vector yHat = ba.findClosest(y, A);
@@ -465,6 +526,9 @@ public class OrthogonalTests {
         System.out.printf("  %s: Min distance = %.2e\n", context, minDist);
     }
 
+    /**
+     * Confirms best approximation equals input already in subspace.
+     */
     @Test
     public void testBestApproximation_EdgeCase_VectorInSubspace() {
         System.out.println("\n=== Best Approximation: Vector Already in Subspace ===");
@@ -483,6 +547,9 @@ public class OrthogonalTests {
         assertTrue("Vector in subspace: distance zero", error < SMALL_TOL * 10);
     }
 
+    /**
+     * Confirms projection of an orthogonal vector yields zero.
+     */
     @Test
     public void testBestApproximation_EdgeCase_OrthogonalVector() {
         System.out.println("\n=== Best Approximation: Vector Orthogonal to Subspace ===");
@@ -508,6 +575,9 @@ public class OrthogonalTests {
 
     // ========== Projection onto Orthonormal Basis Tests ==========
 
+    /**
+     * Projects random vectors onto an orthonormal basis.
+     */
     @Test
     public void testProjectOntoOrthonormalBasis_Random() {
         System.out.println("\n=== Project onto Orthonormal Basis: Random Cases ===");
@@ -557,6 +627,9 @@ public class OrthogonalTests {
         }
     }
 
+    /**
+     * Projects onto a standard basis and verifies expected result.
+     */
     @Test
     public void testProjectOntoOrthonormalBasis_EdgeCase_StandardBasis() {
         System.out.println("\n=== Project onto Orthonormal Basis: Standard Basis ===");
@@ -580,6 +653,9 @@ public class OrthogonalTests {
 
     // ========== Integration Tests ==========
 
+    /**
+     * Integrates orthonormalization and projection matrix consistency.
+     */
     @Test
     public void testIntegration_OrthonormalizationWithProjection() {
         System.out.println("\n=== Integration: Orthonormalization + Projection Matrix ===");
@@ -608,6 +684,9 @@ public class OrthogonalTests {
         assertTrue("Integration: both methods agree", error < MEDIUM_TOL * 100);
     }
 
+    /**
+     * Prints summary metrics for orthogonal operations across sizes.
+     */
     @Test
     public void testAccuracySummary_AllOrthogonalOperations() {
         System.out.println("\n=== Accuracy Summary: All Orthogonal Operations ===");

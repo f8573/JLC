@@ -8,6 +8,9 @@ import org.junit.Test;
 import net.faulj.matrix.Matrix;
 import net.faulj.vector.Vector;
 
+/**
+ * Tests linear system solvers across exact, triangular, and least-squares cases.
+ */
 public class SolverTest {
 
     private static final double TOL = 1e-9;
@@ -15,6 +18,9 @@ public class SolverTest {
 
     // ========== LUSolver Tests ==========
 
+    /**
+     * Solves a small $2\times2$ system with a known solution.
+     */
     @Test
     public void testSimpleSystem() {
         // 2x + y = 5
@@ -34,6 +40,9 @@ public class SolverTest {
         assertEquals(1.8, x.get(1), TOL);
     }
 
+    /**
+     * Verifies that the LU solution satisfies $Ax=b$.
+     */
     @Test
     public void testVerifySolutionSatisfiesEquation() {
         Matrix A = new Matrix(new double[][]{
@@ -55,6 +64,9 @@ public class SolverTest {
         }
     }
 
+    /**
+     * Solves an upper triangular system and checks reconstruction.
+     */
     @Test
     public void testUpperTriangularSystem() {
         Matrix A = new Matrix(new double[][]{
@@ -75,6 +87,9 @@ public class SolverTest {
         }
     }
 
+    /**
+     * Solves a lower triangular system and checks reconstruction.
+     */
     @Test
     public void testLowerTriangularSystem() {
         Matrix A = new Matrix(new double[][]{
@@ -95,6 +110,9 @@ public class SolverTest {
         }
     }
 
+    /**
+     * Solves a diagonal system with a known solution.
+     */
     @Test
     public void testDiagonalSystem() {
         Matrix A = new Matrix(new double[][]{
@@ -114,6 +132,9 @@ public class SolverTest {
         assertEquals(3.0, x.get(2), TOL);
     }
 
+    /**
+     * Ensures solving with identity returns the RHS unchanged.
+     */
     @Test
     public void testIdentitySystem() {
         Matrix I = Matrix.Identity(3);
@@ -128,6 +149,9 @@ public class SolverTest {
         }
     }
 
+    /**
+     * Solves a larger dense system and verifies $Ax=b$.
+     */
     @Test
     public void testLargerSystem() {
         Matrix A = new Matrix(new double[][]{
@@ -149,6 +173,9 @@ public class SolverTest {
         }
     }
 
+    /**
+     * Solves the same matrix with multiple RHS vectors.
+     */
     @Test
     public void testMultipleSolutionsWithSameMatrix() {
         Matrix A = new Matrix(new double[][]{
@@ -175,6 +202,9 @@ public class SolverTest {
         }
     }
 
+    /**
+     * Solves a random system and verifies $Ax=b$.
+     */
     @Test
     public void testRandomSystem() {
         Matrix A = Matrix.randomMatrix(5, 5);
@@ -190,6 +220,9 @@ public class SolverTest {
         }
     }
 
+    /**
+     * Solves a symmetric system and verifies $Ax=b$.
+     */
     @Test
     public void testSymmetricSystem() {
         Matrix A = new Matrix(new double[][]{
@@ -210,6 +243,9 @@ public class SolverTest {
         }
     }
 
+    /**
+     * Solves a system with negative coefficients and checks $Ax=b$.
+     */
     @Test
     public void testWithNegativeCoefficients() {
         Matrix A = new Matrix(new double[][]{
@@ -232,6 +268,9 @@ public class SolverTest {
 
     // ========== LinearSolver Interface Tests ==========
 
+    /**
+     * Exercises the LinearSolver interface using the LU implementation.
+     */
     @Test
     public void testLUSolverInterface() {
         Matrix A = new Matrix(new double[][]{
@@ -250,6 +289,9 @@ public class SolverTest {
         assertEquals(b.get(1), Ax.get(1), TOL);
     }
 
+    /**
+     * Exercises the LinearSolver interface using the least-squares solver.
+     */
     @Test
     public void testLeastSquaresSolverInterface() {
         // Overdetermined system
@@ -268,6 +310,9 @@ public class SolverTest {
         assertEquals(2, x.dimension());
     }
 
+    /**
+     * Compares LU and Cramer solvers on a small system.
+     */
     @Test
     public void testComparisonBetweenSolvers() {
         // Small system that all solvers can handle
@@ -291,6 +336,9 @@ public class SolverTest {
         }
     }
 
+    /**
+     * Ensures different solvers produce consistent results.
+     */
     @Test
     public void testPolymorphicUsage() {
         Matrix A = new Matrix(new double[][]{
@@ -324,6 +372,9 @@ public class SolverTest {
         }
     }
 
+    /**
+     * Solves scaled identity systems across multiple sizes.
+     */
     @Test
     public void testDifferentSystemSizes() {
         // Test with different sized systems
@@ -347,6 +398,9 @@ public class SolverTest {
         }
     }
 
+    /**
+     * Checks residual norm of the solved system.
+     */
     @Test
     public void testConsistencyCheck() {
         Matrix A = new Matrix(new double[][]{
@@ -371,6 +425,9 @@ public class SolverTest {
 
     // ========== LeastSquaresSolver Tests ==========
 
+    /**
+     * Ensures least-squares solver finds exact solution for square system.
+     */
     @Test
     public void testExactSolutionForSquareSystem() {
         // When system has exact solution, least squares should find it
@@ -391,6 +448,9 @@ public class SolverTest {
         assertEquals(b.get(1), Ax.get(1), TOL_LEAST_SQUARES);
     }
 
+    /**
+     * Solves an overdetermined system and checks residual magnitude.
+     */
     @Test
     public void testOverdeterminedSystem() {
         // More equations than unknowns
@@ -420,6 +480,9 @@ public class SolverTest {
                 residualNorm < 1.0);
     }
 
+    /**
+     * Fits a line to sample points using least squares.
+     */
     @Test
     public void testLinearRegression() {
         // Fit y = mx + c to points: (0,1), (1,3), (2,4), (3,6)
@@ -447,6 +510,9 @@ public class SolverTest {
         assertTrue("Intercept should be positive and reasonable", intercept > 0.5 && intercept < 2.0);
     }
 
+    /**
+     * Solves a tall system and checks residual size.
+     */
     @Test
     public void testTallMatrix() {
         // Many more equations than unknowns
@@ -474,6 +540,9 @@ public class SolverTest {
         assertTrue("Residual should be reasonably small", residual.norm2() < 2.0);
     }
 
+    /**
+     * Verifies the normal equations $A^T A x = A^T b$.
+     */
     @Test
     public void testNormalEquationsProperty() {
         // For least squares, A^T * A * x = A^T * b
@@ -499,6 +568,9 @@ public class SolverTest {
         }
     }
 
+    /**
+     * Fits a quadratic model to sample points using least squares.
+     */
     @Test
     public void testQuadraticFit() {
         // Fit y = a*x^2 + b*x + c to data
@@ -527,6 +599,9 @@ public class SolverTest {
         assertTrue("Constant should be close to 1", Math.abs(c - 1.0) < 0.1);
     }
 
+    /**
+     * Ensures the least-squares solution yields a small residual norm.
+     */
     @Test
     public void testMinimizesResidualNorm() {
         Matrix A = new Matrix(new double[][]{
@@ -552,6 +627,9 @@ public class SolverTest {
                 residualNorm < 0.5);
     }
 
+    /**
+     * Checks least-squares solution on a tall identity-like system.
+     */
     @Test
     public void testIdentityMatrixCase() {
         // Tall identity-like matrix

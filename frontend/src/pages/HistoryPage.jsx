@@ -2,6 +2,9 @@
 import Header from '../components/Header'
 import Sidebar from '../components/Sidebar'
 
+/**
+ * History view listing completed matrix sessions and actions.
+ */
 export default function HistoryPage() {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#ffffff] text-slate-800 font-sans selection:bg-primary/20">

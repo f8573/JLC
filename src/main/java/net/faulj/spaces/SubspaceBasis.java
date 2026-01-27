@@ -196,6 +196,13 @@ public class SubspaceBasis {
 		return orthonormalize(basis, tol);
 	}
 
+	/**
+	 * Orthonormalize a list of vectors using a simple Gram-Schmidt process.
+	 *
+	 * @param vectors input vectors
+	 * @param tol tolerance for zero detection
+	 * @return set of orthonormal vectors
+	 */
 	private static Set<Vector> orthonormalize(List<Vector> vectors, double tol) {
 		LinkedHashSet<Vector> result = new LinkedHashSet<>();
 		List<double[]> basis = new ArrayList<>();
@@ -224,6 +231,13 @@ public class SubspaceBasis {
 		return result;
 	}
 
+	/**
+	 * Compute the dot product of two arrays.
+	 *
+	 * @param a first vector
+	 * @param b second vector
+	 * @return dot product
+	 */
 	private static double dot(double[] a, double[] b) {
 		double sum = 0.0;
 		for (int i = 0; i < a.length; i++) {
@@ -232,6 +246,12 @@ public class SubspaceBasis {
 		return sum;
 	}
 
+	/**
+	 * Compute the Euclidean norm of a vector.
+	 *
+	 * @param a vector
+	 * @return 2-norm
+	 */
 	private static double norm2(double[] a) {
 		double sum = 0.0;
 		for (double v : a) {

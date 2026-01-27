@@ -1,5 +1,14 @@
 import React from 'react'
 
+/**
+ * Icon-only button used across the UI.
+ *
+ * @param {Object} props
+ * @param {string} props.icon
+ * @param {(event: React.MouseEvent<HTMLButtonElement>) => void} [props.onClick]
+ * @param {string} [props.className='']
+ * @param {'ghost'|'small'} [props.variant='ghost']
+ */
 export default function IconButton({ icon, onClick, className = '', variant = 'ghost' }) {
   const variants = {
     ghost: 'p-2 text-slate-gray hover:text-primary hover:bg-purple-light rounded-md transition-all',

@@ -173,6 +173,13 @@ public class PolarResult {
     private final Matrix U;  // Orthogonal matrix
     private final Matrix P;  // Positive semi-definite matrix
 
+    /**
+     * Create a polar result container.
+     *
+     * @param A original matrix
+     * @param U orthogonal factor
+     * @param P positive semi-definite factor
+     */
     public PolarResult(Matrix A, Matrix U, Matrix P) {
         this.A = A;
         this.U = U;
@@ -203,19 +210,22 @@ public class PolarResult {
         return U.multiply(P);
     }
 
+    /**
+     * Compute the Frobenius norm residual of the factorization.
+     *
+     * @return residual
+     */
     public double residualNorm() {
-        return MatrixUtils.normResidual(A, reconstruct(), 1e-10);
+        return MatrixUtils.relativeError(A, reconstruct());
     }
 
-    public double residualElement() {
-        return MatrixUtils.backwardErrorComponentwise(A, reconstruct(), 1e-10);
-    }
-
+    /**
+     * Verify orthogonality of a matrix against the identity.
+     *
+     * @param O matrix to verify
+     * @return array with {orthogonalityError}
+     */
     public double[] verifyOrthogonality(Matrix O) {
-        Matrix I = Matrix.Identity(O.getRowCount());
-        O = O.multiply(O.transpose());
-        double n = MatrixUtils.normResidual(I, O, 1e-10);
-        double e = MatrixUtils.backwardErrorComponentwise(I, O, 1e-10);
-        return new double[]{n, e};
+        return new double[]{MatrixUtils.orthogonalityError(O)};
     }
 }
