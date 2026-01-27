@@ -4,12 +4,18 @@ import net.faulj.matrix.Matrix;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
+/**
+ * Verifies determinant implementations against known values and cross-checks.
+ */
 public class DeterminantTest {
 
     private static final double TOL = 1e-9;
 
     // ========== Determinant Tests ==========
 
+    /**
+     * Checks determinant values for small matrices with known results.
+     */
     @Test
     public void determinantMatchesExpected() {
         Matrix a1 = new Matrix(new double[][]{{5}});
@@ -27,6 +33,9 @@ public class DeterminantTest {
         assertEquals(9, Determinant.compute(a3), TOL);
     }
 
+    /**
+     * Confirms the facade result matches minors-based computation.
+     */
     @Test
     public void determinantMatchesMinorsDeterminant() {
         Matrix a1 = new Matrix(new double[][]{{5}});
@@ -45,6 +54,9 @@ public class DeterminantTest {
 
     // ========== MinorsDeterminant Tests ==========
 
+    /**
+     * Validates minors-based determinant on small matrices.
+     */
     @Test
     public void minorsDeterminantMatchesExpected() {
         Matrix a1 = new Matrix(new double[][]{{5}});
@@ -64,6 +76,9 @@ public class DeterminantTest {
 
     // ========== LUDeterminant Tests ==========
 
+    /**
+     * Ensures LU-based determinant matches the facade for larger matrices.
+     */
     @Test
     public void LUDeterminantMatchesLUResult() {
         Matrix a = new Matrix(new double[][]{
@@ -79,6 +94,9 @@ public class DeterminantTest {
         assertEquals(viaLUDet, viaFacade, TOL * Math.max(1.0, Math.abs(viaFacade)));
     }
 
+    /**
+     * Validates LU determinant value for a fixed $4\times4$ matrix.
+     */
     @Test
     public void LUDeterminantValid() {
         Matrix a = new Matrix(new double[][]{

@@ -115,6 +115,12 @@ import net.faulj.matrix.Matrix;
 public class Bidiagonalization {
     private static final double TOL = 1e-12;
 
+    /**
+     * Compute the bidiagonal decomposition of a matrix.
+     *
+     * @param A matrix to decompose
+     * @return bidiagonalization result containing U, B, and V
+     */
     public BidiagonalizationResult decompose(Matrix A) {
         if (A == null) {
             throw new IllegalArgumentException("Matrix must not be null");
@@ -133,6 +139,12 @@ public class Bidiagonalization {
         );
     }
 
+    /**
+     * Compute the upper bidiagonal form for matrices with m &ge; n.
+     *
+     * @param A matrix to decompose
+     * @return bidiagonalization result
+     */
     private BidiagonalizationResult decomposeUpper(Matrix A) {
         int m = A.getRowCount();
         int n = A.getColumnCount();
@@ -186,6 +198,12 @@ public class Bidiagonalization {
         return new net.faulj.decomposition.result.BidiagonalizationResult(A, U, B, V);
     }
 
+    /**
+     * Compute the Euclidean norm of a vector.
+     *
+     * @param x vector entries
+     * @return 2-norm
+     */
     private static double norm2(double[] x) {
         double sum = 0.0;
         for (double v : x) {
@@ -194,6 +212,12 @@ public class Bidiagonalization {
         return Math.sqrt(sum);
     }
 
+    /**
+     * Check whether all entries except the first are near zero.
+     *
+     * @param x vector entries
+     * @return true if the tail is zero within tolerance
+     */
     private static boolean tailIsZero(double[] x) {
         for (int i = 1; i < x.length; i++) {
             if (Math.abs(x[i]) > TOL) {
@@ -203,6 +227,15 @@ public class Bidiagonalization {
         return true;
     }
 
+    /**
+     * Apply a Householder reflector from the left to a submatrix.
+     *
+     * @param M matrix to update
+     * @param startRow row offset
+     * @param startCol column offset
+     * @param v Householder vector
+     * @param tau Householder scalar
+     */
     private static void applyHouseholderLeft(net.faulj.matrix.Matrix M, int startRow, int startCol, double[] v, double tau) {
         int rows = M.getRowCount();
         int cols = M.getColumnCount();
@@ -223,6 +256,15 @@ public class Bidiagonalization {
         }
     }
 
+    /**
+     * Apply a Householder reflector from the right to a submatrix.
+     *
+     * @param M matrix to update
+     * @param startRow row offset
+     * @param startCol column offset
+     * @param v Householder vector
+     * @param tau Householder scalar
+     */
     private static void applyHouseholderRight(net.faulj.matrix.Matrix M, int startRow, int startCol, double[] v, double tau) {
         int rows = M.getRowCount();
         int len = v.length;

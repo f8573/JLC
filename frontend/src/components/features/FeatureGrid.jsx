@@ -21,6 +21,9 @@ const features = [
   }
 ]
 
+/**
+ * Grid of feature callouts for the matrix input console.
+ */
 export default function FeatureGrid() {
   return (
     <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-6 w-full">

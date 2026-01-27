@@ -1,5 +1,14 @@
 import React from 'react'
 
+/**
+ * Feature callout card used on the input landing view.
+ *
+ * @param {Object} props
+ * @param {string} props.icon
+ * @param {string} props.title
+ * @param {string} props.description
+ * @param {boolean} [props.hasBorder=false]
+ */
 export default function FeatureCard({ icon, title, description, hasBorder = false }) {
   return (
     <div className={`flex items-start gap-3 p-4 ${hasBorder ? 'border-l border-border-color' : ''}`}>

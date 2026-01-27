@@ -123,16 +123,29 @@ public class HessenbergResult {
     private final Matrix H;
     private final Matrix Q;
     private final Matrix A;
+    /**
+     * Create a Hessenberg result container.
+     *
+     * @param A original matrix
+     * @param H Hessenberg matrix
+     * @param Q orthogonal factor
+     */
     public HessenbergResult(Matrix A, Matrix H, Matrix Q) {
         this.A = A;
         this.H = H;
         this.Q = Q;
     }
 
+    /**
+     * @return Hessenberg matrix H
+     */
     public Matrix getH() {
         return H;
     }
 
+    /**
+     * @return orthogonal factor Q
+     */
     public Matrix getQ() {
         return Q;
     }
@@ -140,23 +153,31 @@ public class HessenbergResult {
     /**
      * Reconstructs A via A = Q H Q^T
      */
+    /**
+     * Reconstruct A via $QHQ^T$.
+     *
+     * @return reconstructed matrix
+     */
     public Matrix reconstruct() {
         return Q.multiply(H).multiply(Q.transpose());
     }
 
+    /**
+     * Compute the Frobenius norm residual of the transformation.
+     *
+     * @return residual
+     */
     public double residualNorm() {
-        return MatrixUtils.normResidual(A, reconstruct(), 1e-10);
+        return MatrixUtils.relativeError(A, reconstruct());
     }
 
-    public double residualElement() {
-        return MatrixUtils.backwardErrorComponentwise(A, reconstruct(), 1e-10);
-    }
-
+    /**
+     * Verify orthogonality of a matrix against the identity.
+     *
+     * @param O matrix to verify
+     * @return array with {orthogonalityError}
+     */
     public double[] verifyOrthogonality(Matrix O) {
-        Matrix I = Matrix.Identity(O.getRowCount());
-        O = O.multiply(O.transpose());
-        double n = MatrixUtils.normResidual(I, O, 1e-10);
-        double e = MatrixUtils.backwardErrorComponentwise(I, O, 1e-10);
-        return new double[]{n, e};
+        return new double[]{MatrixUtils.orthogonalityError(O)};
     }
 }

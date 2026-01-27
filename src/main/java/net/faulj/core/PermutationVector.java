@@ -93,6 +93,11 @@ import java.util.Arrays;
 public class PermutationVector {
     private final int[] perm;
     private int exchangeCount;
+    /**
+     * Create an identity permutation of the given size.
+     *
+     * @param size permutation size
+     */
     public PermutationVector(int size) {
         this.perm = new int[size];
         for (int i = 0; i < size; i++) {
@@ -100,6 +105,12 @@ public class PermutationVector {
         }
         this.exchangeCount = 0;
     }
+    /**
+     * Swap two indices in the permutation.
+     *
+     * @param i first index
+     * @param j second index
+     */
     public void exchange(int i, int j) {
         if (i != j) {
             int temp = perm[i];
@@ -108,12 +119,28 @@ public class PermutationVector {
             exchangeCount++;
         }
     }
+    /**
+     * Get the mapped index for a position.
+     *
+     * @param index position
+     * @return mapped index
+     */
     public int get(int index) {
         return perm[index];
     }
+    /**
+     * Get permutation size.
+     *
+     * @return size
+     */
     public int size() {
         return perm.length;
     }
+    /**
+     * Get number of exchanges performed.
+     *
+     * @return exchange count
+     */
     public int getExchangeCount() {
         return exchangeCount;
     }
@@ -123,9 +150,19 @@ public class PermutationVector {
     public int sign() {
         return (exchangeCount % 2 == 0) ? 1 : -1;
     }
+    /**
+     * Copy permutation to an array.
+     *
+     * @return permutation array
+     */
     public int[] toArray() {
         return Arrays.copyOf(perm, perm.length);
     }
+    /**
+     * Create a deep copy of this permutation vector.
+     *
+     * @return copied permutation vector
+     */
     public PermutationVector copy() {
         PermutationVector p = new PermutationVector(perm.length);
         System.arraycopy(this.perm, 0, p.perm, 0, perm.length);

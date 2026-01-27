@@ -1,6 +1,14 @@
 import React from 'react'
 import NumberInput from '../ui/NumberInput'
 
+/**
+ * Dimension control widget for matrix rows/columns.
+ *
+ * @param {Object} props
+ * @param {number} props.rows
+ * @param {number} props.cols
+ * @param {(rows: number, cols: number) => void} props.onDimensionChange
+ */
 export default function MatrixDimensionControl({ rows, cols, onDimensionChange }) {
   return (
     <div className="flex flex-col items-center gap-3 mb-10">

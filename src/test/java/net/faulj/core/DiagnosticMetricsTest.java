@@ -9,8 +9,14 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
+/**
+ * Tests for diagnostic metric analysis on matrices.
+ */
 public class DiagnosticMetricsTest {
 
+    /**
+     * Validate diagnostics for a symmetric positive definite matrix.
+     */
     @Test
     public void testDiagnosticsForSPDMatrix() {
         Matrix A = new Matrix(new double[][]{
@@ -32,6 +38,9 @@ public class DiagnosticMetricsTest {
         assertEquals(Integer.valueOf(0), diag.getNullity());
     }
 
+    /**
+     * Validate diagnostics for a singular matrix.
+     */
     @Test
     public void testDiagnosticsForSingularMatrix() {
         Matrix A = new Matrix(new double[][]{
@@ -47,6 +56,9 @@ public class DiagnosticMetricsTest {
         assertEquals(Integer.valueOf(1), diag.getNullity());
     }
 
+    /**
+     * Validate diagnostics for a rectangular matrix.
+     */
     @Test
     public void testDiagnosticsForRectangularMatrix() {
         Matrix A = new Matrix(new double[][]{

@@ -151,10 +151,18 @@ public class LUDecomposition {
     
     private final PivotPolicy pivotPolicy;
     
+    /**
+     * Create an LU decomposition with partial pivoting.
+     */
     public LUDecomposition() {
         this(PivotPolicy.PARTIAL);
     }
     
+    /**
+     * Create an LU decomposition with a specific pivoting strategy.
+     *
+     * @param pivotPolicy pivot selection policy
+     */
     public LUDecomposition(PivotPolicy pivotPolicy) {
         this.pivotPolicy = pivotPolicy;
     }

@@ -1,5 +1,12 @@
 import React from 'react'
 
+/**
+ * Search input for command-like queries.
+ *
+ * @param {Object} props
+ * @param {string} [props.placeholder='Enter matrix commands...']
+ * @param {string} [props.defaultValue='']
+ */
 export default function SearchBar({ placeholder = 'Enter matrix commands...', defaultValue = '' }) {
   return (
     <div className="relative group">

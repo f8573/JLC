@@ -7,6 +7,12 @@ import { formatComplex, formatNumber } from '../utils/format'
 import Latex from '../components/ui/Latex'
 import { computeSpectralSeverity, computePerEigenvalueSeverity, SEVERITY_COLORS } from '../utils/spectralSeverity'
 
+/**
+ * Formats polynomial coefficients into a LaTeX-ready string.
+ *
+ * @param {Array<{real:number, imag:number}>} coeffs
+ * @returns {string}
+ */
 function formatPolynomial(coeffs) {
   if (!Array.isArray(coeffs) || coeffs.length === 0) return '—'
   const degree = coeffs.length - 1
@@ -26,6 +32,12 @@ function formatPolynomial(coeffs) {
   return terms.length ? `p(\\lambda) = ${terms.join(' + ').replace(/\+ -/g, '- ')}` : '—'
 }
 
+/**
+ * Spectral analysis view for eigenvalues, eigenvectors, and decomposition status.
+ *
+ * @param {Object} props
+ * @param {string} props.matrixString - Serialized matrix payload from the URL.
+ */
 export default function MatrixSpectralPage({ matrixString }) {
   const { diagnostics } = useDiagnostics(matrixString)
   const eigenvalues = diagnostics?.eigenvalues || []

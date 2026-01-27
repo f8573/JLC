@@ -104,37 +104,58 @@ public class QRResult {
     private final Matrix Q;
     private final Matrix R;
 
+    /**
+     * Create a QR result container.
+     *
+     * @param A original matrix
+     * @param Q orthogonal factor
+     * @param R upper-triangular factor
+     */
     public QRResult(Matrix A, Matrix Q, Matrix R) {
         this.A = A;
         this.Q = Q;
         this.R = R;
     }
 
+    /**
+     * @return orthogonal factor Q
+     */
     public Matrix getQ() {
         return Q;
     }
 
+    /**
+     * @return upper-triangular factor R
+     */
     public Matrix getR() {
         return R;
     }
 
+    /**
+     * Reconstruct A from QR factors.
+     *
+     * @return reconstructed matrix
+     */
     public Matrix reconstruct() {
         return Q.multiply(R);
     }
 
+    /**
+     * Compute the Frobenius norm residual of the factorization.
+     *
+     * @return normalized residual
+     */
     public double residualNorm() {
-        return MatrixUtils.normResidual(A, reconstruct(), 1e-10);
+        return MatrixUtils.relativeError(A, reconstruct());
     }
 
-    public double residualElement() {
-        return MatrixUtils.backwardErrorComponentwise(A, reconstruct(), 1e-10);
-    }
-
+    /**
+     * Verify orthogonality of a matrix against the identity.
+     *
+     * @param O matrix to verify
+     * @return array with {orthogonalityError}
+     */
     public double[] verifyOrthogonality(Matrix O) {
-        Matrix I = Matrix.Identity(O.getRowCount());
-        O = O.multiply(O.transpose());
-        double n = MatrixUtils.normResidual(I, O, 1e-10);
-        double e = MatrixUtils.backwardErrorComponentwise(I, O, 1e-10);
-        return new double[]{n, e};
+        return new double[]{MatrixUtils.orthogonalityError(O)};
     }
 }

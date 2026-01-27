@@ -1,5 +1,12 @@
 import React from 'react'
 
+/**
+ * Focus a specific matrix cell input by row/column.
+ *
+ * @param {number} r
+ * @param {number} c
+ * @returns {HTMLInputElement | null}
+ */
 function focusCell(r, c) {
   const el = document.querySelector(`[data-cell][data-row="${r}"][data-col="${c}"]`)
   if (el) {
@@ -9,9 +16,27 @@ function focusCell(r, c) {
   return null
 }
 
+/**
+ * Single matrix input cell with keyboard navigation and validation.
+ *
+ * @param {Object} props
+ * @param {string|number} props.value
+ * @param {(row: number, col: number, value: string) => void} props.onChange
+ * @param {number} props.rowIndex
+ * @param {number} props.colIndex
+ * @param {number} props.rows
+ * @param {number} props.cols
+ * @param {() => void} [props.onAnalyze]
+ */
 export default function MatrixCell({ value, onChange, rowIndex, colIndex, rows, cols, onAnalyze }) {
   const allowed = /[0-9.\-]/
 
+  /**
+   * Normalize raw input by restricting to numeric characters and one leading minus sign.
+   *
+   * @param {string} raw
+   * @returns {string}
+   */
   function sanitizeValue(raw) {
     let val = (raw || '').split('').filter((ch) => allowed.test(ch)).join('')
     if (val.startsWith('-')) {
@@ -22,6 +47,11 @@ export default function MatrixCell({ value, onChange, rowIndex, colIndex, rows, 
     return val
   }
 
+  /**
+   * Handle user input edits and forward sanitized values.
+   *
+   * @param {React.ChangeEvent<HTMLInputElement>} e
+   */
   function handleChange(e) {
     const cleaned = sanitizeValue(e.target.value)
     if (cleaned !== e.target.value) {
@@ -30,6 +60,11 @@ export default function MatrixCell({ value, onChange, rowIndex, colIndex, rows, 
     onChange(rowIndex, colIndex, cleaned)
   }
 
+  /**
+   * Keyboard navigation and entry restrictions for the matrix grid.
+   *
+   * @param {React.KeyboardEvent<HTMLInputElement>} e
+   */
   function handleKeyDown(e) {
     const key = e.key
     const el = e.target
@@ -110,6 +145,11 @@ export default function MatrixCell({ value, onChange, rowIndex, colIndex, rows, 
     }
   }
 
+  /**
+   * Paste handler that sanitizes pasted data.
+   *
+   * @param {React.ClipboardEvent<HTMLInputElement>} e
+   */
   function handlePaste(e) {
     e.preventDefault()
     const text = e.clipboardData.getData('text') || ''

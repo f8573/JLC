@@ -177,6 +177,12 @@ public final class ChangeOfBasis {
 		return new ChangeOfBasis(this.P.multiply(other.P));
 	}
 
+	/**
+	 * Compare change-of-basis matrices for equality.
+	 *
+	 * @param o other object
+	 * @return true if equal
+	 */
 	@Override
 	public boolean equals(Object o) {
 		if (this == o) return true;
@@ -201,12 +207,18 @@ public final class ChangeOfBasis {
 		return true;
 	}
 
+	/**
+	 * @return hash code derived from matrix contents
+	 */
 	@Override
 	public int hashCode() {
 		// Use toString hash as a stable fallback for value-based hashing
 		return P.toString().hashCode();
 	}
 
+	/**
+	 * @return string representation of the change-of-basis matrix
+	 */
 	@Override
 	public String toString() {
 		return "ChangeOfBasis(P_{C<-B}=\n" + P.toString() + ")";

@@ -3,6 +3,10 @@ import Header from '../components/Header'
 import Sidebar from '../components/Sidebar'
 import MatrixInput from '../components/MatrixInput'
 
+/**
+ * Landing page layout for the matrix explorer.
+ * Renders the global header, navigation sidebar, and the matrix input panel.
+ */
 export default function MainPage() {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#ffffff] text-slate-800 font-sans selection:bg-primary/20">

@@ -3,6 +3,9 @@ import MatrixHeader from '../components/MatrixHeader'
 import MatrixSidebar from '../components/MatrixSidebar'
 import { useMatrixCompute } from '../hooks/useMatrixCompute'
 
+/**
+ * Recent queries view for previously submitted computations.
+ */
 export default function RecentPage() {
   const handleCompute = useMatrixCompute()
 

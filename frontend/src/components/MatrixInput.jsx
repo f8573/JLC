@@ -8,6 +8,9 @@ import MatrixDimensionControl from './matrix/MatrixDimensionControl'
 import MatrixActions from './matrix/MatrixActions'
 import FeatureGrid from './features/FeatureGrid'
 
+/**
+ * Interactive matrix input console with dimension controls and analysis actions.
+ */
 export default function MatrixInput() {
   const { rows, cols, values, updateDimensions, updateCell, transpose } = useMatrix()
   const { containerRef, animateTranspose } = useMatrixAnimation()

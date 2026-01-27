@@ -8,6 +8,10 @@ import net.faulj.compute.BlockedMultiply;
 import net.faulj.vector.Vector;
 import net.faulj.spaces.SubspaceBasis;
 
+/**
+ * Dense matrix implementation with optional complex components.
+ * Provides common linear algebra operations and utility helpers.
+ */
 public class Matrix {
     private final int rows;
     private final int columns;
@@ -18,6 +22,11 @@ public class Matrix {
     private double tol = 1e-10;
     private transient Vector[] columnViews;
 
+    /**
+     * Construct a matrix from column vectors.
+     *
+     * @param data column vectors
+     */
     public Matrix(Vector[] data) {
         if (data == null || data.length == 0) {
             this.rows = 0;
@@ -58,6 +67,11 @@ public class Matrix {
         pivotColumns = new ArrayList<>();
     }
 
+    /**
+     * Construct a real matrix from a 2D array.
+     *
+     * @param data row-major data
+     */
     public Matrix(double[][] data) {
         if (data == null || data.length == 0 || data[0].length == 0) {
             throw new IllegalArgumentException("Data must be non-empty");
@@ -74,6 +88,12 @@ public class Matrix {
         pivotColumns = new ArrayList<>();
     }
 
+    /**
+     * Construct a complex matrix from real and imaginary arrays.
+     *
+     * @param real real data
+     * @param imag imaginary data
+     */
     public Matrix(double[][] real, double[][] imag) {
         if (real == null || real.length == 0 || real[0].length == 0) {
             throw new IllegalArgumentException("Data must be non-empty");
@@ -99,6 +119,12 @@ public class Matrix {
         pivotColumns = new ArrayList<>();
     }
 
+    /**
+     * Construct an empty real matrix of the given size.
+     *
+     * @param rows number of rows
+     * @param cols number of columns
+     */
     public Matrix(int rows, int cols) {
         if (rows < 0 || cols < 0) {
             throw new IllegalArgumentException("Matrix dimensions must be non-negative");
@@ -117,10 +143,27 @@ public class Matrix {
         this.pivotColumns = new ArrayList<>();
     }
 
+    /**
+     * Wrap a raw data array as a matrix without copying.
+     *
+     * @param data raw data array
+     * @param rows number of rows
+     * @param cols number of columns
+     * @return wrapped matrix
+     */
     public static Matrix wrap(double[] data, int rows, int cols) {
         return wrap(data, null, rows, cols);
     }
 
+    /**
+     * Wrap raw real/imag data arrays as a matrix without copying.
+     *
+     * @param data real data array
+     * @param imag imaginary data array
+     * @param rows number of rows
+     * @param cols number of columns
+     * @return wrapped matrix
+     */
     public static Matrix wrap(double[] data, double[] imag, int rows, int cols) {
         if (data == null) {
             throw new IllegalArgumentException("Data must not be null");
@@ -137,6 +180,12 @@ public class Matrix {
         return new Matrix(rows, cols, data, imag, true);
     }
 
+    /**
+     * Set a column from a vector.
+     *
+     * @param colIndex column index
+     * @param column vector data
+     */
     public void setColumn(int colIndex, Vector column) {
         if (colIndex < 0 || colIndex >= columns) {
             throw new IllegalArgumentException("Invalid column index");
@@ -159,6 +208,12 @@ public class Matrix {
         }
     }
 
+    /**
+     * Set a column from a raw array.
+     *
+     * @param colIndex column index
+     * @param column column data
+     */
     public void setColumn(int colIndex, double[] column) {
         if (colIndex < 0 || colIndex >= columns) {
             throw new IllegalArgumentException("Invalid column index");
@@ -176,6 +231,12 @@ public class Matrix {
         }
     }
 
+    /**
+     * Get a column as a new array.
+     *
+     * @param colIndex column index
+     * @return column data
+     */
     public double[] getColumn(int colIndex) {
         if (colIndex < 0 || colIndex >= columns) {
             throw new IllegalArgumentException("Invalid column index");
@@ -189,6 +250,12 @@ public class Matrix {
         return col;
     }
 
+    /**
+     * Get a row as a new array.
+     *
+     * @param rowIndex row index
+     * @return row data
+     */
     public double[] getRow(int rowIndex) {
         if (rowIndex < 0 || rowIndex >= rows) {
             throw new IllegalArgumentException("Invalid row index");
@@ -198,6 +265,11 @@ public class Matrix {
         return row;
     }
 
+    /**
+     * Get column vector views over this matrix.
+     *
+     * @return array of column vectors
+     */
     public Vector[] getData() {
         if (columns == 0) {
             return new Vector[0];
@@ -212,6 +284,11 @@ public class Matrix {
         return columnViews;
     }
 
+    /**
+     * Set all columns from a vector array.
+     *
+     * @param data column vectors
+     */
     public void setData(Vector[] data) {
         if (data == null) {
             throw new IllegalArgumentException("Data must not be null");
@@ -224,10 +301,24 @@ public class Matrix {
         }
     }
 
+    /**
+     * Get a real value at a position.
+     *
+     * @param row row index
+     * @param column column index
+     * @return real value
+     */
     public double get(int row, int column) {
         return data[row * columns + column];
     }
 
+    /**
+     * Get an imaginary value at a position.
+     *
+     * @param row row index
+     * @param column column index
+     * @return imaginary value (0 if none)
+     */
     public double getImag(int row, int column) {
         if (imag == null) {
             return 0.0;
@@ -235,10 +326,24 @@ public class Matrix {
         return imag[row * columns + column];
     }
 
+    /**
+     * Set a real value at a position.
+     *
+     * @param row row index
+     * @param column column index
+     * @param value real value
+     */
     public void set(int row, int column, double value) {
         data[row * columns + column] = value;
     }
 
+    /**
+     * Set an imaginary value at a position.
+     *
+     * @param row row index
+     * @param column column index
+     * @param value imaginary value
+     */
     public void setImag(int row, int column, double value) {
         if (imag == null) {
             if (value == 0.0) {
@@ -249,31 +354,69 @@ public class Matrix {
         imag[row * columns + column] = value;
     }
 
+    /**
+     * Set both real and imaginary values at a position.
+     *
+     * @param row row index
+     * @param column column index
+     * @param real real value
+     * @param imaginary imaginary value
+     */
     public void setComplex(int row, int column, double real, double imaginary) {
         data[row * columns + column] = real;
         setImag(row, column, imaginary);
     }
 
+    /**
+     * Get number of rows.
+     *
+     * @return row count
+     */
     public int getRowCount() {
         return rows;
     }
 
+    /**
+     * Get number of columns.
+     *
+     * @return column count
+     */
     public int getColumnCount() {
         return columns;
     }
 
+    /**
+     * Get pivot columns used in row-reduction routines.
+     *
+     * @return pivot columns list
+     */
     public ArrayList<Vector> getPivotColumns() {
         return pivotColumns;
     }
 
+    /**
+     * Get the raw real data backing array.
+     *
+     * @return raw real data
+     */
     public double[] getRawData() {
         return data;
     }
 
+    /**
+     * Get the raw imaginary backing array, if present.
+     *
+     * @return raw imaginary data or null
+     */
     public double[] getRawImagData() {
         return imag;
     }
 
+    /**
+     * Ensure the imaginary array exists and return it.
+     *
+     * @return imaginary data array
+     */
     public double[] ensureImagData() {
         if (imag == null) {
             imag = new double[data.length];
@@ -281,6 +424,11 @@ public class Matrix {
         return imag;
     }
 
+    /**
+     * Replace the imaginary data array.
+     *
+     * @param imag imaginary data array
+     */
     public void setImagData(double[] imag) {
         if (imag != null && imag.length != data.length) {
             throw new IllegalArgumentException("Imaginary data length does not match dimensions");
@@ -288,10 +436,20 @@ public class Matrix {
         this.imag = imag;
     }
 
+    /**
+     * Check if imaginary data storage exists.
+     *
+     * @return true if complex data is present
+     */
     public boolean hasImagData() {
         return imag != null;
     }
 
+    /**
+     * Check if the matrix contains only real values.
+     *
+     * @return true if real
+     */
     public boolean isReal() {
         if (imag == null) {
             return true;
@@ -310,6 +468,12 @@ public class Matrix {
         }
     }
 
+    /**
+     * Swap two rows in place.
+     *
+     * @param row1 first row index
+     * @param row2 second row index
+     */
     public void exchangeRows(int row1, int row2) {
         if (row1 < 0 || row2 < 0 || row1 >= rows || row2 >= rows) {
             throw new IllegalArgumentException("Invalid row indices");
@@ -331,6 +495,13 @@ public class Matrix {
         }
     }
 
+    /**
+     * Add a multiple of one row to another.
+     *
+     * @param sourceRow source row index
+     * @param targetRow target row index
+     * @param multiplier scalar multiplier
+     */
     public void addMultipleOfRow(int sourceRow, int targetRow, double multiplier) {
         if (sourceRow < 0 || targetRow < 0 || sourceRow >= rows || targetRow >= rows) {
             throw new IllegalArgumentException("Invalid row indices");
@@ -345,6 +516,12 @@ public class Matrix {
         }
     }
 
+    /**
+     * Add another matrix to this matrix.
+     *
+     * @param other matrix to add
+     * @return sum matrix
+     */
     public Matrix add(Matrix other) {
         if (columns != other.getColumnCount() || rows != other.getRowCount()) {
             throw new IllegalArgumentException("Matrices must have equal dimensions");
@@ -368,6 +545,12 @@ public class Matrix {
         return result;
     }
 
+    /**
+     * Subtract another matrix from this matrix.
+     *
+     * @param other matrix to subtract
+     * @return difference matrix
+     */
     public Matrix subtract(Matrix other) {
         if (columns != other.getColumnCount() || rows != other.getRowCount()) {
             throw new IllegalArgumentException("Matrices must have equal dimensions");
@@ -391,6 +574,12 @@ public class Matrix {
         return result;
     }
 
+    /**
+     * Multiply a row by a scalar.
+     *
+     * @param row row index
+     * @param multiplier scalar multiplier
+     */
     public void multiplyRow(int row, double multiplier) {
         if (row < 0 || row >= rows) {
             throw new IllegalArgumentException("Invalid row index");
@@ -404,6 +593,11 @@ public class Matrix {
         }
     }
 
+    /**
+     * Transpose the matrix.
+     *
+     * @return transposed matrix
+     */
     public Matrix transpose() {
         Matrix result = new Matrix(columns, rows);
         double[] out = result.data;
@@ -424,6 +618,11 @@ public class Matrix {
         return result;
     }
 
+    /**
+     * Create a deep copy of this matrix.
+     *
+     * @return copied matrix
+     */
     public Matrix copy() {
         Matrix result = new Matrix(rows, columns);
         System.arraycopy(data, 0, result.data, 0, data.length);
@@ -433,6 +632,11 @@ public class Matrix {
         return result;
     }
 
+    /**
+     * Render the matrix as a string.
+     *
+     * @return string representation
+     */
     @Override
     public String toString() {
         StringBuilder s = new StringBuilder();
@@ -468,6 +672,9 @@ public class Matrix {
         return s.toString();
     }
 
+    /**
+     * Transform this matrix to row echelon form in place.
+     */
     public void toRowEchelonForm() {
         ensureReal("Row echelon form");
         exchanges = 0;
@@ -511,6 +718,9 @@ public class Matrix {
         }
     }
 
+    /**
+     * Transform this matrix to reduced row echelon form in place.
+     */
     public void toReducedRowEchelonForm() {
         ensureReal("Reduced row echelon form");
         pivotColumns.clear();
@@ -558,6 +768,12 @@ public class Matrix {
         }
     }
 
+    /**
+     * Solve a linear system $Ax=b$ using row reduction.
+     *
+     * @param b right-hand side vector
+     * @return solution vector
+     */
     public Vector solve(Vector b) {
         ensureReal("Solve");
         if (b == null) {
@@ -615,6 +831,13 @@ public class Matrix {
         return augmented.getData()[augmentedColIndex].copy();
     }
 
+    /**
+     * Append a vector to this matrix as a row or column.
+     *
+     * @param v vector to append
+     * @param position "row" or "column"
+     * @return new matrix
+     */
     public Matrix AppendVector(Vector v, String position) {
         if (v == null) {
             throw new IllegalArgumentException("Vector to append must not be null");
@@ -664,6 +887,13 @@ public class Matrix {
         return result;
     }
 
+    /**
+     * Append another matrix to this matrix.
+     *
+     * @param other matrix to append
+     * @param position "row" or "column"
+     * @return new matrix
+     */
     public Matrix AppendMatrix(Matrix other, String position) {
         if (other == null) {
             throw new IllegalArgumentException("Matrix to append must not be null");
@@ -749,6 +979,11 @@ public class Matrix {
         }
     }
 
+    /**
+     * Compute the product of diagonal entries.
+     *
+     * @return product of diagonal
+     */
     public double diagonalProduct() {
         ensureReal("Diagonal product");
         if (rows != columns) {
@@ -761,6 +996,11 @@ public class Matrix {
         return result;
     }
 
+    /**
+     * Compute the matrix trace.
+     *
+     * @return trace
+     */
     public double trace() {
         ensureReal("Trace");
         if (rows != columns) {
@@ -773,6 +1013,11 @@ public class Matrix {
         return result;
     }
 
+    /**
+     * Compute the inverse using LU-based inversion.
+     *
+     * @return inverse matrix
+     */
     public Matrix inverse() {
         ensureReal("Inverse");
         if (!isInvertible()) {
@@ -800,6 +1045,11 @@ public class Matrix {
         return m;
     }
 
+    /**
+     * Compute the determinant.
+     *
+     * @return determinant
+     */
     public double determinant() {
         ensureReal("Determinant");
         if (rows != columns) {
@@ -846,31 +1096,67 @@ public class Matrix {
         return det;
     }
 
+    /**
+     * Check whether this matrix is invertible.
+     *
+     * @return true if invertible
+     */
     public boolean isInvertible() {
         return determinant() != 0;
     }
 
+    /**
+     * Multiply by another matrix.
+     *
+     * @param other matrix to multiply
+     * @return product matrix
+     */
     public Matrix multiply(Matrix other) {
         return BlockedMultiply.multiply(this, other);
     }
 
+    /**
+     * Compute a basis for the row space.
+     *
+     * @return row space basis
+     */
     public Set<Vector> rowSpaceBasis() {
         return SubspaceBasis.rowSpaceBasis(this);
     }
 
+    /**
+     * Compute a basis for the column space.
+     *
+     * @return column space basis
+     */
     public Set<Vector> columnSpaceBasis() {
         return SubspaceBasis.columnSpaceBasis(this);
     }
 
+    /**
+     * Compute a basis for the null space.
+     *
+     * @return null space basis
+     */
     public Set<Vector> nullSpaceBasis() {
         return SubspaceBasis.nullSpaceBasis(this);
     }
 
+    /**
+     * Compute the QR decomposition.
+     *
+     * @return array containing Q and R
+     */
     public Matrix[] QR() {
         net.faulj.decomposition.result.QRResult res = net.faulj.decomposition.qr.HouseholderQR.decompose(this);
         return new Matrix[]{res.getQ(), res.getR()};
     }
 
+    /**
+     * Compute the thin QR decomposition.
+     *
+     * @return array containing Q and R
+     */
     public Matrix[] thinQR() {
         net.faulj.decomposition.result.QRResult res = net.faulj.decomposition.qr.HouseholderQR.decomposeThin(this);
         return new Matrix[]{res.getQ(), res.getR()};
@@ -880,6 +1166,11 @@ public class Matrix {
         return net.faulj.decomposition.hessenberg.HessenbergReduction.decompose(this);
     }
 
+    /**
+     * Check if this matrix is square.
+     *
+     * @return true if square
+     */
     public boolean isSquare() {
         return rows == columns;
     }
@@ -906,6 +1197,12 @@ public class Matrix {
         return new Matrix(rows, columns);
     }
 
+    /**
+     * Multiply this matrix by a scalar.
+     *
+     * @param d scalar value
+     * @return scaled matrix
+     */
     public Matrix multiplyScalar(double d) {
         Matrix result = new Matrix(rows, columns);
         double[] out = result.data;
@@ -921,18 +1218,39 @@ public class Matrix {
         return result;
     }
 
+    /**
+     * Compute the Frobenius norm.
+     *
+     * @return Frobenius norm
+     */
     public double frobeniusNorm() {
         return MatrixNorms.frobeniusNorm(this);
     }
 
+    /**
+     * Compute the induced 1-norm.
+     *
+     * @return 1-norm
+     */
     public double norm1() {
         return MatrixNorms.norm1(this);
     }
 
+    /**
+     * Compute the induced infinity norm.
+     *
+     * @return infinity norm
+     */
     public double normInf() {
         return MatrixNorms.normInf(this);
     }
 
+    /**
+     * Round values below a tolerance to zero.
+     *
+     * @param tolerance rounding tolerance
+     * @return rounded matrix
+     */
     public Matrix round(double tolerance) {
         Matrix result = new Matrix(rows, columns);
         double[] out = result.data;
@@ -950,6 +1268,15 @@ public class Matrix {
         return result;
     }
 
+    /**
+     * Extract a submatrix.
+     *
+     * @param fromRow starting row (inclusive)
+     * @param toRow ending row (exclusive)
+     * @param fromCol starting column (inclusive)
+     * @param toCol ending column (exclusive)
+     * @return submatrix
+     */
     public Matrix crop(int fromRow, int toRow, int fromCol, int toCol) {
         if (fromRow < 0 || toRow >= rows || fromCol < 0 || toCol >= columns
                 || fromRow > toRow || fromCol > toCol) {
@@ -977,6 +1304,13 @@ public class Matrix {
         return result;
     }
 
+    /**
+     * Compute the minor matrix removing row i and column j.
+     *
+     * @param i row index to remove
+     * @param j column index to remove
+     * @return minor matrix
+     */
     public Matrix minor(int i, int j) {
         if (rows != columns) {
             throw new IllegalArgumentException("Matrix must be square to compute a minor");

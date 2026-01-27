@@ -1,139 +1,152 @@
-# React Component Architecture
+# Frontend Architecture
 
 ## Overview
-This project follows **Atomic Design principles** for a fully modular React component architecture.
+This frontend is organized around **Atomic Design** with clear separation between
+UI primitives, feature-level matrix components, layout shells, and route-level pages.
+State and computation are encapsulated in custom hooks, while utilities centralize
+formatting, navigation, and diagnostics helpers.
 
 ## Directory Structure
 
 ```
 src/
+├── App.jsx                      # Root component
+├── main.jsx                     # App bootstrap
+├── ARCHITECTURE.md              # This document
 ├── components/
-│   ├── ui/              # Atomic components (primitives)
-│   │   ├── Logo.jsx
-│   │   ├── IconButton.jsx
-│   │   ├── SearchBar.jsx
-│   │   ├── UserAvatar.jsx
+│   ├── ui/                       # Atomic primitives
 │   │   ├── Badge.jsx
 │   │   ├── Button.jsx
+│   │   ├── IconButton.jsx
+│   │   ├── Latex.jsx
+│   │   ├── Logo.jsx
 │   │   ├── NumberInput.jsx
+│   │   ├── SearchBar.jsx
+│   │   ├── UserAvatar.jsx
 │   │   └── index.js
-│   │
-│   ├── matrix/          # Molecular components (matrix-specific)
-│   │   ├── MatrixCell.jsx
-│   │   ├── MatrixGrid.jsx
-│   │   ├── MatrixDimensionControl.jsx
+│   ├── matrix/                   # Matrix-specific molecular components
 │   │   ├── MatrixActions.jsx
+│   │   ├── MatrixCell.jsx
+│   │   ├── MatrixDimensionControl.jsx
+│   │   ├── MatrixDisplay.jsx
+│   │   ├── MatrixGrid.jsx
 │   │   ├── MatrixInputCard.jsx
 │   │   └── index.js
-│   │
-│   ├── features/        # Feature components
+│   ├── features/                 # Feature cards and grids
 │   │   ├── FeatureCard.jsx
 │   │   ├── FeatureGrid.jsx
 │   │   └── index.js
-│   │
-│   ├── results/         # Results-specific components
+│   ├── results/                  # Result summary blocks
+│   │   ├── Breadcrumb.jsx
 │   │   ├── PropertyCard.jsx
 │   │   ├── SummaryItem.jsx
-│   │   ├── Breadcrumb.jsx
 │   │   └── index.js
-│   │
-│   ├── Header.jsx       # Organism components
-│   ├── Sidebar.jsx
+│   ├── layout/                   # Page-level layout helpers
+│   │   ├── MatrixAnalysisLayout.jsx
+│   │   └── MatrixTabs.jsx
+│   ├── Header.jsx                # Organisms
 │   ├── MatrixHeader.jsx
-│   ├── MatrixSidebar.jsx
 │   ├── MatrixInput.jsx
-│   └── MatrixResults.jsx
-│
-├── hooks/               # Custom React hooks
+│   ├── MatrixResults.jsx
+│   ├── MatrixSidebar.jsx
+│   └── Sidebar.jsx
+├── hooks/                        # State & computation logic
+│   ├── useDiagnostics.js
 │   ├── useMatrix.js
 │   ├── useMatrixAnimation.js
+│   ├── useMatrixCompute.js
 │   └── index.js
-│
-├── pages/               # Page templates
+├── pages/                        # Route-level pages
+│   ├── FavoritesPage.jsx
+│   ├── HistoryPage.jsx
 │   ├── MainPage.jsx
-│   └── MatrixPage.jsx
-│
-└── App.jsx              # Root component & router
-
+│   ├── MatrixBasicPage.jsx
+│   ├── MatrixDecomposePage.jsx
+│   ├── MatrixPage.jsx
+│   ├── MatrixReportPage.jsx
+│   ├── MatrixSpectralPage.jsx
+│   ├── MatrixStructurePage.jsx
+│   ├── RecentPage.jsx
+│   └── SettingsPage.jsx
+└── utils/                        # Pure helpers
+    ├── diagnostics.js
+    ├── format.js
+    ├── navigation.js
+    └── spectralSeverity.js
 ```
 
 ## Design Principles
 
-### 1. **Atomic Components** (`ui/`)
-Smallest, reusable building blocks that can be used anywhere:
-- `Logo` - Brand logo with variants
-- `IconButton` - Icon-only button with multiple variants
-- `SearchBar` - Input with search icon
-- `UserAvatar` - User profile image
-- `Badge` - Status/label badges with animation support
-- `Button` - Primary action buttons with icon support
-- `NumberInput` - Numeric input with constraints
+### 1) UI Primitives (components/ui)
+Reusable, style-focused atoms used across the app.
+- Buttons, icons, badges, and numeric inputs
+- `Latex` for KaTeX rendering of equations
+- `Logo` and `UserAvatar` for identity elements
 
-### 2. **Molecular Components** (`matrix/`, `features/`, `results/`)
-Combinations of atomic components for specific purposes:
-- **Matrix**: Cell inputs, grids, dimension controls, action buttons
-- **Features**: Feature cards and grids
-- **Results**: Property cards, summary items, breadcrumbs
+### 2) Molecular Components (components/matrix, components/features, components/results)
+Feature-oriented blocks composed from UI primitives.
+- Matrix grid and cell input controls
+- Matrix actions and dimension controls
+- Feature highlight cards and result summary items
 
-### 3. **Organism Components** (root level)
-Complete sections combining molecular/atomic components:
-- `Header`, `Sidebar` - Layout components
-- `MatrixInput`, `MatrixResults` - Major feature sections
+### 3) Organisms + Layout (components/*, components/layout)
+High-level page sections and layout shells that assemble molecular components.
+- `Header`, `Sidebar`, `MatrixSidebar`
+- `MatrixInput`, `MatrixResults`
+- `MatrixAnalysisLayout` and `MatrixTabs` for consistent page structure
 
-### 4. **Page Templates** (`pages/`)
-Full pages combining organisms:
-- `MainPage` - Landing/input page
-- `MatrixPage` - Results/analysis page
+### 4) Pages (pages)
+Route-level views that compose organisms and connect to hooks.
+- Matrix flows: basic, decomposition, spectral, structure, report
+- Supporting views: favorites, history, recent, settings
 
-### 5. **Custom Hooks** (`hooks/`)
-Reusable stateful logic:
-- `useMatrix` - Matrix state management (CRUD operations)
-- `useMatrixAnimation` - Animation logic for transpose
+### 5) Hooks (hooks)
+Reusable stateful logic and computation interfaces.
+- `useMatrix`: matrix values, dimensions, and editing actions
+- `useMatrixCompute`: decomposition/eigen/etc. compute orchestration
+- `useDiagnostics`: validation and diagnostics collection
+- `useMatrixAnimation`: UI animation state for transforms
+
+### 6) Utilities (utils)
+Pure functions for formatting, navigation helpers, and diagnostic metadata.
+
+## Data & UI Flow
+1. Pages wire hooks to feature components.
+2. Matrix inputs update state via `useMatrix` and trigger compute via `useMatrixCompute`.
+3. Diagnostics flow through `useDiagnostics` into results views.
+4. Formatting and navigation helpers keep page logic lean.
 
 ## Usage Examples
 
-### Import from index files:
+### Imports from index files
 ```jsx
-import { Logo, Button, Badge } from './components/ui'
+import { Button, Badge, Latex } from './components/ui'
 import { MatrixGrid, MatrixActions } from './components/matrix'
-import { useMatrix, useMatrixAnimation } from './hooks'
+import { useMatrix, useMatrixCompute } from './hooks'
 ```
 
-### Using atomic components:
+### Component usage
 ```jsx
-<Button variant="primary" icon="analytics" onClick={handleClick}>
+<Button variant="primary" onClick={handleCompute}>
   Analyze Matrix
 </Button>
 ```
 
-### Using custom hooks:
+### Hook usage
 ```jsx
 const { rows, cols, values, updateCell, transpose } = useMatrix(2, 2)
-const { containerRef, animateTranspose } = useMatrixAnimation()
+const { compute, isRunning, results } = useMatrixCompute()
 ```
 
-## Benefits
-
-1. **Reusability**: Atomic components can be used throughout the app
-2. **Maintainability**: Changes to primitives cascade automatically
-3. **Testability**: Small components are easy to unit test
-4. **Scalability**: Add features by composing existing components
-5. **Consistency**: Design system enforced through shared components
-6. **Performance**: Optimized re-renders with proper component boundaries
-7. **Developer Experience**: Clear structure, easy to navigate
-
 ## Adding New Components
+1. Choose the layer: UI, matrix/feature/results, layout, or page.
+2. Create the file and export via the local `index.js` if applicable.
+3. Add JSDoc for props, events, and return values.
+4. Keep components pure and delegate logic to hooks/utilities.
 
-1. **Identify level**: Is it atomic, molecular, or organism?
-2. **Create file**: Place in appropriate directory
-3. **Export**: Add to corresponding `index.js`
-4. **Document**: Add props/usage to this README if needed
-
-## Component Props Pattern
-
-All components follow consistent prop patterns:
-- `variant` for style variations
-- `className` for custom styling
-- `onClick` for actions
-- `children` for composition
-- Clear, semantic prop names
+## Component Props Conventions
+- `variant`: visual style option
+- `className`: styling override hooks
+- `onClick`, `onChange`: event handlers
+- `children`: composition slot
+- Use semantic, self-describing prop names

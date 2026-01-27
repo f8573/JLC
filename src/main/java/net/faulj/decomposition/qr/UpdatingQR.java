@@ -8,16 +8,41 @@ import net.faulj.vector.Vector;
  * Rank-one update/downdate QR. This implementation recomputes QR for correctness.
  */
 public class UpdatingQR {
+    /**
+     * Apply a rank-one update A + u v^T and recompute QR.
+     *
+     * @param A base matrix
+     * @param u column vector
+     * @param v row vector
+     * @return QR result of the updated matrix
+     */
     public static QRResult rankOneUpdate(Matrix A, Vector u, Vector v) {
         Matrix updated = applyRankOne(A, u, v, 1.0);
         return HouseholderQR.decompose(updated);
     }
 
+    /**
+     * Apply a rank-one downdate A - u v^T and recompute QR.
+     *
+     * @param A base matrix
+     * @param u column vector
+     * @param v row vector
+     * @return QR result of the updated matrix
+     */
     public static QRResult rankOneDowndate(Matrix A, Vector u, Vector v) {
         Matrix updated = applyRankOne(A, u, v, -1.0);
         return HouseholderQR.decompose(updated);
     }
 
+    /**
+     * Apply a rank-one update or downdate.
+     *
+     * @param A base matrix
+     * @param u column vector
+     * @param v row vector
+     * @param sign +1.0 for update, -1.0 for downdate
+     * @return updated matrix
+     */
     private static Matrix applyRankOne(Matrix A, Vector u, Vector v, double sign) {
         if (A == null || u == null || v == null) {
             throw new IllegalArgumentException("Matrix and vectors must not be null");

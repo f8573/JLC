@@ -13,6 +13,12 @@ import java.util.List;
 public class TallSkinnyQR {
     private static final int DEFAULT_BLOCK_SIZE = 64;
 
+    /**
+     * Compute a tall-skinny QR decomposition using a two-level TSQR tree.
+     *
+     * @param A matrix to decompose
+     * @return QR result containing Q and R
+     */
     public static QRResult decompose(Matrix A) {
         if (A == null) {
             throw new IllegalArgumentException("Matrix must not be null");

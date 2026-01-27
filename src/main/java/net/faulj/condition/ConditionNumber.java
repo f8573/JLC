@@ -1,7 +1,5 @@
 package net.faulj.condition;
 
-import net.faulj.decomposition.bidiagonal.Bidiagonalization;
-import net.faulj.decomposition.result.BidiagonalizationResult;
 import net.faulj.matrix.Matrix;
 import net.faulj.svd.SVDecomposition;
 
@@ -76,6 +74,12 @@ import net.faulj.svd.SVDecomposition;
  * @see net.faulj.svd.SVDecomposition
  */
 public class ConditionNumber {
+    /**
+     * Compute the 2-norm condition number via SVD.
+     *
+     * @param A input matrix
+     * @return condition number
+     */
     public static double computeNorm2SVD(Matrix A) {
         A = A.copy();
         SVDecomposition svDecomposition = new SVDecomposition();

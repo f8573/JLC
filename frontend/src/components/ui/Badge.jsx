@@ -1,5 +1,13 @@
 import React from 'react'
 
+/**
+ * Status badge component.
+ *
+ * @param {Object} props
+ * @param {React.ReactNode} props.children
+ * @param {'default'|'status'} [props.variant='default']
+ * @param {boolean} [props.animated=false]
+ */
 export default function Badge({ children, variant = 'default', animated = false }) {
   const variants = {
     default: 'bg-purple-light border border-primary/20 text-primary',

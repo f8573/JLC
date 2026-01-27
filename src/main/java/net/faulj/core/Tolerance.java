@@ -94,10 +94,20 @@ public final class Tolerance {
     
     private Tolerance() {}
     
+    /**
+     * Get the global tolerance value.
+     *
+     * @return tolerance
+     */
     public static double get() {
         return defaultTolerance;
     }
     
+    /**
+     * Set the global tolerance value.
+     *
+     * @param tol new tolerance (non-negative)
+     */
     public static void set(double tol) {
         if (tol < 0) {
             throw new IllegalArgumentException("Tolerance must be non-negative");
@@ -105,18 +115,46 @@ public final class Tolerance {
         defaultTolerance = tol;
     }
     
+    /**
+     * Check if a value is within the global tolerance of zero.
+     *
+     * @param value value to test
+     * @return true if value is approximately zero
+     */
     public static boolean isZero(double value) {
         return Math.abs(value) <= defaultTolerance;
     }
     
+    /**
+     * Check if a value is within a custom tolerance of zero.
+     *
+     * @param value value to test
+     * @param tol tolerance
+     * @return true if value is approximately zero
+     */
     public static boolean isZero(double value, double tol) {
         return Math.abs(value) <= tol;
     }
     
+    /**
+     * Compare two values within the global tolerance.
+     *
+     * @param a first value
+     * @param b second value
+     * @return true if values are approximately equal
+     */
     public static boolean equals(double a, double b) {
         return Math.abs(a - b) <= defaultTolerance;
     }
     
+    /**
+     * Compare two values within a custom tolerance.
+     *
+     * @param a first value
+     * @param b second value
+     * @param tol tolerance
+     * @return true if values are approximately equal
+     */
     public static boolean equals(double a, double b, double tol) {
         return Math.abs(a - b) <= tol;
     }

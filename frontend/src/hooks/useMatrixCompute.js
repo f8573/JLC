@@ -1,5 +1,8 @@
 ﻿import { analyzeAndCache, parseMatrixString, matrixToString } from '../utils/diagnostics'
 
+/**
+ * Hook that returns a matrix compute handler for header inputs.
+ */
 export function useMatrixCompute() {
   return async function handleCompute(inputValue) {
     const parsed = parseMatrixString(inputValue)

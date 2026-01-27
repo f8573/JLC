@@ -8,8 +8,14 @@ import org.junit.Test;
 
 import static org.junit.Assert.*;
 
+/**
+ * Tests for reciprocal condition number estimation.
+ */
 public class ReciprocalConditionTest {
 
+    /**
+     * Validate reciprocal condition number for a diagonal matrix via LU.
+     */
     @Test
     public void testEstimateFromLU_diagonalMatrix() {
         double[][] data = new double[][]{

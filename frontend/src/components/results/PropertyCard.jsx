@@ -1,5 +1,15 @@
 import React from 'react'
 
+/**
+ * Summary property card for matrix metrics.
+ *
+ * @param {Object} props
+ * @param {string} props.icon
+ * @param {string} props.label
+ * @param {React.ReactNode} props.value
+ * @param {string} [props.iconBg='bg-primary/10']
+ * @param {string} [props.iconColor='text-primary']
+ */
 export default function PropertyCard({ icon, label, value, iconBg = 'bg-primary/10', iconColor = 'text-primary' }) {
   return (
     <div className="p-5 rounded-xl bg-primary-light border border-primary/10 flex items-center justify-between">

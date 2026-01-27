@@ -2,6 +2,9 @@ package net.faulj.compute;
 
 import java.util.Locale;
 
+/**
+ * Utility for detecting CUDA runtime availability.
+ */
 final class CudaSupport {
     private static final String PROP_FORCE = "faulj.cuda.force";
     private static final String PROP_ENABLED = "faulj.cuda.enabled";
@@ -23,6 +26,11 @@ final class CudaSupport {
     private CudaSupport() {
     }
 
+    /**
+     * Check whether CUDA is available in the current runtime.
+     *
+     * @return true if CUDA is available
+     */
     static boolean isCudaAvailable() {
         Boolean local = cached;
         if (local != null) {
@@ -33,6 +41,9 @@ final class CudaSupport {
         return available;
     }
 
+    /**
+     * Reset cached CUDA detection state.
+     */
     static void refresh() {
         cached = null;
     }

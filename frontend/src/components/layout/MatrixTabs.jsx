@@ -8,6 +8,13 @@ const tabs = [
   { id: 'structure', label: 'Structure' }
 ]
 
+/**
+ * Tab navigation for matrix analysis sections.
+ *
+ * @param {Object} props
+ * @param {string} props.matrixString
+ * @param {'basic'|'spectral'|'decompose'|'structure'} [props.activeTab='basic']
+ */
 export default function MatrixTabs({ matrixString, activeTab = 'basic' }) {
   const encoded = encodeURIComponent(matrixString || '')
   return (

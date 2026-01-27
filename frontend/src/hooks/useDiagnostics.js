@@ -1,6 +1,12 @@
 ﻿import { useEffect, useState } from 'react'
 import { parseMatrixString, loadCachedDiagnostics, analyzeAndCache } from '../utils/diagnostics'
 
+/**
+ * Fetch and cache diagnostics for a given matrix string.
+ *
+ * @param {string} matrixString
+ * @returns {{diagnostics: any, loading: boolean, error: string | null}}
+ */
 export function useDiagnostics(matrixString) {
   const [diagnostics, setDiagnostics] = useState(() => loadCachedDiagnostics(matrixString))
   const [loading, setLoading] = useState(!diagnostics)

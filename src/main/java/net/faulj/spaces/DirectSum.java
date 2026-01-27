@@ -122,23 +122,44 @@ public final class DirectSum {
 	// Basic getters
 	// -------------------------
 
+	/**
+	 * @return ambient dimension n
+	 */
 	public int ambientDimension() { return n; }
 
+	/**
+	 * @return dimension of subspace U
+	 */
 	public int dimU() { return dimU; }
 
+	/**
+	 * @return dimension of subspace W
+	 */
 	public int dimW() { return dimW; }
 
-	/** dim(V) where V := U + W */
+	/**
+	 * @return dim(V) where V := U + W
+	 */
 	public int dimV() { return dimV; }
 
+	/**
+	 * @return copy of basis matrix for U
+	 */
 	public Matrix basisU() { return BU.copy(); }
 
+	/**
+	 * @return copy of basis matrix for W
+	 */
 	public Matrix basisW() { return BW.copy(); }
 
-	/** Returns [BU BW] */
+	/**
+	 * @return copy of concatenated basis matrix [BU BW]
+	 */
 	public Matrix basisV() { return BV.copy(); }
 
-	/** True iff [BU BW] is square and invertible (so V = R^n and projections are global linear maps). */
+	/**
+	 * @return true iff [BU BW] is square and invertible
+	 */
 	public boolean isSquareInvertible() { return squareInvertible; }
 
 	// -------------------------
@@ -191,12 +212,22 @@ public final class DirectSum {
 		return new Decomposition(u, w, new Vector(a), new Vector(c), res);
 	}
 
-	/** Projection onto U along W (defined on V = U ⊕ W). */
+	/**
+	 * Projection onto U along W (defined on V = U ⊕ W).
+	 *
+	 * @param v vector to project
+	 * @return projection onto U
+	 */
 	public Vector projectOntoUAlongW(Vector v) {
 		return decompose(v).u();
 	}
 
-	/** Projection onto W along U (defined on V = U ⊕ W). */
+	/**
+	 * Projection onto W along U (defined on V = U ⊕ W).
+	 *
+	 * @param v vector to project
+	 * @return projection onto W
+	 */
 	public Vector projectOntoWAlongU(Vector v) {
 		return decompose(v).w();
 	}
@@ -217,7 +248,11 @@ public final class DirectSum {
 		return BU.multiply(EU).multiply(BVinv);
 	}
 
-	/** Analogous projection matrix onto W along U: P_W = BW * E_W * BV^{-1}. */
+	/**
+	 * Analogous projection matrix onto W along U: P_W = BW * E_W * BV^{-1}.
+	 *
+	 * @return projection matrix onto W along U
+	 */
 	public Matrix projectionMatrixOntoWAlongU() {
 		requireSquareInvertible("projectionMatrixOntoWAlongU");
 		Matrix EW = selectorLast(dimW, n, dimU); // dimW x n, selects coords dimU..n-1
@@ -243,14 +278,29 @@ public final class DirectSum {
 			this.residual = residual;
 		}
 
+		/**
+		 * @return component in U
+		 */
 		public Vector u() { return u.copy(); }
 
+		/**
+		 * @return component in W
+		 */
 		public Vector w() { return w.copy(); }
 
+		/**
+		 * @return coordinates of u in basis U
+		 */
 		public Vector coefficientsU() { return coeffU.copy(); }
 
+		/**
+		 * @return coordinates of w in basis W
+		 */
 		public Vector coefficientsW() { return coeffW.copy(); }
 
+		/**
+		 * @return residual norm for u + w versus v
+		 */
 		public double residual() { return residual; }
 	}
 
@@ -258,6 +308,11 @@ public final class DirectSum {
 	// Internal helpers (Matrix ops)
 	// -------------------------
 
+	/**
+	 * Ensure BV is square and invertible for global projection matrices.
+	 *
+	 * @param method method name for error context
+	 */
 	private void requireSquareInvertible(String method) {
 		if (!squareInvertible) {
 			throw new UnsupportedOperationException(
@@ -268,6 +323,13 @@ public final class DirectSum {
 	}
 
 	/** Build selector E_U = [I_k 0] of size k×n */
+	/**
+	 * Build a selector matrix that picks the first k coordinates.
+	 *
+	 * @param k number of coordinates
+	 * @param n total dimension
+	 * @return selector matrix
+	 */
 	private static Matrix selectorFirst(int k, int n) {
 		// Create k x n matrix
 		// We can use Matrix.Identity(k) then append Matrix.zero(k, n-k)
@@ -276,6 +338,14 @@ public final class DirectSum {
 	}
 
 	/** Build selector E_W that selects the last m coordinates starting at offset */
+	/**
+	 * Build a selector matrix that picks the last m coordinates.
+	 *
+	 * @param m number of coordinates
+	 * @param n total dimension
+	 * @param offset starting index
+	 * @return selector matrix
+	 */
 	private static Matrix selectorLast(int m, int n, int offset) {
 		// [0 I_m] of size m x n
 		if (offset == 0 && m == n) return Matrix.Identity(m);
@@ -287,10 +357,24 @@ public final class DirectSum {
 		return Z.AppendMatrix(I, "RIGHT");
 	}
 
+	/**
+	 * Multiply matrix by vector and return as Vector.
+	 *
+	 * @param A matrix
+	 * @param x vector data
+	 * @return resulting vector
+	 */
 	private static Vector matVecToVector(Matrix A, double[] x) {
 		return new Vector(matVec(A, x));
 	}
 
+	/**
+	 * Multiply matrix by vector and return raw array.
+	 *
+	 * @param A matrix
+	 * @param x vector data
+	 * @return resulting array
+	 */
 	private static double[] matVec(Matrix A, double[] x) {
 		int r = A.getRowCount();
 		int c = A.getColumnCount();
@@ -310,6 +394,13 @@ public final class DirectSum {
 
 	/**
 	 * Rank via Gaussian elimination with partial pivoting (on a copied array).
+	 */
+	/**
+	 * Estimate rank using a simple Gaussian elimination with tolerance.
+	 *
+	 * @param A matrix to analyze
+	 * @param tol tolerance
+	 * @return estimated rank
 	 */
 	private static int rank(Matrix A, double tol) {
 		double[][] M = toArray(A);
@@ -350,6 +441,13 @@ public final class DirectSum {
 	/**
 	 * Inverse via Gauss-Jordan with partial pivoting.
 	 * Throws if singular under tol.
+	 */
+	/**
+	 * Compute matrix inverse using Gaussian elimination.
+	 *
+	 * @param A matrix to invert
+	 * @param tol tolerance
+	 * @return inverse matrix
 	 */
 	private static Matrix inverse(Matrix A, double tol) {
 		int n = A.getRowCount();
@@ -404,6 +502,14 @@ public final class DirectSum {
 	 *
 	 * NOTE: Normal equations can be ill-conditioned; swap this for a QR solve when you have it.
 	 */
+	/**
+	 * Solve least squares for full column-rank BV using normal equations.
+	 *
+	 * @param BV basis matrix with independent columns
+	 * @param b right-hand side
+	 * @param tol tolerance
+	 * @return solution vector
+	 */
 	private static double[] solveNormalEquationsFullColumnRank(Matrix BV, double[] b, double tol) {
 		int n = BV.getRowCount();
 		int p = BV.getColumnCount();
@@ -433,6 +539,14 @@ public final class DirectSum {
 		return solveLinearSystem(G, rhs, tol);
 	}
 
+	/**
+	 * Solve a dense linear system using Gaussian elimination.
+	 *
+	 * @param A coefficient matrix
+	 * @param b right-hand side
+	 * @param tol tolerance
+	 * @return solution vector
+	 */
 	private static double[] solveLinearSystem(double[][] A, double[] b, double tol) {
 		int n = A.length;
 		if (A[0].length != n) throw new IllegalArgumentException("A must be square.");
@@ -476,6 +590,12 @@ public final class DirectSum {
 		return x;
 	}
 
+	/**
+	 * Convert a matrix to a dense row-major array.
+	 *
+	 * @param A matrix to convert
+	 * @return dense array
+	 */
 	private static double[][] toArray(Matrix A) {
 		double[][] out = new double[A.getRowCount()][A.getColumnCount()];
 		for (int i = 0; i < A.getRowCount(); i++) {
@@ -486,6 +606,13 @@ public final class DirectSum {
 		return out;
 	}
 
+	/**
+	 * Swap two rows in-place.
+	 *
+	 * @param M matrix array
+	 * @param i first row index
+	 * @param j second row index
+	 */
 	private static void swapRows(double[][] M, int i, int j) {
 		if (i == j) return;
 		double[] tmp = M[i];

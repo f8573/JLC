@@ -74,6 +74,13 @@ import net.faulj.vector.Vector;
  * @see net.faulj.solve.LeastSquaresSolver
  */
 public class BestApproximation {
+	/**
+	 * Find the closest vector in the column space of A to y.
+	 *
+	 * @param y target vector
+	 * @param A basis matrix whose columns span the subspace
+	 * @return best approximation in the subspace
+	 */
 	public Vector findClosest(Vector y, Matrix A) {
 		LeastSquaresSolver leastSquaresSolver = new LeastSquaresSolver();
 		Vector xHat = leastSquaresSolver.solve(A,y);

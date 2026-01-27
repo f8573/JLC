@@ -1,9 +1,24 @@
 import { useState, useCallback } from 'react'
 
+/**
+ * Create an empty matrix (as string grid) with the given dimensions.
+ *
+ * @param {number} rows
+ * @param {number} cols
+ * @param {string} [fill='0']
+ * @returns {string[][]}
+ */
 function makeEmpty(rows, cols, fill = '0') {
   return Array.from({ length: rows }, () => Array.from({ length: cols }, () => fill))
 }
 
+/**
+ * Matrix state hook used by the input console.
+ *
+ * @param {number} [initialRows=2]
+ * @param {number} [initialCols=2]
+ * @param {string[][] | null} [initialValues=null]
+ */
 export function useMatrix(initialRows = 2, initialCols = 2, initialValues = null) {
   const [rows, setRows] = useState(initialRows)
   const [cols, setCols] = useState(initialCols)

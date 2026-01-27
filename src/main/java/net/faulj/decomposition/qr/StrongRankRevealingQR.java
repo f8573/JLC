@@ -16,6 +16,12 @@ public class StrongRankRevealingQR {
     private static final double EPS = 1e-12;
     private static final double BOOST = 1.05;
 
+    /**
+     * Compute a heuristic strong rank-revealing QR decomposition.
+     *
+     * @param A matrix to decompose
+     * @return pivoted QR result with enhanced diagonal dominance
+     */
     public static PivotedQRResult decompose(Matrix A) {
         PivotedQRResult base = PivotedQR.decompose(A);
         Matrix Q = base.getQ().copy();
@@ -46,6 +52,14 @@ public class StrongRankRevealingQR {
         return new PivotedQRResult(A, Q, R, P);
     }
 
+    /**
+     * Swap adjacent columns using a Givens rotation to preserve triangular form.
+     *
+     * @param Q orthogonal factor to update
+     * @param R upper triangular factor to update
+     * @param P permutation vector to update
+     * @param k left column index of the adjacent pair
+     */
     private static void swapAdjacentColumnsWithGivens(Matrix Q, Matrix R, PermutationVector P, int k) {
         int m = R.getRowCount();
         int n = R.getColumnCount();
@@ -84,6 +98,13 @@ public class StrongRankRevealingQR {
         }
     }
 
+    /**
+     * Swap two columns in-place.
+     *
+     * @param M matrix to update
+     * @param c1 first column index
+     * @param c2 second column index
+     */
     private static void swapColumns(Matrix M, int c1, int c2) {
         if (c1 == c2) {
             return;

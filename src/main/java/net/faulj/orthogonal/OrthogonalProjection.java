@@ -69,6 +69,12 @@ import net.faulj.vector.Vector;
  * @see net.faulj.decomposition.qr.GramSchmidt
  */
 public class OrthogonalProjection {
+	/**
+	 * Create the orthogonal projection matrix onto the column space of A.
+	 *
+	 * @param A basis matrix
+	 * @return projection matrix
+	 */
 	public static Matrix createMatrix(Matrix A) {
 		if (A == null) {
 			throw new IllegalArgumentException("Matrix must not be null");

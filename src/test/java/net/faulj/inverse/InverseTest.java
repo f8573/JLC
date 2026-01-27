@@ -1,17 +1,22 @@
 package net.faulj.inverse;
 
-import net.faulj.core.Tolerance;
 import net.faulj.matrix.Matrix;
 import org.junit.Test;
 
 import static org.junit.Assert.*;
 
+/**
+ * Tests adjugate- and LU-based matrix inversion implementations.
+ */
 public class InverseTest {
 
     private static final double TOL = 1e-8;
 
     // ========== AdjugateInverse Tests ==========
 
+    /**
+     * Verifies adjugate inverse on a $2\times2$ matrix.
+     */
     @Test
     public void adjugateInverse2x2Matrix() {
         Matrix A = new Matrix(new double[][]{
@@ -32,6 +37,9 @@ public class InverseTest {
         }
     }
 
+    /**
+     * Verifies adjugate inverse on a $3\times3$ matrix.
+     */
     @Test
     public void adjugateInverse3x3Matrix() {
         Matrix A = new Matrix(new double[][]{
@@ -53,6 +61,9 @@ public class InverseTest {
         }
     }
 
+    /**
+     * Cross-checks adjugate inverse against LU inverse for consistency.
+     */
     @Test
     public void adjugateInverseComparisonWithLUInverse() {
         Matrix A = new Matrix(new double[][]{
@@ -74,6 +85,9 @@ public class InverseTest {
         }
     }
 
+    /**
+     * Ensures singular matrices trigger an exception for adjugate inverse.
+     */
     @Test(expected = ArithmeticException.class)
     public void adjugateInverseSingularMatrixThrowsException() {
         Matrix A = new Matrix(new double[][]{
@@ -85,6 +99,9 @@ public class InverseTest {
         AdjugateInverse.compute(A);
     }
 
+    /**
+     * Confirms adjugate inverse returns reciprocal diagonal entries.
+     */
     @Test
     public void adjugateInverseOfDiagonalMatrix() {
         Matrix D = new Matrix(new double[][]{
@@ -100,6 +117,9 @@ public class InverseTest {
         assertEquals(0.5, Dinv.get(2, 2), TOL);
     }
 
+    /**
+     * Confirms adjugate inverse preserves identity.
+     */
     @Test
     public void adjugateInverseOfIdentityIsIdentity() {
         Matrix I = Matrix.Identity(3);
@@ -115,6 +135,9 @@ public class InverseTest {
 
     // ========== LUInverse Tests ==========
 
+    /**
+     * Verifies $A A^{-1} = I$ for LU-based inverse.
+     */
     @Test
     public void luInverseMultiplicationGivesIdentity() {
         Matrix A = new Matrix(new double[][]{
@@ -137,6 +160,9 @@ public class InverseTest {
         }
     }
 
+    /**
+     * Checks that inverting an inverse returns the original matrix.
+     */
     @Test
     public void luInverseOfInverseIsOriginal() {
         Matrix A = new Matrix(new double[][]{
@@ -158,6 +184,9 @@ public class InverseTest {
         }
     }
 
+    /**
+     * Confirms LU inverse preserves identity.
+     */
     @Test
     public void luInverseOfIdentityIsIdentity() {
         Matrix I = Matrix.Identity(4);
@@ -173,6 +202,9 @@ public class InverseTest {
         }
     }
 
+    /**
+     * Verifies LU inverse on diagonal matrices yields reciprocal diagonals.
+     */
     @Test
     public void luInverseOfDiagonalMatrix() {
         Matrix D = new Matrix(new double[][]{
@@ -189,6 +221,9 @@ public class InverseTest {
         assertEquals(0.2, Dinv.get(2, 2), TOL);
     }
 
+    /**
+     * Ensures LU inverse rejects singular matrices.
+     */
     @Test(expected = ArithmeticException.class)
     public void luInverseSingularMatrixThrowsException() {
         // Singular matrix (row 2 = row 1)
@@ -201,6 +236,9 @@ public class InverseTest {
         LUInverse.compute(A);
     }
 
+    /**
+     * Ensures LU inverse rejects the zero matrix.
+     */
     @Test(expected = ArithmeticException.class)
     public void luInverseZeroMatrixThrowsException() {
         Matrix zero = new Matrix(new double[][]{
@@ -212,6 +250,9 @@ public class InverseTest {
         LUInverse.compute(zero);
     }
 
+    /**
+     * Ensures LU inverse rejects non-square matrices.
+     */
     @Test(expected = IllegalArgumentException.class)
     public void luInverseNonSquareMatrixThrowsException() {
         Matrix A = new Matrix(new double[][]{
@@ -222,6 +263,9 @@ public class InverseTest {
         LUInverse.compute(A);
     }
 
+    /**
+     * Verifies $A^{-1} A = I$ for LU inverse.
+     */
     @Test
     public void luInverseTimesOriginalIsIdentity() {
         Matrix A = new Matrix(new double[][]{
@@ -244,6 +288,9 @@ public class InverseTest {
         }
     }
 
+    /**
+     * Confirms symmetry preservation for inverse of symmetric matrices.
+     */
     @Test
     public void luInverseSymmetricMatrixInverse() {
         Matrix A = new Matrix(new double[][]{
@@ -264,6 +311,9 @@ public class InverseTest {
         }
     }
 
+    /**
+     * Validates LU inverse accuracy on a random matrix.
+     */
     @Test
     public void luInverseRandomMatrixInverse() {
         Matrix A = Matrix.randomMatrix(5, 5);
@@ -284,6 +334,9 @@ public class InverseTest {
         assertTrue("Max deviation should be small: " + maxDeviation, maxDeviation < TOL);
     }
 
+    /**
+     * Verifies LU inverse for a larger fixed $4\times4$ matrix.
+     */
     @Test
     public void luInverseLargerMatrix() {
         Matrix A = new Matrix(new double[][]{

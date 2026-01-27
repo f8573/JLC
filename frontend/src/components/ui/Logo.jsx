@@ -1,5 +1,11 @@
 import React from 'react'
 
+/**
+ * Brand logo badge.
+ *
+ * @param {Object} props
+ * @param {'default'|'large'} [props.variant='default']
+ */
 export default function Logo({ variant = 'default' }) {
   const sizes = {
     default: 'size-9',

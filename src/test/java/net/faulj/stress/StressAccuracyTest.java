@@ -16,6 +16,9 @@ import java.util.Random;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+/**
+ * Stress tests decomposition accuracy across many random trials and sizes.
+ */
 public class StressAccuracyTest {
 
     private static final int TRIALS = 2000;
@@ -31,6 +34,9 @@ public class StressAccuracyTest {
     // How often to print progress during the main stress loop (in trials)
     private static final int PROGRESS_INTERVAL = 100;
 
+    /**
+     * Runs repeated QR/Hessenberg/Schur decompositions and checks residuals.
+     */
     @Test
     public void stressDecompositionAndEigenAccuracy() {
         Random rnd = new Random(1234567L);
@@ -77,6 +83,9 @@ public class StressAccuracyTest {
         }
     }
 
+    /**
+     * Benchmarks larger matrices with size-based dispatch policy settings.
+     */
     @Test
     public void stressLargeMatrixDecompositions() {
         Random rnd = new Random(7654321L);
@@ -177,6 +186,12 @@ public class StressAccuracyTest {
         return builder.build();
     }
 
+    /**
+     * Formats a dispatch algorithm label for logging.
+     *
+     * @param algorithm chosen algorithm
+     * @return label for output
+     */
     private static String algorithmLabel(DispatchPolicy.Algorithm algorithm) {
         if (algorithm == null) {
             return "STANDARD";
@@ -211,6 +226,13 @@ public class StressAccuracyTest {
         return (flops / 1e6) / (nanos / 1e9);
     }
 
+    /**
+     * Generates a random $n\times n$ matrix with entries in $[-1, 1]$.
+     *
+     * @param rnd random source
+     * @param n matrix dimension
+     * @return random matrix
+     */
     private static Matrix randomMatrix(Random rnd, int n) {
         double[][] data = new double[n][n];
         for (int i = 0; i < n; i++) {

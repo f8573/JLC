@@ -1,6 +1,17 @@
 ﻿import React from 'react'
 import { formatNumber } from '../../utils/format'
 
+/**
+ * Render a numeric matrix as a CSS grid.
+ *
+ * @param {Object} props
+ * @param {number[][]} props.data
+ * @param {number} [props.minCellWidth=60]
+ * @param {number} [props.gap=8]
+ * @param {string} [props.className='']
+ * @param {string} [props.cellClassName='']
+ * @param {boolean} [props.highlightDiagonal=false]
+ */
 export default function MatrixDisplay({
   data,
   minCellWidth = 60,

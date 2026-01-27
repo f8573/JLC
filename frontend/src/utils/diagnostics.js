@@ -1,4 +1,10 @@
-﻿export function parseMatrixString(matrixString) {
+﻿/**
+ * Parse a serialized matrix string into a 2D array.
+ *
+ * @param {string} matrixString
+ * @returns {number[][] | null}
+ */
+export function parseMatrixString(matrixString) {
   if (!matrixString) return null
   try {
     const parsed = JSON.parse(matrixString)
@@ -9,6 +15,12 @@
   }
 }
 
+/**
+ * Convert grid string values into numeric matrix data.
+ *
+ * @param {string[][]} values
+ * @returns {number[][]}
+ */
 export function valuesToMatrixData(values) {
   return values.map((row) =>
     row.map((value) => {
@@ -18,14 +30,32 @@ export function valuesToMatrixData(values) {
   )
 }
 
+/**
+ * Serialize a numeric matrix into a JSON string.
+ *
+ * @param {number[][]} matrixData
+ * @returns {string}
+ */
 export function matrixToString(matrixData) {
   return JSON.stringify(matrixData)
 }
 
+/**
+ * Build a namespaced cache key for a matrix string.
+ *
+ * @param {string} matrixString
+ * @returns {string}
+ */
 function cacheKey(matrixString) {
   return `diagnostics:${encodeURIComponent(matrixString)}`
 }
 
+/**
+ * Load cached diagnostics from session storage.
+ *
+ * @param {string} matrixString
+ * @returns {any | null}
+ */
 export function loadCachedDiagnostics(matrixString) {
   if (!matrixString) return null
   try {
@@ -38,6 +68,12 @@ export function loadCachedDiagnostics(matrixString) {
   }
 }
 
+/**
+ * Persist diagnostics to session storage.
+ *
+ * @param {string} matrixString
+ * @param {any} diagnostics
+ */
 export function cacheDiagnostics(matrixString, diagnostics) {
   if (!matrixString || !diagnostics) return
   try {
@@ -53,6 +89,12 @@ export function cacheDiagnostics(matrixString, diagnostics) {
   }
 }
 
+/**
+ * Fetch diagnostics from the backend API.
+ *
+ * @param {number[][]} matrixData
+ * @returns {Promise<any>}
+ */
 export async function fetchDiagnostics(matrixData) {
   const response = await fetch('/api/diagnostics', {
     method: 'POST',
@@ -69,12 +111,25 @@ export async function fetchDiagnostics(matrixData) {
   return normalizeDiagnostics(data)
 }
 
+/**
+ * Fetch diagnostics and update cache.
+ *
+ * @param {number[][]} matrixData
+ * @param {string} matrixString
+ * @returns {Promise<any>}
+ */
 export async function analyzeAndCache(matrixData, matrixString) {
   const diagnostics = await fetchDiagnostics(matrixData)
   cacheDiagnostics(matrixString, diagnostics)
   return diagnostics
 }
 
+/**
+ * Normalize API diagnostics into a flat, backwards-compatible shape.
+ *
+ * @param {any} resp
+ * @returns {any}
+ */
 function normalizeDiagnostics(resp) {
   if (!resp || typeof resp !== 'object') return resp
 

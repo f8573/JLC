@@ -169,6 +169,14 @@ public class SVDResult {
     private final double[] singularValues;
     private final Matrix V;
 
+    /**
+     * Create an SVD result container.
+     *
+     * @param A original matrix
+     * @param U left singular vectors
+     * @param singularValues singular values
+     * @param V right singular vectors
+     */
     public SVDResult(Matrix A, Matrix U, double[] singularValues, Matrix V) {
         this.A = A;
         this.U = U;
@@ -228,18 +236,17 @@ public class SVDResult {
      * @return Frobenius norm of reconstruction error
      */
     public double residualNorm() {
-        return MatrixUtils.normResidual(A, reconstruct(), 1e-10);
+        return MatrixUtils.relativeError(A, reconstruct());
     }
 
-    public double residualElement() {
-        return MatrixUtils.backwardErrorComponentwise(A, reconstruct(), 1e-10);
-    }
-
+    /**
+     * Verify orthogonality of a matrix against the identity.
+     *
+     * @param O matrix to verify
+     * @return array with {orthogonalityError}
+     */
     public double[] verifyOrthogonality(Matrix O) {
-        Matrix I = Matrix.Identity(O.getRowCount());
-        double n = MatrixUtils.normResidual(I, O, 1e-10);
-        double e = MatrixUtils.backwardErrorComponentwise(I, O, 1e-10);
-        return new double[]{n, e};
+        return new double[]{MatrixUtils.orthogonalityError(O)};
     }
 
     /**

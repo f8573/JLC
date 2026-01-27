@@ -322,6 +322,9 @@ public class PrincipalAxes {
         return "Quadric surface";
     }
     
+    /**
+     * @return string summary of the principal axes
+     */
     @Override
     public String toString() {
         return String.format("PrincipalAxes[n=%d, canonical: %s]", 

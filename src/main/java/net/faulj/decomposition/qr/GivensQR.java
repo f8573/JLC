@@ -153,6 +153,12 @@ import net.faulj.decomposition.result.QRResult;
  */
 public class GivensQR {
     
+    /**
+     * Compute a full QR decomposition using Givens rotations.
+     *
+     * @param A matrix to decompose
+     * @return QR result containing full Q and R
+     */
     public static QRResult decompose(Matrix A) {
         if (A == null) throw new IllegalArgumentException("Matrix must not be null");
         if (!A.isReal()) throw new UnsupportedOperationException("Givens QR requires a real-valued matrix");
@@ -178,6 +184,12 @@ public class GivensQR {
         return new QRResult(A, Q, R);
     }
     
+    /**
+     * Compute a thin (economy) QR decomposition using Givens rotations.
+     *
+     * @param A matrix to decompose
+     * @return QR result containing thin Q and R
+     */
     public static QRResult decomposeThin(Matrix A) {
         if (A == null) throw new IllegalArgumentException("Matrix must not be null");
         int m = A.getRowCount();
@@ -189,6 +201,14 @@ public class GivensQR {
         return new QRResult(A, Q_thin, R_thin);
     }
     
+    /**
+     * Apply G^T on the right to a pair of columns.
+     *
+     * @param M matrix to update
+     * @param G rotation parameters
+     * @param i first column index
+     * @param k second column index
+     */
     private static void applyGivensTransposeRight(Matrix M, GivensRotation G, int i, int k) {
         int m = M.getRowCount();
         for (int row = 0; row < m; row++) {
@@ -199,6 +219,12 @@ public class GivensQR {
         }
     }
     
+    /**
+     * Zero out entries below a tolerance for cleaner output.
+     *
+     * @param M matrix to update
+     * @param tol absolute tolerance
+     */
     private static void cleanupSmallValues(Matrix M, double tol) {
         int m = M.getRowCount();
         int n = M.getColumnCount();

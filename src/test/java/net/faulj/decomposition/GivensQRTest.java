@@ -13,10 +13,19 @@ import net.faulj.matrix.Matrix;
 import net.faulj.matrix.MatrixUtils;
 import net.faulj.vector.Vector;
 
+/**
+ * Tests Givens-rotation-based QR decomposition across edge cases and sizes.
+ */
 public class GivensQRTest {
 
     private static final double TOLERANCE = 1e-9;
 
+    /**
+     * Builds a matrix from row-major input.
+     *
+     * @param a row-major values
+     * @return matrix with the same entries
+     */
     private static Matrix fromRowMajor(double[][] a) {
         int rows = a.length;
         int cols = a[0].length;
@@ -29,6 +38,14 @@ public class GivensQRTest {
         return new Matrix(colsV);
     }
 
+    /**
+     * Generates a random matrix with entries in $[-1, 1]$ using a fixed seed.
+     *
+     * @param rows number of rows
+     * @param cols number of columns
+     * @param seed RNG seed
+     * @return random matrix
+     */
     private static Matrix randomMatrix(int rows, int cols, long seed) {
         Random rnd = new Random(seed);
         double[][] a = new double[rows][cols];
@@ -40,6 +57,14 @@ public class GivensQRTest {
         return fromRowMajor(a);
     }
 
+    /**
+     * Verifies orthogonality, triangularity, and reconstruction error for $A=QR$.
+     *
+     * @param A original matrix
+     * @param result QR factorization
+     * @param tol tolerance for error checks
+     * @param context label for assertion messages
+     */
     private void verifyQR(Matrix A, QRResult result, double tol, String context) {
         Matrix Q = result.getQ();
         Matrix R = result.getR();
@@ -66,6 +91,9 @@ public class GivensQRTest {
                 reconError < tol);
     }
 
+    /**
+     * Ensures stability on matrices with near-zero off-diagonal entries.
+     */
     @Test
     public void testGivensQR_NearZeroElements() {
         System.out.println("\n=== Edge Case: Matrix with Near-Zero Elements ===");
@@ -83,6 +111,9 @@ public class GivensQRTest {
 
     // ========== Performance Tests ==========
 
+    /**
+     * Records runtime across modest square sizes to spot regressions.
+     */
     @Test
     public void testGivensQR_Performance() {
         System.out.println("\n=== Performance Test ===");
@@ -102,6 +133,9 @@ public class GivensQRTest {
         }
     }
 
+    /**
+     * Validates QR factorization on a larger random square matrix.
+     */
     @Test
     public void testGivensQR_LargeMatrix() {
         System.out.println("\n=== Large Matrix Test ===");

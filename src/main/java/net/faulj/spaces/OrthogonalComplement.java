@@ -65,7 +65,12 @@ public final class OrthogonalComplement {
 		this.qPerp = Collections.unmodifiableList(qPerp);
 	}
 
-	/** Factory using a default tolerance. */
+	/**
+	 * Create an orthogonal complement using a default tolerance.
+	 *
+	 * @param spanningSetForW vectors spanning W
+	 * @return orthogonal complement
+	 */
 	public static OrthogonalComplement of(List<Vector> spanningSetForW) {
 		return of(spanningSetForW, 1e-12);
 	}
@@ -118,32 +123,47 @@ public final class OrthogonalComplement {
 		return new OrthogonalComplement(n, tol, qW, qPerp);
 	}
 
-	/** Ambient dimension dim(V). */
+	/**
+	 * @return ambient dimension dim(V)
+	 */
 	public int ambientDimension() {
 		return n;
 	}
 
-	/** dim(W) (numerical rank after orthonormalization). */
+	/**
+	 * @return dim(W) (numerical rank after orthonormalization)
+	 */
 	public int dimensionW() {
 		return qW.size();
 	}
 
-	/** dim(W^\perp). */
+	/**
+	 * @return dim(W^\perp)
+	 */
 	public int dimensionPerp() {
 		return qPerp.size();
 	}
 
-	/** Orthonormal basis of W. */
+	/**
+	 * @return orthonormal basis of W
+	 */
 	public List<Vector> basisW() {
 		return qW;
 	}
 
-	/** Orthonormal basis of W^\perp. */
+	/**
+	 * @return orthonormal basis of W^\perp
+	 */
 	public List<Vector> basisPerp() {
 		return qPerp;
 	}
 
-	/** Returns true iff x is orthogonal to all of W (within tolerance). */
+	/**
+	 * Check whether a vector is orthogonal to all of W (within tolerance).
+	 *
+	 * @param x vector to test
+	 * @return true if orthogonal to W
+	 */
 	public boolean contains(Vector x) {
 		requireDim(x);
 		for (Vector q : qW) {
@@ -189,6 +209,9 @@ public final class OrthogonalComplement {
 		return new Decomposition(yHat, z);
 	}
 
+	/**
+	 * @return tolerance used for orthogonality checks
+	 */
 	public double tolerance() {
 		return tol;
 	}
@@ -201,12 +224,23 @@ public final class OrthogonalComplement {
 		public final Vector yHatInW;
 		public final Vector zInPerp;
 
+		/**
+		 * Create a decomposition v = yHat + z.
+		 *
+		 * @param yHatInW component in W
+		 * @param zInPerp component in W^\perp
+		 */
 		public Decomposition(Vector yHatInW, Vector zInPerp) {
 			this.yHatInW = yHatInW;
 			this.zInPerp = zInPerp;
 		}
 	}
 
+	/**
+	 * Validate vector dimension against ambient space.
+	 *
+	 * @param v vector to check
+	 */
 	private void requireDim(Vector v) {
 		if (v == null) throw new NullPointerException("vector is null");
 		if (v.dimension() != n) {
@@ -217,6 +251,13 @@ public final class OrthogonalComplement {
 	/**
 	 * Modified Gram-Schmidt with a second pass (reorth) and rank revealing drop.
 	 * Returns an orthonormal list.
+	 */
+	/**
+	 * Orthonormalize a set of vectors using modified Gram-Schmidt.
+	 *
+	 * @param vecs input vectors
+	 * @param tol tolerance for rank detection
+	 * @return orthonormal basis
 	 */
 	private static List<Vector> modifiedGramSchmidtOrthonormalize(List<Vector> vecs, double tol) {
 		List<Vector> Q = new ArrayList<>();
@@ -237,6 +278,12 @@ public final class OrthogonalComplement {
 		return Q;
 	}
 
+	/**
+	 * Orthogonalize v against an existing basis.
+	 *
+	 * @param v vector to update
+	 * @param Q basis vectors
+	 */
 	private static void orthogonalizeInPlace(Vector v, List<Vector> Q) {
 		for (Vector q : Q) {
 			double alpha = q.dot(v);
@@ -244,6 +291,12 @@ public final class OrthogonalComplement {
 		}
 	}
 
+	/**
+	 * Re-orthogonalize v against a basis for numerical stability.
+	 *
+	 * @param v vector to update
+	 * @param Q basis vectors
+	 */
 	private static void reorthogonalizeInPlace(Vector v, List<Vector> Q) {
 		// second pass for better numerical stability
 		for (Vector q : Q) {
@@ -252,6 +305,13 @@ public final class OrthogonalComplement {
 		}
 	}
 
+	/**
+	 * Perform y += a * x in-place.
+	 *
+	 * @param y target vector
+	 * @param a scalar multiplier
+	 * @param x source vector
+	 */
 	private static void axpyInPlace(Vector y, double a, Vector x) {
 		// y += a*x
 		int n = y.dimension();
@@ -260,6 +320,12 @@ public final class OrthogonalComplement {
 		}
 	}
 
+	/**
+	 * Scale a vector in-place.
+	 *
+	 * @param v vector to scale
+	 * @param a scalar multiplier
+	 */
 	private static void scaleInPlace(Vector v, double a) {
 		int n = v.dimension();
 		for (int i = 0; i < n; i++) {
@@ -267,6 +333,13 @@ public final class OrthogonalComplement {
 		}
 	}
 
+	/**
+	 * Create the i-th standard basis vector.
+	 *
+	 * @param n dimension
+	 * @param i index
+	 * @return basis vector
+	 */
 	private static Vector standardBasis(int n, int i) {
 		Vector e = zeros(n);
 		e.set(i, 1.0);
@@ -274,7 +347,10 @@ public final class OrthogonalComplement {
 	}
 
 	/**
-	 * Creates a zero vector of dimension n.
+	 * Create a zero vector of dimension n.
+	 *
+	 * @param n dimension
+	 * @return zero vector
 	 */
 	private static Vector zeros(int n) {
 		return new Vector(new double[n]);

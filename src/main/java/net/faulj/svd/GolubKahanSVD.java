@@ -10,6 +10,9 @@ import net.faulj.matrix.Matrix;
  * on the bidiagonal matrix.
  */
 public class GolubKahanSVD {
+    /**
+     * Create a Golub-Kahan SVD solver.
+     */
     public GolubKahanSVD() {
     }
 
@@ -33,6 +36,13 @@ public class GolubKahanSVD {
         return decomposeInternal(A, true);
     }
 
+    /**
+     * Internal decomposition routine.
+     *
+     * @param A input matrix
+     * @param thin whether to return the economy-size factors
+     * @return SVD result
+     */
     private SVDResult decomposeInternal(Matrix A, boolean thin) {
         if (A == null) {
             throw new IllegalArgumentException("Matrix must not be null");
@@ -63,6 +73,12 @@ public class GolubKahanSVD {
         return new SVDResult(A, U, singularValues, V);
     }
 
+    /**
+     * Sort indices by descending values.
+     *
+     * @param values input values
+     * @return index order
+     */
     private static int[] sortIndicesDescending(double[] values) {
         Integer[] order = new Integer[values.length];
         for (int i = 0; i < values.length; i++) {
@@ -76,6 +92,13 @@ public class GolubKahanSVD {
         return result;
     }
 
+    /**
+     * Reorder values based on an index order.
+     *
+     * @param values input values
+     * @param order index order
+     * @return reordered values
+     */
     private static double[] reorderValues(double[] values, int[] order) {
         double[] reordered = new double[values.length];
         for (int i = 0; i < order.length; i++) {
@@ -84,6 +107,14 @@ public class GolubKahanSVD {
         return reordered;
     }
 
+    /**
+     * Reorder matrix columns according to an index order.
+     *
+     * @param M matrix to reorder
+     * @param order column order
+     * @param reorderCount number of columns to reorder
+     * @return reordered matrix
+     */
     private static Matrix reorderColumns(Matrix M, int[] order, int reorderCount) {
         int cols = M.getColumnCount();
         net.faulj.vector.Vector[] data = new net.faulj.vector.Vector[cols];

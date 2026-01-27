@@ -4,10 +4,21 @@ import { useDiagnostics } from '../hooks/useDiagnostics'
 import { formatComplex, formatDimension, formatNumber } from '../utils/format'
 import Latex from '../components/ui/Latex'
 
+/**
+ * Format the report timestamp in the local browser locale.
+ *
+ * @returns {string}
+ */
 function formatDate() {
   return new Date().toLocaleString()
 }
 
+/**
+ * Convert polynomial coefficients to a readable report string.
+ *
+ * @param {Array<{real:number, imag:number}>} coeffs
+ * @returns {string}
+ */
 function formatPolynomial(coeffs) {
   if (!Array.isArray(coeffs) || coeffs.length === 0) return '—'
   const degree = coeffs.length - 1
@@ -31,6 +42,12 @@ function formatPolynomial(coeffs) {
   return terms.length ? `p(?) = ${terms.join(' + ').replace(/\+ -/g, '- ')}` : '—'
 }
 
+/**
+ * Print-ready matrix analysis report view.
+ *
+ * @param {Object} props
+ * @param {string} props.matrixString - Serialized matrix payload from the URL.
+ */
 export default function MatrixReportPage({ matrixString }) {
   const { diagnostics } = useDiagnostics(matrixString)
 

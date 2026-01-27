@@ -68,6 +68,15 @@ public class MatrixAccuracyValidator {
         /** Whether to emit a warning (WARNING or worse) */
         public final boolean shouldWarn;
         
+        /**
+         * Create a validation result instance.
+         *
+         * @param normLevel accuracy level based on norm residual
+         * @param elementLevel accuracy level based on element residual
+         * @param normResidual Frobenius norm residual
+         * @param elementResidual element-wise residual
+         * @param message summary message
+         */
         public ValidationResult(AccuracyLevel normLevel, AccuracyLevel elementLevel,
                                double normResidual, double elementResidual, String message) {
             this.normLevel = normLevel;
@@ -81,10 +90,18 @@ public class MatrixAccuracyValidator {
                               elementLevel.ordinal() >= AccuracyLevel.WARNING.ordinal());
         }
         
+        /**
+         * Get the worst-case accuracy level between norm and element metrics.
+         *
+         * @return overall accuracy level
+         */
         public AccuracyLevel getOverallLevel() {
             return (normLevel.ordinal() > elementLevel.ordinal()) ? normLevel : elementLevel;
         }
         
+        /**
+         * @return diagnostic message
+         */
         @Override
         public String toString() {
             return message;
@@ -173,6 +190,13 @@ public class MatrixAccuracyValidator {
         };
     }
 
+    /**
+     * Compute element-wise thresholds based on matrix size and conditioning.
+     *
+     * @param n matrix dimension
+     * @param conditionNumber condition estimate
+     * @return thresholds array
+     */
     private static double[] getElementThresholds(int n, double conditionNumber) {
         // Element-wise max error grows faster with size than norm-based residuals.
         double base = n * EPS;
@@ -189,6 +213,13 @@ public class MatrixAccuracyValidator {
     
     /**
      * Classify error magnitude into accuracy level
+     */
+    /**
+     * Classify an error magnitude against thresholds.
+     *
+     * @param error measured error
+     * @param thresholds threshold array
+     * @return accuracy level
      */
     private static AccuracyLevel classifyError(double error, double[] thresholds) {
         if (error <= thresholds[0]) return AccuracyLevel.EXCELLENT;
@@ -247,6 +278,18 @@ public class MatrixAccuracyValidator {
     
     /**
      * Generate comprehensive diagnostic message
+     */
+    /**
+     * Build a detailed validation message for the results.
+     *
+     * @param normLevel norm-based accuracy level
+     * @param elemLevel element-based accuracy level
+     * @param normRes norm residual
+     * @param elemRes element residual
+     * @param decompositionType label for the operation
+     * @param n matrix dimension
+     * @param condition condition estimate
+     * @return formatted message
      */
     private static String generateMessage(AccuracyLevel normLevel, 
                                          AccuracyLevel elemLevel,

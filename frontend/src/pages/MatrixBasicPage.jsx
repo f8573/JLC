@@ -8,6 +8,12 @@ import Latex from '../components/ui/Latex'
 import { useDiagnostics } from '../hooks/useDiagnostics'
 import { formatNumber, formatDimension, formatPercent } from '../utils/format'
 
+/**
+ * Base diagnostics page for matrix properties and quick insights.
+ *
+ * @param {Object} props
+ * @param {string} props.matrixString - Serialized matrix payload from the URL.
+ */
 export default function MatrixBasicPage({ matrixString }) {
   const { diagnostics } = useDiagnostics(matrixString)
 

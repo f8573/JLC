@@ -5,8 +5,14 @@ import org.junit.Test;
 
 import static org.junit.Assert.*;
 
+/**
+ * Tests for condition number estimation utilities.
+ */
 public class ConditionNumberTest {
 
+    /**
+     * Validate 2-norm condition number on a diagonal matrix.
+     */
     @Test
     public void testComputeNorm2SVD_diag() {
         double[][] data = new double[][]{

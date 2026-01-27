@@ -45,4 +45,28 @@ package net.faulj.matrix;
  * @see net.faulj.matrix.Matrix
  */
 public class MatrixFactory {
+	private MatrixFactory() {
+	}
+
+	/**
+	 * Create a dense heap-backed matrix.
+	 *
+	 * @param rows number of rows
+	 * @param cols number of columns
+	 * @return heap-backed matrix
+	 */
+	public static Matrix create(int rows, int cols) {
+		return new Matrix(rows, cols);
+	}
+
+	/**
+	 * Create an off-heap matrix with 64-byte alignment.
+	 *
+	 * @param rows number of rows
+	 * @param cols number of columns
+	 * @return off-heap matrix
+	 */
+	public static OffHeapMatrix createOffHeap(int rows, int cols) {
+		return new OffHeapMatrix(rows, cols);
+	}
 }

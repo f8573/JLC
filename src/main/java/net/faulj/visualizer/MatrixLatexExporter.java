@@ -8,10 +8,19 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.text.DecimalFormat;
 
+/**
+ * Utility class for exporting matrices and vectors to LaTeX.
+ */
 public class MatrixLatexExporter {
 
     private static final double TOL = 1e-12;
 
+    /**
+     * Format a number for LaTeX output.
+     *
+     * @param d value to format
+     * @return formatted string
+     */
     private static String fmt(double d) {
         if (Double.isNaN(d)) return "NaN";
         if (Double.isInfinite(d)) return d > 0 ? "\\infty" : "-\\infty";
@@ -21,6 +30,12 @@ public class MatrixLatexExporter {
         return df.format(d);
     }
 
+    /**
+     * Convert a vector to a LaTeX bmatrix string.
+     *
+     * @param v vector to convert
+     * @return LaTeX string
+     */
     public static String vectorToLatex(Vector v) {
         StringBuilder sb = new StringBuilder();
         sb.append("\\begin{bmatrix}");
@@ -32,6 +47,12 @@ public class MatrixLatexExporter {
         return sb.toString();
     }
 
+    /**
+     * Convert a matrix to a LaTeX bmatrix string.
+     *
+     * @param m matrix to convert
+     * @return LaTeX string
+     */
     public static String matrixToLatex(Matrix m) {
         int rows = m.getRowCount();
         int cols = m.getColumnCount();
@@ -48,6 +69,13 @@ public class MatrixLatexExporter {
         return sb.toString();
     }
 
+    /**
+     * Build a full LaTeX document containing the provided matrices.
+     *
+     * @param mats matrices to render
+     * @param names optional section titles
+     * @return LaTeX document string
+     */
     public static String matricesToLatexDocument(Matrix[] mats, String[] names) {
         StringBuilder sb = new StringBuilder();
         sb.append("\\documentclass{article}\n");
@@ -64,6 +92,13 @@ public class MatrixLatexExporter {
         return sb.toString();
     }
 
+    /**
+     * Write a LaTeX document to disk.
+     *
+     * @param out output file
+     * @param content LaTeX content
+     * @throws IOException if write fails
+     */
     public static void writeLatexFile(File out, String content) throws IOException {
         File parent = out.getParentFile();
         if (parent != null && !parent.exists()) parent.mkdirs();

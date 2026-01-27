@@ -346,6 +346,9 @@ public class ProjectionMatrix {
     
     /**
      * Compute the rank of the projection matrix (trace equals rank for projections).
+     *
+     * @param P projection matrix
+     * @return rank estimate
      */
     private static int computeRank(Matrix P) {
         double trace = 0.0;
@@ -396,6 +399,9 @@ public class ProjectionMatrix {
         return P.multiply(M);
     }
     
+    /**
+     * @return string summary of the projection matrix
+     */
     @Override
     public String toString() {
         return String.format("ProjectionMatrix[dimension=%d, rank=%d]", dimension, rank);

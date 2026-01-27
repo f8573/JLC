@@ -137,10 +137,27 @@ public class SchurResult {
     private final Complex[] eigenvalues;
     private final Matrix eigenvectors;
 
+    /**
+     * Create a Schur decomposition result.
+     *
+     * @param A original matrix
+     * @param T quasi-upper triangular Schur form
+     * @param U orthogonal Schur vectors
+     * @param eigenvalues eigenvalues extracted from T
+     */
     public SchurResult(Matrix A, Matrix T, Matrix U, Complex[] eigenvalues) {
         this(A, T, U, eigenvalues, null);
     }
 
+    /**
+     * Create a Schur decomposition result with optional eigenvectors.
+     *
+     * @param A original matrix
+     * @param T quasi-upper triangular Schur form
+     * @param U orthogonal Schur vectors
+     * @param eigenvalues eigenvalues extracted from T
+     * @param eigenvectors eigenvectors, or null if not computed
+     */
     public SchurResult(Matrix A, Matrix T, Matrix U, Complex[] eigenvalues, Matrix eigenvectors) {
         this.A = A;
         this.T = T;
@@ -149,9 +166,21 @@ public class SchurResult {
         this.eigenvectors = eigenvectors;
     }
 
+    /**
+     * @return Schur form T
+     */
     public Matrix getT() { return T; }
+    /**
+     * @return Schur vectors U
+     */
     public Matrix getU() { return U; }
+    /**
+     * @return eigenvalues as complex numbers
+     */
     public Complex[] getEigenvalues() { return eigenvalues; }
+    /**
+     * @return eigenvectors, or null if not computed
+     */
     public Matrix getEigenvectors() { return eigenvectors; }
     
     /**
@@ -178,6 +207,9 @@ public class SchurResult {
         return imag;
     }
 
+    /**
+     * @return string summary of the Schur result
+     */
     @Override
     public String toString() {
         return "SchurResult{\n" +
@@ -186,19 +218,22 @@ public class SchurResult {
                 "  Eigenvalues=" + Arrays.toString(eigenvalues);
     }
 
+    /**
+     * Compute the Frobenius norm residual of the similarity transform.
+     *
+     * @return residual norm
+     */
     public double residualNorm() {
-        return MatrixUtils.normResidual(A, U.multiply(T).multiply(U.transpose()), 1e-10);
+        return MatrixUtils.relativeError(A, U.multiply(T).multiply(U.transpose()));
     }
 
-    public double residualElement() {
-        return MatrixUtils.backwardErrorComponentwise(A, U.multiply(T).multiply(U.transpose()), 1e-10);
-    }
-
+    /**
+     * Verify orthogonality of a candidate matrix.
+     *
+     * @param O matrix to test (typically U)
+     * @return array containing orthogonality error
+     */
     public double[] verifyOrthogonality(Matrix O) {
-        Matrix I = Matrix.Identity(O.getRowCount());
-        O = O.multiply(O.transpose());
-        double n = MatrixUtils.normResidual(I, O, 1e-10);
-        double e = MatrixUtils.backwardErrorComponentwise(I, O, 1e-10);
-        return new double[]{n, e};
+        return new double[]{MatrixUtils.orthogonalityError(O)};
     }
 }

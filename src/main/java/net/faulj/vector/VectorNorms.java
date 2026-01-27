@@ -5,6 +5,12 @@ package net.faulj.vector;
  */
 public class VectorNorms {
 
+	/**
+	 * Compute the 1-norm (sum of absolute values).
+	 *
+	 * @param v vector to measure
+	 * @return 1-norm
+	 */
 	public static double norm1(Vector v) {
 		double sum = 0.0;
 		double[] real = v.getData();
@@ -17,6 +23,12 @@ public class VectorNorms {
 		return sum;
 	}
 
+	/**
+	 * Compute the Euclidean norm.
+	 *
+	 * @param v vector to measure
+	 * @return 2-norm
+	 */
 	public static double norm2(Vector v) {
 		double sum = 0.0;
 		double[] real = v.getData();
@@ -29,6 +41,12 @@ public class VectorNorms {
 		return Math.sqrt(sum);
 	}
 
+	/**
+	 * Compute the infinity norm (max absolute component).
+	 *
+	 * @param v vector to measure
+	 * @return infinity norm
+	 */
 	public static double normInf(Vector v) {
 		double max = 0.0;
 		double[] real = v.getData();
@@ -42,6 +60,12 @@ public class VectorNorms {
 		return max;
 	}
 
+	/**
+	 * Normalize a vector to unit length.
+	 *
+	 * @param v vector to normalize
+	 * @return new normalized vector
+	 */
 	public static Vector normalize(Vector v) {
 		double n2 = norm2(v);
 		if (n2 == 0.0) return v.copy();

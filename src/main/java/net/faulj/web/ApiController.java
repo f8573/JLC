@@ -31,15 +31,28 @@ import net.faulj.visualizer.MatrixLatexExporter;
 
 @RestController
 @CrossOrigin(origins = "http://localhost:5173")
+/**
+ * REST controller exposing diagnostic and debug endpoints for matrix analysis.
+ */
 public class ApiController {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /**
+     * Health check endpoint.
+     *
+     * @return simple status map
+     */
     @GetMapping("/api/ping")
     public Map<String, String> ping() {
         return Map.of("message", "pong from Java backend", "version", "1.0");
     }
 
+    /**
+     * Generate a sample matrix and return LaTeX for the matrix and Schur factors.
+     *
+     * @return map containing LaTeX strings and eigenvalue text
+     */
     @GetMapping("/api/latex")
     public Map<String, Object> latex() {
         // generate a small random matrix and decompose it
@@ -67,6 +80,12 @@ public class ApiController {
         );
     }
 
+    /**
+     * Compute diagnostics for a matrix posted in the request body.
+     *
+     * @param payload JSON payload containing a "matrix" field
+     * @return diagnostics response
+     */
     @PostMapping("/api/diagnostics")
     public ResponseEntity<Map<String, Object>> diagnostics(@RequestBody Map<String, Object> payload) {
         Object matrixObj = payload == null ? null : payload.get("matrix");
@@ -79,6 +98,12 @@ public class ApiController {
         return ResponseEntity.ok(buildDiagnosticsResponse(diagnostics));
     }
 
+    /**
+     * Compute diagnostics for a matrix serialized in a query parameter.
+     *
+     * @param matrixJson matrix data serialized as JSON
+     * @return diagnostics response
+     */
     @GetMapping("/api/diagnostics")
     public ResponseEntity<Map<String, Object>> diagnosticsGet(@RequestParam("matrix") String matrixJson) {
         if (matrixJson == null || matrixJson.isBlank()) {
@@ -94,6 +119,12 @@ public class ApiController {
         }
     }
 
+    /**
+     * Debug endpoint returning raw Schur decomposition artifacts.
+     *
+     * @param payload JSON payload containing a "matrix" field
+     * @return Schur matrices and eigenvalue details
+     */
     @PostMapping("/api/debug/schur")
     public ResponseEntity<Map<String, Object>> debugSchur(@RequestBody Map<String, Object> payload) {
         Object matrixObj = payload == null ? null : payload.get("matrix");
@@ -159,6 +190,12 @@ public class ApiController {
         }
     }
 
+    /**
+     * Build a nested diagnostics response from computed metrics.
+     *
+     * @param diagnostics computed diagnostics
+     * @return response map
+     */
     private Map<String, Object> buildDiagnosticsResponse(MatrixDiagnostics diagnostics) {
         LinkedHashMap<String, Object> out = new LinkedHashMap<>();
 
@@ -413,6 +450,12 @@ public class ApiController {
         return out;
     }
 
+    /**
+     * Convert a diagnostic item to a response map.
+     *
+     * @param item diagnostic item
+     * @return mapped response or null
+     */
     private Map<String, Object> diagnosticItemToMap(DiagnosticItem<?> item) {
         if (item == null) {
             return null;
@@ -424,6 +467,12 @@ public class ApiController {
         return out;
     }
 
+    /**
+     * Convert validation results to a response map.
+     *
+     * @param validation validation result
+     * @return mapped response or null
+     */
     private Map<String, Object> validationToMap(MatrixAccuracyValidator.ValidationResult validation) {
         if (validation == null) {
             return null;
@@ -439,6 +488,12 @@ public class ApiController {
         return out;
     }
 
+    /**
+     * Convert a basis diagnostic item into a vectors response.
+     *
+     * @param item basis diagnostic item
+     * @return mapped response or null
+     */
     private Map<String, Object> basisToMap(DiagnosticItem<Set<Vector>> item) {
         if (item == null) {
             return null;
@@ -456,6 +511,12 @@ public class ApiController {
         return out;
     }
 
+    /**
+     * Convert QR decomposition diagnostics to a response map.
+     *
+     * @param item diagnostic item
+     * @return mapped response or null
+     */
     private Map<String, Object> qrToMap(DiagnosticItem<?> item) {
         if (item == null) {
             return null;
@@ -469,6 +530,12 @@ public class ApiController {
         return out;
     }
 
+    /**
+     * Convert LU decomposition diagnostics to a response map.
+     *
+     * @param item diagnostic item
+     * @return mapped response or null
+     */
     private Map<String, Object> luToMap(DiagnosticItem<?> item) {
         if (item == null) {
             return null;
@@ -485,6 +552,12 @@ public class ApiController {
         return out;
     }
 
+    /**
+     * Convert Cholesky decomposition diagnostics to a response map.
+     *
+     * @param item diagnostic item
+     * @return mapped response or null
+     */
     private Map<String, Object> choleskyToMap(DiagnosticItem<?> item) {
         if (item == null) {
             return null;
@@ -499,6 +572,12 @@ public class ApiController {
         return out;
     }
 
+    /**
+     * Convert SVD diagnostics to a response map.
+     *
+     * @param item diagnostic item
+     * @return mapped response or null
+     */
     private Map<String, Object> svdToMap(DiagnosticItem<?> item) {
         if (item == null) {
             return null;
@@ -516,6 +595,12 @@ public class ApiController {
         return out;
     }
 
+    /**
+     * Convert Hessenberg reduction diagnostics to a response map.
+     *
+     * @param item diagnostic item
+     * @return mapped response or null
+     */
     private Map<String, Object> hessenbergToMap(DiagnosticItem<?> item) {
         if (item == null) {
             return null;
@@ -529,6 +614,12 @@ public class ApiController {
         return out;
     }
 
+    /**
+     * Convert Schur decomposition diagnostics to a response map.
+     *
+     * @param item diagnostic item
+     * @return mapped response or null
+     */
     private Map<String, Object> schurToMap(DiagnosticItem<?> item) {
         if (item == null) {
             return null;
@@ -544,6 +635,12 @@ public class ApiController {
         return out;
     }
 
+    /**
+     * Convert diagonalization diagnostics to a response map.
+     *
+     * @param item diagnostic item
+     * @return mapped response or null
+     */
     private Map<String, Object> diagonalizationToMap(DiagnosticItem<?> item) {
         if (item == null) {
             return null;
@@ -574,6 +671,12 @@ public class ApiController {
         return out;
     }
 
+    /**
+     * Convert symmetric spectral decomposition diagnostics to a response map.
+     *
+     * @param item diagnostic item
+     * @return mapped response or null
+     */
     private Map<String, Object> spectralToMap(DiagnosticItem<?> item) {
         if (item == null) {
             return null;
@@ -587,6 +690,12 @@ public class ApiController {
         return out;
     }
 
+    /**
+     * Convert bidiagonalization diagnostics to a response map.
+     *
+     * @param item diagnostic item
+     * @return mapped response or null
+     */
     private Map<String, Object> bidiagonalizationToMap(DiagnosticItem<?> item) {
         if (item == null) {
             return null;
@@ -601,6 +710,12 @@ public class ApiController {
         return out;
     }
 
+    /**
+     * Convert polar decomposition diagnostics to a response map.
+     *
+     * @param item diagnostic item
+     * @return mapped response or null
+     */
     private Map<String, Object> polarToMap(DiagnosticItem<?> item) {
         if (item == null) {
             return null;
@@ -614,6 +729,12 @@ public class ApiController {
         return out;
     }
 
+    /**
+     * Serialize a matrix into a response map with real/imaginary data.
+     *
+     * @param matrix matrix to serialize
+     * @return mapped response or null
+     */
     private Map<String, Object> matrixToMap(Matrix matrix) {
         if (matrix == null) {
             return null;
@@ -640,6 +761,12 @@ public class ApiController {
         return out;
     }
 
+    /**
+     * Convert complex eigenvalues to a list of maps.
+     *
+     * @param eigenvalues eigenvalues array
+     * @return list of real/imag maps or null
+     */
     private List<Map<String, Object>> toComplexList(net.faulj.scalar.Complex[] eigenvalues) {
         if (eigenvalues == null) {
             return null;

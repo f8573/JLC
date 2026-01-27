@@ -1,5 +1,11 @@
 import React, { useEffect, useState } from 'react'
 
+/**
+ * Primary navigation sidebar for the landing experience.
+ *
+ * @param {Object} props
+ * @param {string} [props.active='home']
+ */
 export default function Sidebar({ active = 'home' }) {
   const [sessions, setSessions] = useState([])
 

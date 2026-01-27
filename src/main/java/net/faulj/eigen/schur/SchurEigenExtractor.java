@@ -46,10 +46,21 @@ public class SchurEigenExtractor {
     // Batch size for blocking (tuned for L1/L2 cache)
     private static final int BATCH_SIZE = 64;
 
+    /**
+     * Create an extractor using only the Schur form.
+     *
+     * @param S Schur form matrix T
+     */
     public SchurEigenExtractor(Matrix S) {
         this(S, null);
     }
 
+    /**
+     * Create an extractor using the Schur form and Schur vectors.
+     *
+     * @param S Schur form matrix T
+     * @param U Schur vectors matrix (may be null to skip eigenvectors)
+     */
     public SchurEigenExtractor(Matrix S, Matrix U) {
         this.n = S.getRowCount();
         this.tData = flatten(S);
@@ -77,6 +88,9 @@ public class SchurEigenExtractor {
         return flat;
     }
 
+    /**
+     * Compute eigenvalues and (optionally) eigenvectors from Schur data.
+     */
     private void compute() {
         extractEigenvaluesPrimitive();
 
@@ -241,6 +255,14 @@ public class SchurEigenExtractor {
      * Here we treat evecData as n rows x n cols, row-major for simplicity in memory,
      * but eigenvectors are columns. So evecData[row * n + col].
      */
+    /**
+     * Solve a batch of eigenvectors using back-substitution.
+     *
+     * @param startCol start column (inclusive)
+     * @param endCol end column (exclusive)
+     * @param Y eigenvector storage
+     * @param fixed flags for fixed columns
+     */
     private void processBatch(int startCol, int endCol, double[] Y, boolean[] fixed) {
         double tol = Tolerance.get();
 
@@ -323,6 +345,16 @@ public class SchurEigenExtractor {
      * Solves a single row step for a complex conjugate pair of eigenvectors.
      * Stored in columns colReal and colImag of Y.
      */
+    /**
+     * Solve a 2x2 complex block during back-substitution.
+     *
+     * @param k row index in T
+     * @param colReal column index for real component
+     * @param colImag column index for imaginary component
+     * @param rowOffset row offset for Y
+     * @param tRowOffset row offset for T
+     * @param Y eigenvector storage
+     */
     private void solveComplexPixel(int k, int colReal, int colImag, int rowOffset, int tRowOffset, double[] Y) {
         double lambdaRe = valReal[colReal];
         double lambdaIm = valImag[colReal]; // Positive or negative
@@ -375,6 +407,14 @@ public class SchurEigenExtractor {
      * Efficient blocked matrix multiplication: Res = U * Y
      * Only computes columns [startCol, endCol) of Result.
      */
+    /**
+     * Multiply U by a block of eigenvectors (hybrid blocked multiply).
+     *
+     * @param startCol start column (inclusive)
+     * @param endCol end column (exclusive)
+     * @param Y eigenvectors in Schur basis
+     * @param Result output eigenvectors in original basis
+     */
     private void multiplyHybridBlock(int startCol, int endCol, double[] Y, double[] Result) {
         // U is n x n (uData)
         // Y is n x n (Y)
@@ -396,6 +436,9 @@ public class SchurEigenExtractor {
         }
     }
 
+    /**
+     * Extract eigenvalues from the quasi-upper triangular Schur form.
+     */
     private void extractEigenvaluesPrimitive() {
         this.valReal = new double[n];
         this.valImag = new double[n];
@@ -441,6 +484,12 @@ public class SchurEigenExtractor {
         }
     }
 
+    /**
+     * Inflate a flattened row-major array into a Matrix.
+     *
+     * @param flat row-major data
+     * @return matrix instance
+     */
     private Matrix inflate(double[] flat) {
         Vector[] cols = new Vector[n];
         for (int c = 0; c < n; c++) {
@@ -453,6 +502,9 @@ public class SchurEigenExtractor {
         return new Matrix(cols);
     }
 
+    /**
+     * @return eigenvalues as complex numbers
+     */
     public Complex[] getEigenvalues() {
         Complex[] c = new Complex[n];
         for(int i=0; i<n; i++) {
@@ -461,6 +513,9 @@ public class SchurEigenExtractor {
         return c;
     }
 
+    /**
+     * @return eigenvectors matrix, or null if not computed
+     */
     public Matrix getEigenvectors() {
         return eigenvectors;
     }

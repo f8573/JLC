@@ -92,7 +92,10 @@ public class QuadraticForm {
     }
     
     /**
-     * Ensure matrix is exactly symmetric by averaging with transpose.
+     * Ensure matrix is exactly symmetric by averaging with its transpose.
+     *
+     * @param A input matrix
+     * @return symmetrized matrix
      */
     private static Matrix symmetrize(Matrix A) {
         int n = A.getRowCount();
@@ -330,6 +333,9 @@ public class QuadraticForm {
         return eigenvalues[eigenvalues.length - 1]; // Last eigenvalue (smallest)
     }
     
+    /**
+     * @return string summary of the quadratic form
+     */
     @Override
     public String toString() {
         Definiteness d = classify();

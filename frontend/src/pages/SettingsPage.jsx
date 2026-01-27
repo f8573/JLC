@@ -2,6 +2,9 @@
 import MatrixHeader from '../components/MatrixHeader'
 import { useMatrixCompute } from '../hooks/useMatrixCompute'
 
+/**
+ * User settings and preferences view.
+ */
 export default function SettingsPage() {
   const handleCompute = useMatrixCompute()
   return (

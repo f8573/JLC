@@ -10,6 +10,9 @@ import net.faulj.matrix.Matrix;
 
 import static jcuda.jcublas.cublasOperation.CUBLAS_OP_N;
 
+/**
+ * CUDA-backed GEMM implementation using JCublas.
+ */
 final class CudaGemm {
     static {
         JCuda.setExceptionsEnabled(true);
@@ -19,6 +22,13 @@ final class CudaGemm {
     private CudaGemm() {
     }
 
+    /**
+     * Multiply two matrices on GPU when available.
+     *
+     * @param a left matrix
+     * @param b right matrix
+     * @return product matrix or null if unavailable
+     */
     static Matrix multiply(Matrix a, Matrix b) {
         int m = a.getRowCount();
         int k = a.getColumnCount();
@@ -30,6 +40,16 @@ final class CudaGemm {
         return null;
     }
 
+    /**
+     * Compute $C = \alpha AB + \beta C$ on GPU when available.
+     *
+     * @param a left matrix
+     * @param b right matrix
+     * @param c output matrix
+     * @param alpha scaling for AB
+     * @param beta scaling for C
+     * @return true if computation succeeded
+     */
     static boolean gemm(Matrix a, Matrix b, Matrix c, double alpha, double beta) {
         if (!CudaSupport.isCudaAvailable()) {
             return false;

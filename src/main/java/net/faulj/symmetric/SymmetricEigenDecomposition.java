@@ -131,6 +131,8 @@ public class SymmetricEigenDecomposition {
     
     /**
      * Validate that the matrix is square and symmetric.
+     *
+     * @param A matrix to validate
      */
     private static void validateSymmetric(Matrix A) {
         if (A == null) {
@@ -167,6 +169,9 @@ public class SymmetricEigenDecomposition {
     
     /**
      * Sort eigenvalues and corresponding eigenvectors in descending order.
+     *
+     * @param eigenvalues eigenvalues to sort
+     * @param eigenvectors eigenvector matrix to reorder
      */
     private static void sortEigenSystem(double[] eigenvalues, Matrix eigenvectors) {
         int n = eigenvalues.length;

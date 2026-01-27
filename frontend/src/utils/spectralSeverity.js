@@ -20,7 +20,10 @@ export const SEVERITY_LABELS = {
 }
 
 /**
- * Compute overall spectral severity based on diagnostics
+ * Compute overall spectral severity based on diagnostics.
+ *
+ * @param {any} diagnostics
+ * @returns {{level: string, color: string, label: string, issues: string[], criticalArtifacts?: any}}
  */
 export function computeSpectralSeverity(diagnostics) {
   if (!diagnostics) return { level: 'safe', color: SEVERITY_COLORS.safe, issues: [] }
@@ -176,7 +179,12 @@ export function computeSpectralSeverity(diagnostics) {
 }
 
 /**
- * Compute per-eigenvalue severity
+ * Compute per-eigenvalue severity.
+ *
+ * @param {{real:number, imag:number}} eigenvalue
+ * @param {number} index
+ * @param {any} diagnostics
+ * @returns {{level: string, color: string, label: string, issues: string[]}}
  */
 export function computePerEigenvalueSeverity(eigenvalue, index, diagnostics) {
   if (!diagnostics) return { level: 'safe', color: SEVERITY_COLORS.safe, issues: [] }
@@ -373,6 +381,12 @@ export function computePerEigenvalueSeverity(eigenvalue, index, diagnostics) {
 
 // Helper functions
 
+/**
+ * Compute a simple determinant (exact for up to 3x3) as a stability heuristic.
+ *
+ * @param {number[][]} matrix
+ * @returns {number}
+ */
 function computeDeterminant(matrix) {
   // Simple determinant for small matrices (up to 3x3)
   const n = matrix.length
@@ -397,6 +411,12 @@ function computeDeterminant(matrix) {
   return prod
 }
 
+/**
+ * Estimate condition number using row-sum ratios.
+ *
+ * @param {number[][]} matrix
+ * @returns {number}
+ */
 function estimateConditionNumber(matrix) {
   // Rough estimate: ratio of max to min absolute row sums
   const rowNorms = matrix.map(row => row.reduce((sum, val) => sum + Math.abs(val || 0), 0))
@@ -405,6 +425,12 @@ function estimateConditionNumber(matrix) {
   return minNorm > 0 ? maxNorm / minNorm : Infinity
 }
 
+/**
+ * Compute nearest-neighbor gaps for each eigenvalue.
+ *
+ * @param {Array<{real:number, imag:number}>} eigenvalues
+ * @returns {number[]}
+ */
 function computeEigenvalueGaps(eigenvalues) {
   const gaps = []
   for (let i = 0; i < eigenvalues.length; i++) {
@@ -413,6 +439,14 @@ function computeEigenvalueGaps(eigenvalues) {
   return gaps
 }
 
+/**
+ * Compute the minimum distance between one eigenvalue and the rest.
+ *
+ * @param {{real:number, imag:number}} eigenvalue
+ * @param {Array<{real:number, imag:number}>} eigenvalues
+ * @param {number} index
+ * @returns {number}
+ */
 function computeEigenvalueGap(eigenvalue, eigenvalues, index) {
   let minGap = Infinity
   for (let j = 0; j < eigenvalues.length; j++) {
@@ -426,6 +460,13 @@ function computeEigenvalueGap(eigenvalue, eigenvalues, index) {
   return minGap
 }
 
+/**
+ * Group eigenvalues by proximity threshold.
+ *
+ * @param {Array<{real:number, imag:number}>} eigenvalues
+ * @param {number} [threshold=1e-3]
+ * @returns {number[][]}
+ */
 function findEigenvalueClusters(eigenvalues, threshold = 1e-3) {
   const clusters = []
   const visited = new Set()
@@ -455,6 +496,12 @@ function findEigenvalueClusters(eigenvalues, threshold = 1e-3) {
   return clusters
 }
 
+/**
+ * Compute spread ratio of eigenvalue magnitudes.
+ *
+ * @param {Array<{real:number, imag:number}>} eigenvalues
+ * @returns {number}
+ */
 function computeEigenvalueSpread(eigenvalues) {
   const magnitudes = eigenvalues.map(ev => Math.hypot(ev.real, ev.imag))
   const nonZero = magnitudes.filter(m => m > 1e-10)
@@ -464,6 +511,12 @@ function computeEigenvalueSpread(eigenvalues) {
   return min > 0 ? max / min : Infinity
 }
 
+/**
+ * Estimate orthogonality of matrix columns.
+ *
+ * @param {number[][]} matrix
+ * @returns {number}
+ */
 function checkOrthogonality(matrix) {
   // Compute dot products between column vectors
   const n = matrix.length
@@ -502,6 +555,13 @@ function checkOrthogonality(matrix) {
   return count > 0 ? totalScore / count : 1
 }
 
+/**
+ * Estimate the number of independent vectors using Gram-Schmidt.
+ *
+ * @param {number[][]} cols
+ * @param {number} [tol=1e-8]
+ * @returns {number}
+ */
 function estimateIndependentColumns(cols, tol = 1e-8) {
   if (!cols || cols.length === 0) return 0
   // ensure all columns have same length

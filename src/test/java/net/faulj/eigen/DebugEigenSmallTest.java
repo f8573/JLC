@@ -7,8 +7,14 @@ import net.faulj.decomposition.result.SchurResult;
 import net.faulj.eigen.schur.RealSchurDecomposition;
 import net.faulj.matrix.Matrix;
 
+/**
+ * Debug-oriented eigenvalue test for a near-singular diagonal spectrum.
+ */
 public class DebugEigenSmallTest {
 
+    /**
+     * Prints diagnostic information for a near-singular $10\times10$ case.
+     */
     @Test
     public void printNearSingular10() {
         int n = 10;
@@ -44,6 +50,13 @@ public class DebugEigenSmallTest {
         }
     }
     
+        /**
+         * Generates a random square matrix with entries in $[-1, 1]$.
+         *
+         * @param n size of the matrix
+         * @param seed RNG seed
+         * @return random matrix
+         */
         private static Matrix randomMatrix(int n, long seed) {
             java.util.Random rnd = new java.util.Random(seed);
             double[][] a = new double[n][n];

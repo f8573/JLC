@@ -20,6 +20,9 @@ public class SymmetricTests {
     
     // ==================== SpectralDecomposition Tests ====================
     
+    /**
+     * Validates spectral decomposition on a small symmetric matrix.
+     */
     @Test
     public void testSpectralDecompositionSmall() {
         // 2x2 symmetric matrix
@@ -44,6 +47,9 @@ public class SymmetricTests {
         assertTrue("Eigenvalues should be sorted descending", eigenvalues[0] >= eigenvalues[1]);
     }
     
+    /**
+     * Validates spectral decomposition on a diagonal matrix.
+     */
     @Test
     public void testSpectralDecompositionSmallDiagonal() {
         // Well-conditioned diagonal matrix
@@ -67,6 +73,9 @@ public class SymmetricTests {
         assertTrue("Reconstruction should pass validation", result.passes);
     }
     
+    /**
+     * Checks quadratic form evaluation on simple inputs.
+     */
     @Test
     public void testQuadraticFormEvaluation() {
         Matrix A = new Matrix(new double[][]{
@@ -84,6 +93,9 @@ public class SymmetricTests {
         assertEquals("Q([1,1]) = 6", 6.0, value, TOLERANCE);
     }
     
+    /**
+     * Ensures definiteness classification matches expected cases.
+     */
     @Test
     public void testQuadraticFormDefiniteness() {
         // Positive definite
@@ -114,6 +126,9 @@ public class SymmetricTests {
         assertTrue(q3.isIndefinite());
     }
     
+    /**
+     * Verifies Rayleigh quotient values for basis vectors.
+     */
     @Test
     public void testRayleighQuotient() {
         Matrix A = new Matrix(new double[][]{
@@ -130,6 +145,9 @@ public class SymmetricTests {
         assertEquals("R([0,1]) = 2", 2.0, r, TOLERANCE);
     }
     
+    /**
+     * Confirms constrained optimization bounds on eigenvalues.
+     */
     @Test
     public void testMaximizeMinimize() {
         Matrix A = createRandomSymmetric(5);
@@ -144,6 +162,9 @@ public class SymmetricTests {
             maxResult.getValue() >= minResult.getValue());
     }
     
+    /**
+     * Checks round-trip principal axes transformation.
+     */
     @Test
     public void testPrincipalAxesTransformation() {
         Matrix A = new Matrix(new double[][]{
@@ -163,6 +184,9 @@ public class SymmetricTests {
         }
     }
     
+    /**
+     * Validates projection construction from a vector.
+     */
     @Test
     public void testProjectionFromVector() {
         Vector v = new Vector(new double[]{3, 4});
@@ -181,6 +205,9 @@ public class SymmetricTests {
         assertTrue("Projection should be orthogonal", P.isOrthogonal(TOLERANCE));
     }
     
+    /**
+     * Validates identity and zero projection matrices.
+     */
     @Test
     public void testProjectionIdentityZero() {
         int n = 4;

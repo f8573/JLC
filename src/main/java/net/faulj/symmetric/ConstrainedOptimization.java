@@ -56,6 +56,13 @@ public class ConstrainedOptimization {
         private final Vector vector;
         private final String type;
         
+        /**
+         * Create an optimization result container.
+         *
+         * @param value optimal Rayleigh quotient value
+         * @param vector optimal unit vector
+         * @param type extremum type (maximum, minimum, saddle)
+         */
         public OptimizationResult(double value, Vector vector, String type) {
             this.value = value;
             this.vector = vector;
@@ -83,6 +90,9 @@ public class ConstrainedOptimization {
             return type;
         }
         
+        /**
+         * @return string summary of the optimization result
+         */
         @Override
         public String toString() {
             return String.format("OptimizationResult[%s = %.6f]", type, value);
