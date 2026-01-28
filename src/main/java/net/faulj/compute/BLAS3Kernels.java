@@ -222,6 +222,304 @@ public class BLAS3Kernels {
         }
     }
 
+    /**
+     * Compute $C = \alpha AB + \beta C$ using row-major data with strides and offsets.
+     *
+     * @param ad left matrix data
+     * @param aOff base offset into A
+     * @param lda leading dimension (row stride) of A
+     * @param bd right matrix data
+     * @param bOff base offset into B
+     * @param ldb leading dimension (row stride) of B
+     * @param cd output matrix data
+     * @param cOff base offset into C
+     * @param ldc leading dimension (row stride) of C
+     * @param m rows of A/C
+     * @param k columns of A / rows of B
+     * @param n columns of B/C
+     * @param alpha scaling for AB
+     * @param beta scaling for C
+     * @param blockSize blocking factor
+     */
+    public static void gemmStrided(double[] ad, int aOff, int lda,
+                                   double[] bd, int bOff, int ldb,
+                                   double[] cd, int cOff, int ldc,
+                                   int m, int k, int n,
+                                   double alpha, double beta, int blockSize) {
+        dgemmSimdPackedStrided(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc,
+            m, k, n, alpha, beta, blockSize);
+    }
+
+    /**
+     * Compute $C = \alpha A^T B + \beta C$ using row-major data with strides and offsets.
+     *
+     * @param ad left matrix data (A), row-major
+     * @param aOff base offset into A
+     * @param lda leading dimension (row stride) of A
+     * @param bd right matrix data (B), row-major
+     * @param bOff base offset into B
+     * @param ldb leading dimension (row stride) of B
+     * @param cd output matrix data (C), row-major
+     * @param cOff base offset into C
+     * @param ldc leading dimension (row stride) of C
+     * @param m rows of A
+     * @param k columns of A
+     * @param n columns of B / C
+     * @param alpha scaling for A^T B
+     * @param beta scaling for C
+     * @param blockSize blocking factor
+     */
+    public static void gemmStridedTransA(double[] ad, int aOff, int lda,
+                                         double[] bd, int bOff, int ldb,
+                                         double[] cd, int cOff, int ldc,
+                                         int m, int k, int n,
+                                         double alpha, double beta, int blockSize) {
+        dgemmSimdPackedStridedTransA(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc,
+            m, k, n, alpha, beta, blockSize);
+    }
+
+    /**
+     * Compute $C = \alpha A B + \beta C$ where A is column-major and B/C are row-major.
+     */
+    public static void gemmStridedColMajorA(double[] ad, int aOff, int lda,
+                                            double[] bd, int bOff, int ldb,
+                                            double[] cd, int cOff, int ldc,
+                                            int m, int k, int n,
+                                            double alpha, double beta, int blockSize) {
+        dgemmSimdPackedStridedColMajorA(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc,
+            m, k, n, alpha, beta, blockSize);
+    }
+
+    /**
+     * Compute $C = \alpha A B + \beta C$ where B is column-major and A/C are row-major.
+     */
+    public static void gemmStridedColMajorB(double[] ad, int aOff, int lda,
+                                            double[] bd, int bOff, int ldb,
+                                            double[] cd, int cOff, int ldc,
+                                            int m, int k, int n,
+                                            double alpha, double beta, int blockSize) {
+        dgemmSimdPackedStridedColMajorB(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc,
+            m, k, n, alpha, beta, blockSize);
+    }
+
+    static void dgemmSimdPackedStrided(double[] ad, int aOff, int lda,
+                                       double[] bd, int bOff, int ldb,
+                                       double[] cd, int cOff, int ldc,
+                                       int m, int k, int n,
+                                       double alpha, double beta, int blockSize) {
+        if (m <= 0 || n <= 0) {
+            return;
+        }
+
+        if (beta == 0.0) {
+            for (int i = 0; i < m; i++) {
+                java.util.Arrays.fill(cd, cOff + i * ldc, cOff + i * ldc + n, 0.0);
+            }
+        } else if (beta != 1.0) {
+            for (int i = 0; i < m; i++) {
+                int row = cOff + i * ldc;
+                for (int j = 0; j < n; j++) {
+                    cd[row + j] *= beta;
+                }
+            }
+        }
+        if (k <= 0) {
+            return;
+        }
+
+        int vecLen = SPECIES.length();
+        int microRows = microRowsForVector(vecLen);
+        int kUnroll = kUnrollForVector(vecLen);
+        int bs = Math.max(1, blockSize);
+
+        for (int jj = 0; jj < n; jj += bs) {
+            int jMax = Math.min(jj + bs, n);
+            int blockWidth = jMax - jj;
+            int packedN = roundUp(blockWidth, vecLen);
+            for (int kk = 0; kk < k; kk += bs) {
+                int kMax = Math.min(kk + bs, k);
+                int kBlock = kMax - kk;
+                double[] bPack = ensureCapacity(PACK_B_BUFFER, kBlock * packedN);
+                packBStrided(bd, bOff, ldb, kk, kBlock, jj, blockWidth, packedN, bPack);
+                for (int ii = 0; ii < m; ii += bs) {
+                    int iMax = Math.min(ii + bs, m);
+                    for (int i = ii; i < iMax; i += microRows) {
+                        int rows = Math.min(microRows, iMax - i);
+                        double[] aPack = ensureCapacity(PACK_A_BUFFER, rows * kBlock);
+                        packAStrided(ad, aOff, lda, i, rows, kk, kBlock, alpha, aPack);
+                        int cOffset = cOff + i * ldc + jj;
+                        microKernel(rows, kBlock, packedN, blockWidth, aPack, bPack,
+                            cd, cOffset, ldc, vecLen, kUnroll);
+                    }
+                }
+            }
+        }
+    }
+
+    static void dgemmSimdPackedStridedTransA(double[] ad, int aOff, int lda,
+                                             double[] bd, int bOff, int ldb,
+                                             double[] cd, int cOff, int ldc,
+                                             int m, int k, int n,
+                                             double alpha, double beta, int blockSize) {
+        int mT = k;
+        int kT = m;
+        if (mT <= 0 || n <= 0) {
+            return;
+        }
+
+        if (beta == 0.0) {
+            for (int i = 0; i < mT; i++) {
+                java.util.Arrays.fill(cd, cOff + i * ldc, cOff + i * ldc + n, 0.0);
+            }
+        } else if (beta != 1.0) {
+            for (int i = 0; i < mT; i++) {
+                int row = cOff + i * ldc;
+                for (int j = 0; j < n; j++) {
+                    cd[row + j] *= beta;
+                }
+            }
+        }
+        if (kT <= 0) {
+            return;
+        }
+
+        int vecLen = SPECIES.length();
+        int microRows = microRowsForVector(vecLen);
+        int kUnroll = kUnrollForVector(vecLen);
+        int bs = Math.max(1, blockSize);
+
+        for (int jj = 0; jj < n; jj += bs) {
+            int jMax = Math.min(jj + bs, n);
+            int blockWidth = jMax - jj;
+            int packedN = roundUp(blockWidth, vecLen);
+            for (int kk = 0; kk < kT; kk += bs) {
+                int kMax = Math.min(kk + bs, kT);
+                int kBlock = kMax - kk;
+                double[] bPack = ensureCapacity(PACK_B_BUFFER, kBlock * packedN);
+                packBStrided(bd, bOff, ldb, kk, kBlock, jj, blockWidth, packedN, bPack);
+                for (int ii = 0; ii < mT; ii += bs) {
+                    int iMax = Math.min(ii + bs, mT);
+                    for (int i = ii; i < iMax; i += microRows) {
+                        int rows = Math.min(microRows, iMax - i);
+                        double[] aPack = ensureCapacity(PACK_A_BUFFER, rows * kBlock);
+                        packAStridedTransposed(ad, aOff, lda, i, rows, kk, kBlock, alpha, aPack);
+                        int cOffset = cOff + i * ldc + jj;
+                        microKernel(rows, kBlock, packedN, blockWidth, aPack, bPack,
+                            cd, cOffset, ldc, vecLen, kUnroll);
+                    }
+                }
+            }
+        }
+    }
+
+    static void dgemmSimdPackedStridedColMajorA(double[] ad, int aOff, int lda,
+                                                double[] bd, int bOff, int ldb,
+                                                double[] cd, int cOff, int ldc,
+                                                int m, int k, int n,
+                                                double alpha, double beta, int blockSize) {
+        if (m <= 0 || n <= 0) {
+            return;
+        }
+
+        if (beta == 0.0) {
+            for (int i = 0; i < m; i++) {
+                java.util.Arrays.fill(cd, cOff + i * ldc, cOff + i * ldc + n, 0.0);
+            }
+        } else if (beta != 1.0) {
+            for (int i = 0; i < m; i++) {
+                int row = cOff + i * ldc;
+                for (int j = 0; j < n; j++) {
+                    cd[row + j] *= beta;
+                }
+            }
+        }
+        if (k <= 0) {
+            return;
+        }
+
+        int vecLen = SPECIES.length();
+        int microRows = microRowsForVector(vecLen);
+        int kUnroll = kUnrollForVector(vecLen);
+        int bs = Math.max(1, blockSize);
+
+        for (int jj = 0; jj < n; jj += bs) {
+            int jMax = Math.min(jj + bs, n);
+            int blockWidth = jMax - jj;
+            int packedN = roundUp(blockWidth, vecLen);
+            for (int kk = 0; kk < k; kk += bs) {
+                int kMax = Math.min(kk + bs, k);
+                int kBlock = kMax - kk;
+                double[] bPack = ensureCapacity(PACK_B_BUFFER, kBlock * packedN);
+                packBStrided(bd, bOff, ldb, kk, kBlock, jj, blockWidth, packedN, bPack);
+                for (int ii = 0; ii < m; ii += bs) {
+                    int iMax = Math.min(ii + bs, m);
+                    for (int i = ii; i < iMax; i += microRows) {
+                        int rows = Math.min(microRows, iMax - i);
+                        double[] aPack = ensureCapacity(PACK_A_BUFFER, rows * kBlock);
+                        packAStridedColMajor(ad, aOff, lda, i, rows, kk, kBlock, alpha, aPack);
+                        int cOffset = cOff + i * ldc + jj;
+                        microKernel(rows, kBlock, packedN, blockWidth, aPack, bPack,
+                            cd, cOffset, ldc, vecLen, kUnroll);
+                    }
+                }
+            }
+        }
+    }
+
+    static void dgemmSimdPackedStridedColMajorB(double[] ad, int aOff, int lda,
+                                                double[] bd, int bOff, int ldb,
+                                                double[] cd, int cOff, int ldc,
+                                                int m, int k, int n,
+                                                double alpha, double beta, int blockSize) {
+        if (m <= 0 || n <= 0) {
+            return;
+        }
+
+        if (beta == 0.0) {
+            for (int i = 0; i < m; i++) {
+                java.util.Arrays.fill(cd, cOff + i * ldc, cOff + i * ldc + n, 0.0);
+            }
+        } else if (beta != 1.0) {
+            for (int i = 0; i < m; i++) {
+                int row = cOff + i * ldc;
+                for (int j = 0; j < n; j++) {
+                    cd[row + j] *= beta;
+                }
+            }
+        }
+        if (k <= 0) {
+            return;
+        }
+
+        int vecLen = SPECIES.length();
+        int microRows = microRowsForVector(vecLen);
+        int kUnroll = kUnrollForVector(vecLen);
+        int bs = Math.max(1, blockSize);
+
+        for (int jj = 0; jj < n; jj += bs) {
+            int jMax = Math.min(jj + bs, n);
+            int blockWidth = jMax - jj;
+            int packedN = roundUp(blockWidth, vecLen);
+            for (int kk = 0; kk < k; kk += bs) {
+                int kMax = Math.min(kk + bs, k);
+                int kBlock = kMax - kk;
+                double[] bPack = ensureCapacity(PACK_B_BUFFER, kBlock * packedN);
+                packBStridedColMajor(bd, bOff, ldb, kk, kBlock, jj, blockWidth, packedN, bPack);
+                for (int ii = 0; ii < m; ii += bs) {
+                    int iMax = Math.min(ii + bs, m);
+                    for (int i = ii; i < iMax; i += microRows) {
+                        int rows = Math.min(microRows, iMax - i);
+                        double[] aPack = ensureCapacity(PACK_A_BUFFER, rows * kBlock);
+                        packAStrided(ad, aOff, lda, i, rows, kk, kBlock, alpha, aPack);
+                        int cOffset = cOff + i * ldc + jj;
+                        microKernel(rows, kBlock, packedN, blockWidth, aPack, bPack,
+                            cd, cOffset, ldc, vecLen, kUnroll);
+                    }
+                }
+            }
+        }
+    }
+
     private static void microKernel(int rows, int kBlock, int packedN, int blockWidth,
                                     double[] aPack, double[] bPack, double[] c,
                                     int cOffset, int ldc, int vecLen, int kUnroll) {
@@ -381,12 +679,106 @@ public class BLAS3Kernels {
         }
     }
 
+    private static void packAStrided(double[] ad, int aOff, int lda, int rowStart, int rows,
+                                     int kk, int kBlock, double alpha, double[] aPack) {
+        int offset = 0;
+        if (alpha == 1.0) {
+            for (int r = 0; r < rows; r++) {
+                int src = aOff + (rowStart + r) * lda + kk;
+                System.arraycopy(ad, src, aPack, offset, kBlock);
+                offset += kBlock;
+            }
+        } else {
+            for (int r = 0; r < rows; r++) {
+                int src = aOff + (rowStart + r) * lda + kk;
+                for (int p = 0; p < kBlock; p++) {
+                    aPack[offset + p] = ad[src + p] * alpha;
+                }
+                offset += kBlock;
+            }
+        }
+    }
+
+    private static void packAStridedTransposed(double[] ad, int aOff, int lda, int rowStart, int rows,
+                                               int kk, int kBlock, double alpha, double[] aPack) {
+        int offset = 0;
+        if (alpha == 1.0) {
+            for (int r = 0; r < rows; r++) {
+                int col = rowStart + r;
+                for (int p = 0; p < kBlock; p++) {
+                    aPack[offset + p] = ad[aOff + (kk + p) * lda + col];
+                }
+                offset += kBlock;
+            }
+        } else {
+            for (int r = 0; r < rows; r++) {
+                int col = rowStart + r;
+                for (int p = 0; p < kBlock; p++) {
+                    aPack[offset + p] = ad[aOff + (kk + p) * lda + col] * alpha;
+                }
+                offset += kBlock;
+            }
+        }
+    }
+
+    private static void packAStridedColMajor(double[] ad, int aOff, int lda, int rowStart, int rows,
+                                             int kk, int kBlock, double alpha, double[] aPack) {
+        int offset = 0;
+        if (alpha == 1.0) {
+            for (int r = 0; r < rows; r++) {
+                int row = rowStart + r;
+                int src = aOff + kk * lda + row;
+                for (int p = 0; p < kBlock; p++) {
+                    aPack[offset + p] = ad[src + p * lda];
+                }
+                offset += kBlock;
+            }
+        } else {
+            for (int r = 0; r < rows; r++) {
+                int row = rowStart + r;
+                int src = aOff + kk * lda + row;
+                for (int p = 0; p < kBlock; p++) {
+                    aPack[offset + p] = ad[src + p * lda] * alpha;
+                }
+                offset += kBlock;
+            }
+        }
+    }
+
     private static void packB(double[] bd, int n, int kk, int kBlock, int jj,
                               int blockWidth, int packedN, double[] bPack) {
         int dst = 0;
         for (int p = 0; p < kBlock; p++) {
             int src = (kk + p) * n + jj;
             System.arraycopy(bd, src, bPack, dst, blockWidth);
+            if (packedN > blockWidth) {
+                java.util.Arrays.fill(bPack, dst + blockWidth, dst + packedN, 0.0);
+            }
+            dst += packedN;
+        }
+    }
+
+    private static void packBStrided(double[] bd, int bOff, int ldb, int kk, int kBlock,
+                                     int jj, int blockWidth, int packedN, double[] bPack) {
+        int dst = 0;
+        for (int p = 0; p < kBlock; p++) {
+            int src = bOff + (kk + p) * ldb + jj;
+            System.arraycopy(bd, src, bPack, dst, blockWidth);
+            if (packedN > blockWidth) {
+                java.util.Arrays.fill(bPack, dst + blockWidth, dst + packedN, 0.0);
+            }
+            dst += packedN;
+        }
+    }
+
+    private static void packBStridedColMajor(double[] bd, int bOff, int ldb, int kk, int kBlock,
+                                             int jj, int blockWidth, int packedN, double[] bPack) {
+        int dst = 0;
+        for (int p = 0; p < kBlock; p++) {
+            int src = bOff + (kk + p) + jj * ldb;
+            for (int j = 0; j < blockWidth; j++) {
+                bPack[dst + j] = bd[src + j * ldb];
+            }
             if (packedN > blockWidth) {
                 java.util.Arrays.fill(bPack, dst + blockWidth, dst + packedN, 0.0);
             }

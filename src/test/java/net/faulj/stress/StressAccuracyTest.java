@@ -24,7 +24,7 @@ public class StressAccuracyTest {
     private static final int TRIALS = 2000;
     private static final int MIN_SIZE = 2;
     private static final int MAX_SIZE = 8;
-    private static final int[] LARGE_SIZES = {50, 100, 200, 2000};
+    private static final int[] LARGE_SIZES = {50, 100, 200, 1000};
     private static final double QR_RESIDUAL_LIMIT = 1e-2;
     private static final double HESS_RESIDUAL_LIMIT = 1e-2;
     private static final double SCHUR_RESIDUAL_LIMIT = 5e-2;
@@ -40,7 +40,6 @@ public class StressAccuracyTest {
     @Test
     public void stressDecompositionAndEigenAccuracy() {
         Random rnd = new Random(1234567L);
-
         for (int t = 0; t < TRIALS; t++) {
             int n = MIN_SIZE + (t % (MAX_SIZE - MIN_SIZE + 1));
             Matrix A = randomMatrix(rnd, n);

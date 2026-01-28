@@ -24,6 +24,7 @@ import net.faulj.eigen.schur.RealSchurDecomposition;
 import net.faulj.inverse.LUInverse;
 import net.faulj.matrix.Matrix;
 import net.faulj.matrix.MatrixAccuracyValidator;
+import net.faulj.matrix.MatrixUtils;
 import net.faulj.polar.PolarDecomposition;
 import net.faulj.scalar.Complex;
 import net.faulj.spaces.SubspaceBasis;
@@ -942,7 +943,7 @@ public class DiagnosticMetrics {
 
         if (diag.real) {
             Matrix rrefMatrix = A.copy();
-            rrefMatrix.toReducedRowEchelonForm();
+            MatrixUtils.toReducedRowEchelonForm(rrefMatrix);
             diag.rref = new DiagnosticItem<>("rref", Status.OK, "Computed reduced row echelon form",
                     rrefMatrix, null);
         } else {
@@ -2040,7 +2041,7 @@ public class DiagnosticMetrics {
             return 0;
         }
         Matrix rref = A.copy();
-        rref.toReducedRowEchelonForm();
+        MatrixUtils.toReducedRowEchelonForm(rref);
         return rankFromRref(rref, tol);
     }
 

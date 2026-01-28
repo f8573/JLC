@@ -1,26 +1,27 @@
 package net.faulj.matrix;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Set;
 
 import net.faulj.compute.BlockedMultiply;
+import net.faulj.core.Tolerance;
 import net.faulj.vector.Vector;
 import net.faulj.spaces.SubspaceBasis;
+import jdk.incubator.vector.DoubleVector;
+import jdk.incubator.vector.VectorOperators;
+import jdk.incubator.vector.VectorSpecies;
 
 /**
  * Dense matrix implementation with optional complex components.
  * Provides common linear algebra operations and utility helpers.
  */
 public class Matrix {
+    private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
+    private static final int TRANSPOSE_BLOCK = 64;
     private final int rows;
     private final int columns;
-    private double[] data;
+    private final double[] data;
     private double[] imag;
-    private int exchanges;
-    private final ArrayList<Vector> pivotColumns;
-    private double tol = 1e-10;
-    private transient Vector[] columnViews;
 
     /**
      * Construct a matrix from column vectors.
@@ -32,7 +33,6 @@ public class Matrix {
             this.rows = 0;
             this.columns = 0;
             this.data = new double[0];
-            this.pivotColumns = new ArrayList<>();
             return;
         }
         int rowCount = data[0].dimension();
@@ -64,7 +64,6 @@ public class Matrix {
                 idx += columns;
             }
         }
-        pivotColumns = new ArrayList<>();
     }
 
     /**
@@ -85,7 +84,6 @@ public class Matrix {
             }
             System.arraycopy(data[row], 0, this.data, row * columns, columns);
         }
-        pivotColumns = new ArrayList<>();
     }
 
     /**
@@ -116,7 +114,6 @@ public class Matrix {
                 System.arraycopy(imag[row], 0, this.imag, row * columns, columns);
             }
         }
-        pivotColumns = new ArrayList<>();
     }
 
     /**
@@ -132,7 +129,6 @@ public class Matrix {
         this.rows = rows;
         this.columns = cols;
         this.data = new double[rows * cols];
-        this.pivotColumns = new ArrayList<>();
     }
 
     private Matrix(int rows, int cols, double[] data, double[] imag, boolean wrap) {
@@ -140,7 +136,6 @@ public class Matrix {
         this.columns = cols;
         this.data = data;
         this.imag = imag;
-        this.pivotColumns = new ArrayList<>();
     }
 
     /**
@@ -274,14 +269,11 @@ public class Matrix {
         if (columns == 0) {
             return new Vector[0];
         }
-        if (columnViews == null || columnViews.length != columns) {
-            Vector[] views = new Vector[columns];
-            for (int col = 0; col < columns; col++) {
-                views[col] = new Vector(this, col);
-            }
-            columnViews = views;
+        Vector[] views = new Vector[columns];
+        for (int col = 0; col < columns; col++) {
+            views[col] = new Vector(this, col);
         }
-        return columnViews;
+        return views;
     }
 
     /**
@@ -386,15 +378,6 @@ public class Matrix {
     }
 
     /**
-     * Get pivot columns used in row-reduction routines.
-     *
-     * @return pivot columns list
-     */
-    public ArrayList<Vector> getPivotColumns() {
-        return pivotColumns;
-    }
-
-    /**
      * Get the raw real data backing array.
      *
      * @return raw real data
@@ -451,15 +434,7 @@ public class Matrix {
      * @return true if real
      */
     public boolean isReal() {
-        if (imag == null) {
-            return true;
-        }
-        for (double v : imag) {
-            if (v != 0.0) {
-                return false;
-            }
-        }
-        return true;
+        return imag == null;
     }
 
     private void ensureReal(String operation) {
@@ -506,14 +481,7 @@ public class Matrix {
         if (sourceRow < 0 || targetRow < 0 || sourceRow >= rows || targetRow >= rows) {
             throw new IllegalArgumentException("Invalid row indices");
         }
-        int sourceOffset = sourceRow * columns;
-        int targetOffset = targetRow * columns;
-        for (int col = 0; col < columns; col++) {
-            data[targetOffset + col] += multiplier * data[sourceOffset + col];
-            if (imag != null) {
-                imag[targetOffset + col] += multiplier * imag[sourceOffset + col];
-            }
-        }
+        kernelAddRow(sourceRow, targetRow, multiplier);
     }
 
     /**
@@ -532,14 +500,34 @@ public class Matrix {
         double[] b = other.data;
         double[] ai = this.imag;
         double[] bi = other.imag;
-        double[] oi = null;
-        if (ai != null || bi != null) {
-            oi = result.ensureImagData();
+        int length = out.length;
+        int i = 0;
+        int loopBound = SPECIES.loopBound(length);
+        for (; i < loopBound; i += SPECIES.length()) {
+            DoubleVector va = DoubleVector.fromArray(SPECIES, a, i);
+            DoubleVector vb = DoubleVector.fromArray(SPECIES, b, i);
+            va.add(vb).intoArray(out, i);
         }
-        for (int i = 0; i < out.length; i++) {
+        for (; i < length; i++) {
             out[i] = a[i] + b[i];
-            if (oi != null) {
-                oi[i] = (ai == null ? 0.0 : ai[i]) + (bi == null ? 0.0 : bi[i]);
+        }
+        if (ai != null || bi != null) {
+            double[] oi = result.ensureImagData();
+            if (ai != null && bi != null) {
+                i = 0;
+                loopBound = SPECIES.loopBound(length);
+                for (; i < loopBound; i += SPECIES.length()) {
+                    DoubleVector vai = DoubleVector.fromArray(SPECIES, ai, i);
+                    DoubleVector vbi = DoubleVector.fromArray(SPECIES, bi, i);
+                    vai.add(vbi).intoArray(oi, i);
+                }
+                for (; i < length; i++) {
+                    oi[i] = ai[i] + bi[i];
+                }
+            } else if (ai != null) {
+                System.arraycopy(ai, 0, oi, 0, length);
+            } else {
+                System.arraycopy(bi, 0, oi, 0, length);
             }
         }
         return result;
@@ -561,14 +549,42 @@ public class Matrix {
         double[] b = other.data;
         double[] ai = this.imag;
         double[] bi = other.imag;
-        double[] oi = null;
-        if (ai != null || bi != null) {
-            oi = result.ensureImagData();
+        int length = out.length;
+        int i = 0;
+        int loopBound = SPECIES.loopBound(length);
+        for (; i < loopBound; i += SPECIES.length()) {
+            DoubleVector va = DoubleVector.fromArray(SPECIES, a, i);
+            DoubleVector vb = DoubleVector.fromArray(SPECIES, b, i);
+            va.sub(vb).intoArray(out, i);
         }
-        for (int i = 0; i < out.length; i++) {
+        for (; i < length; i++) {
             out[i] = a[i] - b[i];
-            if (oi != null) {
-                oi[i] = (ai == null ? 0.0 : ai[i]) - (bi == null ? 0.0 : bi[i]);
+        }
+        if (ai != null || bi != null) {
+            double[] oi = result.ensureImagData();
+            if (ai != null && bi != null) {
+                i = 0;
+                loopBound = SPECIES.loopBound(length);
+                for (; i < loopBound; i += SPECIES.length()) {
+                    DoubleVector vai = DoubleVector.fromArray(SPECIES, ai, i);
+                    DoubleVector vbi = DoubleVector.fromArray(SPECIES, bi, i);
+                    vai.sub(vbi).intoArray(oi, i);
+                }
+                for (; i < length; i++) {
+                    oi[i] = ai[i] - bi[i];
+                }
+            } else if (ai != null) {
+                System.arraycopy(ai, 0, oi, 0, length);
+            } else {
+                i = 0;
+                loopBound = SPECIES.loopBound(length);
+                for (; i < loopBound; i += SPECIES.length()) {
+                    DoubleVector vbi = DoubleVector.fromArray(SPECIES, bi, i);
+                    vbi.neg().intoArray(oi, i);
+                }
+                for (; i < length; i++) {
+                    oi[i] = -bi[i];
+                }
             }
         }
         return result;
@@ -584,13 +600,7 @@ public class Matrix {
         if (row < 0 || row >= rows) {
             throw new IllegalArgumentException("Invalid row index");
         }
-        int offset = row * columns;
-        for (int col = 0; col < columns; col++) {
-            data[offset + col] *= multiplier;
-            if (imag != null) {
-                imag[offset + col] *= multiplier;
-            }
-        }
+        kernelScaleRow(row, multiplier);
     }
 
     /**
@@ -605,13 +615,21 @@ public class Matrix {
         if (imag != null) {
             outImag = result.ensureImagData();
         }
-        for (int row = 0; row < rows; row++) {
-            int rowOffset = row * columns;
-            for (int col = 0; col < columns; col++) {
-                int outIndex = col * rows + row;
-                out[outIndex] = data[rowOffset + col];
-                if (outImag != null) {
-                    outImag[outIndex] = imag[rowOffset + col];
+        int blockSize = TRANSPOSE_BLOCK;
+        for (int i = 0; i < rows; i += blockSize) {
+            int iMax = Math.min(i + blockSize, rows);
+            for (int j = 0; j < columns; j += blockSize) {
+                int jMax = Math.min(j + blockSize, columns);
+                for (int row = i; row < iMax; row++) {
+                    int rowOffset = row * columns;
+                    for (int col = j; col < jMax; col++) {
+                        int outIndex = col * rows + row;
+                        int srcIndex = rowOffset + col;
+                        out[outIndex] = data[srcIndex];
+                        if (outImag != null) {
+                            outImag[outIndex] = imag[srcIndex];
+                        }
+                    }
                 }
             }
         }
@@ -672,101 +690,6 @@ public class Matrix {
         return s.toString();
     }
 
-    /**
-     * Transform this matrix to row echelon form in place.
-     */
-    public void toRowEchelonForm() {
-        ensureReal("Row echelon form");
-        exchanges = 0;
-        pivotColumns.clear();
-        int pivotRow = 0;
-
-        for (int col = 0; col < columns && pivotRow < rows; col++) {
-            int pivotIndex = -1;
-            double maxAbs = tol;
-            for (int row = pivotRow; row < rows; row++) {
-                double val = Math.abs(get(row, col));
-                if (val > maxAbs) {
-                    maxAbs = val;
-                    pivotIndex = row;
-                }
-            }
-
-            if (pivotIndex == -1) {
-                continue;
-            }
-
-            if (pivotIndex != pivotRow) {
-                exchangeRows(pivotRow, pivotIndex);
-                exchanges++;
-            }
-
-            double pivot = get(pivotRow, col);
-            if (Math.abs(pivot) <= tol) {
-                continue;
-            }
-
-            for (int row = pivotRow + 1; row < rows; row++) {
-                double val = get(row, col);
-                if (Math.abs(val) > tol) {
-                    double multiplier = -val / pivot;
-                    addMultipleOfRow(pivotRow, row, multiplier);
-                }
-            }
-
-            pivotRow++;
-        }
-    }
-
-    /**
-     * Transform this matrix to reduced row echelon form in place.
-     */
-    public void toReducedRowEchelonForm() {
-        ensureReal("Reduced row echelon form");
-        pivotColumns.clear();
-        Matrix original = this.copy();
-        int pivotRow = 0;
-
-        for (int col = 0; col < columns && pivotRow < rows; col++) {
-            int pivotIndex = -1;
-            double maxAbs = tol;
-            for (int row = pivotRow; row < rows; row++) {
-                double val = Math.abs(get(row, col));
-                if (val > maxAbs) {
-                    maxAbs = val;
-                    pivotIndex = row;
-                }
-            }
-
-            if (pivotIndex == -1) {
-                continue;
-            }
-
-            if (pivotIndex != pivotRow) {
-                exchangeRows(pivotRow, pivotIndex);
-            }
-
-            double pivot = get(pivotRow, col);
-            if (Math.abs(pivot) <= tol) {
-                continue;
-            }
-
-            multiplyRow(pivotRow, 1.0 / pivot);
-
-            for (int row = 0; row < rows; row++) {
-                if (row == pivotRow) {
-                    continue;
-                }
-                double val = get(row, col);
-                if (Math.abs(val) > tol) {
-                    addMultipleOfRow(pivotRow, row, -val);
-                }
-            }
-
-            pivotColumns.add(original.getData()[col].copy());
-            pivotRow++;
-        }
-    }
 
     /**
      * Solve a linear system $Ax=b$ using row reduction.
@@ -785,7 +708,8 @@ public class Matrix {
         }
 
         Matrix augmented = this.AppendVector(b, "RIGHT");
-        augmented.toReducedRowEchelonForm();
+        MatrixUtils.toReducedRowEchelonForm(augmented);
+        double tol = Tolerance.get();
 
         int originalCols = this.columns;
         int augmentedColIndex = augmented.getColumnCount() - 1;
@@ -1020,12 +944,19 @@ public class Matrix {
      */
     public Matrix inverse() {
         ensureReal("Inverse");
+        if (rows != columns) {
+            throw new ArithmeticException("Row-column count mismatch");
+        }
+        int n = rows;
+        double tol = Tolerance.get();
+        if (n <= 4) {
+            return inverseSmall(n, tol);
+        }
         if (!isInvertible()) {
             throw new ArithmeticException("Matrix is not invertible");
         }
-        int n = rows;
         Matrix augmented = this.AppendMatrix(Matrix.Identity(n), "RIGHT");
-        augmented.toReducedRowEchelonForm();
+        MatrixUtils.toReducedRowEchelonForm(augmented);
         int originalCols = this.columns;
         Vector[] invCols = new Vector[originalCols];
         for (int c = 0; c < originalCols; c++) {
@@ -1055,8 +986,44 @@ public class Matrix {
         if (rows != columns) {
             throw new ArithmeticException("Row-column count mismatch");
         }
+        int n = rows;
+        if (n == 1) {
+            return data[0];
+        }
+        if (n == 2) {
+            return data[0] * data[3] - data[1] * data[2];
+        }
+        if (n == 3) {
+            return det3x3(
+                    data[0], data[1], data[2],
+                    data[3], data[4], data[5],
+                    data[6], data[7], data[8]);
+        }
+        if (n == 4) {
+            double a00 = data[0];
+            double a01 = data[1];
+            double a02 = data[2];
+            double a03 = data[3];
+            double a10 = data[4];
+            double a11 = data[5];
+            double a12 = data[6];
+            double a13 = data[7];
+            double a20 = data[8];
+            double a21 = data[9];
+            double a22 = data[10];
+            double a23 = data[11];
+            double a30 = data[12];
+            double a31 = data[13];
+            double a32 = data[14];
+            double a33 = data[15];
+            double c00 = det3x3(a11, a12, a13, a21, a22, a23, a31, a32, a33);
+            double c01 = -det3x3(a10, a12, a13, a20, a22, a23, a30, a32, a33);
+            double c02 = det3x3(a10, a11, a13, a20, a21, a23, a30, a31, a33);
+            double c03 = -det3x3(a10, a11, a12, a20, a21, a22, a30, a31, a32);
+            return a00 * c00 + a01 * c01 + a02 * c02 + a03 * c03;
+        }
+        double tol = Tolerance.get();
         Matrix m = this.copy();
-        int n = m.rows;
         int exchanges = 0;
 
         for (int col = 0; col < n; col++) {
@@ -1206,12 +1173,26 @@ public class Matrix {
     public Matrix multiplyScalar(double d) {
         Matrix result = new Matrix(rows, columns);
         double[] out = result.data;
-        for (int i = 0; i < data.length; i++) {
+        int length = out.length;
+        int i = 0;
+        int loopBound = SPECIES.loopBound(length);
+        DoubleVector factor = DoubleVector.broadcast(SPECIES, d);
+        for (; i < loopBound; i += SPECIES.length()) {
+            DoubleVector v = DoubleVector.fromArray(SPECIES, data, i);
+            v.mul(factor).intoArray(out, i);
+        }
+        for (; i < length; i++) {
             out[i] = data[i] * d;
         }
         if (imag != null) {
             double[] outImag = result.ensureImagData();
-            for (int i = 0; i < imag.length; i++) {
+            i = 0;
+            loopBound = SPECIES.loopBound(length);
+            for (; i < loopBound; i += SPECIES.length()) {
+                DoubleVector v = DoubleVector.fromArray(SPECIES, imag, i);
+                v.mul(factor).intoArray(outImag, i);
+            }
+            for (; i < length; i++) {
                 outImag[i] = imag[i] * d;
             }
         }
@@ -1224,7 +1205,31 @@ public class Matrix {
      * @return Frobenius norm
      */
     public double frobeniusNorm() {
-        return MatrixNorms.frobeniusNorm(this);
+        int length = data.length;
+        int i = 0;
+        int loopBound = SPECIES.loopBound(length);
+        DoubleVector sum = DoubleVector.zero(SPECIES);
+        for (; i < loopBound; i += SPECIES.length()) {
+            DoubleVector v = DoubleVector.fromArray(SPECIES, data, i);
+            sum = v.lanewise(VectorOperators.FMA, v, sum);
+        }
+        double total = sum.reduceLanes(VectorOperators.ADD);
+        for (; i < length; i++) {
+            total += data[i] * data[i];
+        }
+        if (imag != null) {
+            i = 0;
+            sum = DoubleVector.zero(SPECIES);
+            for (; i < loopBound; i += SPECIES.length()) {
+                DoubleVector v = DoubleVector.fromArray(SPECIES, imag, i);
+                sum = v.lanewise(VectorOperators.FMA, v, sum);
+            }
+            total += sum.reduceLanes(VectorOperators.ADD);
+            for (; i < length; i++) {
+                total += imag[i] * imag[i];
+            }
+        }
+        return Math.sqrt(total);
     }
 
     /**
@@ -1345,6 +1350,196 @@ public class Matrix {
         }
         return result;
     }
+
+    private void kernelScaleRow(int row, double factor) {
+        if (factor == 1.0) {
+            return;
+        }
+        int offset = row * columns;
+        int length = columns;
+        int i = 0;
+        int loopBound = SPECIES.loopBound(length);
+        DoubleVector fv = DoubleVector.broadcast(SPECIES, factor);
+        for (; i < loopBound; i += SPECIES.length()) {
+            DoubleVector v = DoubleVector.fromArray(SPECIES, data, offset + i);
+            v.mul(fv).intoArray(data, offset + i);
+        }
+        for (; i < length; i++) {
+            data[offset + i] *= factor;
+        }
+        if (imag != null) {
+            i = 0;
+            for (; i < loopBound; i += SPECIES.length()) {
+                DoubleVector v = DoubleVector.fromArray(SPECIES, imag, offset + i);
+                v.mul(fv).intoArray(imag, offset + i);
+            }
+            for (; i < length; i++) {
+                imag[offset + i] *= factor;
+            }
+        }
+    }
+
+    private void kernelAddRow(int sourceRow, int targetRow, double factor) {
+        if (factor == 0.0) {
+            return;
+        }
+        int sourceOffset = sourceRow * columns;
+        int targetOffset = targetRow * columns;
+        int length = columns;
+        int i = 0;
+        int loopBound = SPECIES.loopBound(length);
+        DoubleVector fv = DoubleVector.broadcast(SPECIES, factor);
+        for (; i < loopBound; i += SPECIES.length()) {
+            DoubleVector src = DoubleVector.fromArray(SPECIES, data, sourceOffset + i);
+            DoubleVector dst = DoubleVector.fromArray(SPECIES, data, targetOffset + i);
+            src.mul(fv).add(dst).intoArray(data, targetOffset + i);
+        }
+        for (; i < length; i++) {
+            data[targetOffset + i] += factor * data[sourceOffset + i];
+        }
+        if (imag != null) {
+            i = 0;
+            for (; i < loopBound; i += SPECIES.length()) {
+                DoubleVector src = DoubleVector.fromArray(SPECIES, imag, sourceOffset + i);
+                DoubleVector dst = DoubleVector.fromArray(SPECIES, imag, targetOffset + i);
+                src.mul(fv).add(dst).intoArray(imag, targetOffset + i);
+            }
+            for (; i < length; i++) {
+                imag[targetOffset + i] += factor * imag[sourceOffset + i];
+            }
+        }
+    }
+
+    private static double det3x3(double a00, double a01, double a02,
+                                 double a10, double a11, double a12,
+                                 double a20, double a21, double a22) {
+        return a00 * (a11 * a22 - a12 * a21)
+                - a01 * (a10 * a22 - a12 * a20)
+                + a02 * (a10 * a21 - a11 * a20);
+    }
+
+    private Matrix inverseSmall(int n, double tol) {
+        if (n == 1) {
+            double a = data[0];
+            if (Math.abs(a) <= tol) {
+                throw new ArithmeticException("Matrix is not invertible");
+            }
+            Matrix result = new Matrix(1, 1);
+            result.data[0] = 1.0 / a;
+            return result;
+        }
+        if (n == 2) {
+            double a = data[0];
+            double b = data[1];
+            double c = data[2];
+            double d = data[3];
+            double det = a * d - b * c;
+            if (Math.abs(det) <= tol) {
+                throw new ArithmeticException("Matrix is not invertible");
+            }
+            double invDet = 1.0 / det;
+            Matrix result = new Matrix(2, 2);
+            result.data[0] = d * invDet;
+            result.data[1] = -b * invDet;
+            result.data[2] = -c * invDet;
+            result.data[3] = a * invDet;
+            return result;
+        }
+        if (n == 3) {
+            double a00 = data[0];
+            double a01 = data[1];
+            double a02 = data[2];
+            double a10 = data[3];
+            double a11 = data[4];
+            double a12 = data[5];
+            double a20 = data[6];
+            double a21 = data[7];
+            double a22 = data[8];
+            double det = det3x3(a00, a01, a02, a10, a11, a12, a20, a21, a22);
+            if (Math.abs(det) <= tol) {
+                throw new ArithmeticException("Matrix is not invertible");
+            }
+            double c00 = (a11 * a22 - a12 * a21);
+            double c01 = -(a10 * a22 - a12 * a20);
+            double c02 = (a10 * a21 - a11 * a20);
+            double c10 = -(a01 * a22 - a02 * a21);
+            double c11 = (a00 * a22 - a02 * a20);
+            double c12 = -(a00 * a21 - a01 * a20);
+            double c20 = (a01 * a12 - a02 * a11);
+            double c21 = -(a00 * a12 - a02 * a10);
+            double c22 = (a00 * a11 - a01 * a10);
+            double invDet = 1.0 / det;
+            Matrix result = new Matrix(3, 3);
+            result.data[0] = c00 * invDet;
+            result.data[1] = c10 * invDet;
+            result.data[2] = c20 * invDet;
+            result.data[3] = c01 * invDet;
+            result.data[4] = c11 * invDet;
+            result.data[5] = c21 * invDet;
+            result.data[6] = c02 * invDet;
+            result.data[7] = c12 * invDet;
+            result.data[8] = c22 * invDet;
+            return result;
+        }
+        double a00 = data[0];
+        double a01 = data[1];
+        double a02 = data[2];
+        double a03 = data[3];
+        double a10 = data[4];
+        double a11 = data[5];
+        double a12 = data[6];
+        double a13 = data[7];
+        double a20 = data[8];
+        double a21 = data[9];
+        double a22 = data[10];
+        double a23 = data[11];
+        double a30 = data[12];
+        double a31 = data[13];
+        double a32 = data[14];
+        double a33 = data[15];
+
+        double c00 = det3x3(a11, a12, a13, a21, a22, a23, a31, a32, a33);
+        double c01 = -det3x3(a10, a12, a13, a20, a22, a23, a30, a32, a33);
+        double c02 = det3x3(a10, a11, a13, a20, a21, a23, a30, a31, a33);
+        double c03 = -det3x3(a10, a11, a12, a20, a21, a22, a30, a31, a32);
+        double c10 = -det3x3(a01, a02, a03, a21, a22, a23, a31, a32, a33);
+        double c11 = det3x3(a00, a02, a03, a20, a22, a23, a30, a32, a33);
+        double c12 = -det3x3(a00, a01, a03, a20, a21, a23, a30, a31, a33);
+        double c13 = det3x3(a00, a01, a02, a20, a21, a22, a30, a31, a32);
+        double c20 = det3x3(a01, a02, a03, a11, a12, a13, a31, a32, a33);
+        double c21 = -det3x3(a00, a02, a03, a10, a12, a13, a30, a32, a33);
+        double c22 = det3x3(a00, a01, a03, a10, a11, a13, a30, a31, a33);
+        double c23 = -det3x3(a00, a01, a02, a10, a11, a12, a30, a31, a32);
+        double c30 = -det3x3(a01, a02, a03, a11, a12, a13, a21, a22, a23);
+        double c31 = det3x3(a00, a02, a03, a10, a12, a13, a20, a22, a23);
+        double c32 = -det3x3(a00, a01, a03, a10, a11, a13, a20, a21, a23);
+        double c33 = det3x3(a00, a01, a02, a10, a11, a12, a20, a21, a22);
+
+        double det = a00 * c00 + a01 * c01 + a02 * c02 + a03 * c03;
+        if (Math.abs(det) <= tol) {
+            throw new ArithmeticException("Matrix is not invertible");
+        }
+        double invDet = 1.0 / det;
+        Matrix result = new Matrix(4, 4);
+        result.data[0] = c00 * invDet;
+        result.data[1] = c10 * invDet;
+        result.data[2] = c20 * invDet;
+        result.data[3] = c30 * invDet;
+        result.data[4] = c01 * invDet;
+        result.data[5] = c11 * invDet;
+        result.data[6] = c21 * invDet;
+        result.data[7] = c31 * invDet;
+        result.data[8] = c02 * invDet;
+        result.data[9] = c12 * invDet;
+        result.data[10] = c22 * invDet;
+        result.data[11] = c32 * invDet;
+        result.data[12] = c03 * invDet;
+        result.data[13] = c13 * invDet;
+        result.data[14] = c23 * invDet;
+        result.data[15] = c33 * invDet;
+        return result;
+    }
+
 
     public static Matrix randomMatrix(int rows, int cols) {
         Matrix m = new Matrix(rows, cols);

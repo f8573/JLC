@@ -2,6 +2,7 @@ package net.faulj.spaces;
 
 import net.faulj.matrix.Matrix;
 import net.faulj.core.Tolerance;
+import net.faulj.matrix.MatrixUtils;
 import net.faulj.vector.Vector;
 
 import java.util.ArrayList;
@@ -150,7 +151,7 @@ public class SubspaceBasis {
 		}
 
 		Matrix rref = m.copy();
-		rref.toReducedRowEchelonForm();
+		MatrixUtils.toReducedRowEchelonForm(rref);
 		int rows = rref.getRowCount();
 		int cols = rref.getColumnCount();
 		double tol = Tolerance.get();
