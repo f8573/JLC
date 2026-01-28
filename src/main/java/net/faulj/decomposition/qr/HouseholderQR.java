@@ -2,300 +2,516 @@ package net.faulj.decomposition.qr;
 
 import net.faulj.decomposition.result.QRResult;
 import net.faulj.matrix.Matrix;
+import net.faulj.compute.BLAS3Kernels;
+import net.faulj.compute.DispatchPolicy;
 import jdk.incubator.vector.*;
 
 /**
- * Optimized Householder QR decomposition using vector API for BLAS3-like operations.
- * Maintains correctness of original algorithm while providing speedup through vectorization.
+ * Householder QR decomposition using column-major internal representation
+ * for optimal vectorization and cache performance.
+ * 
+ * Internally works with A^T (column-major) to make column operations contiguous.
+ * This enables true BLAS3-like performance through SIMD vectorization.
  */
 public final class HouseholderQR {
-	private static final double EPS = 1e-12;
-	private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
-	private static final int LANE_SIZE = SPECIES.length();
+    private static final double EPS = 1e-12;
+    private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
+    private static final int LANE_SIZE = SPECIES.length();
+    private static final int BLOCK_SIZE = 64; // Optimal for L1 cache
+    private static final int TRANSPOSE_BLOCK = 32;
+    private static final int TRAILING_BLOCK = 128;
 
-	private HouseholderQR() {}
+    private HouseholderQR() {}
 
-	public static QRResult decompose(Matrix A) { return decompose(A, false); }
-	public static QRResult decomposeThin(Matrix A) { return decompose(A, true); }
+    public static QRResult decompose(Matrix A) { return decompose(A, false); }
+    public static QRResult decomposeThin(Matrix A) { return decompose(A, true); }
 
-	private static QRResult decompose(Matrix A, boolean thin) {
-		if (A == null) throw new IllegalArgumentException("Matrix must not be null");
-		if (!A.isReal()) throw new UnsupportedOperationException("Householder QR requires real matrix");
+    private static QRResult decompose(Matrix A, boolean thin) {
+        if (A == null) throw new IllegalArgumentException("Matrix must not be null");
+        if (!A.isReal()) throw new UnsupportedOperationException("Householder QR requires real matrix");
 
-		final int m = A.getRowCount();
-		final int n = A.getColumnCount();
-		final int kMax = Math.min(m, n);
+        final int m = A.getRowCount();
+        final int n = A.getColumnCount();
+        final int kMax = Math.min(m, n);
 
-		// Work on a copy
-		Matrix R = A.copy();
-		double[] a = R.getRawData();
-		double[] tau = new double[kMax];
+        // Convert to column-major (transposed) for contiguous column access
+        double[] AT = toColumnMajor(A.getRawData(), m, n);
+        double[] tau = new double[kMax];
+        Workspace ws = new Workspace(m, n);
 
-		// Factorization with vectorized column updates
-		for (int k = 0; k < kMax; k++) {
-			int len = m - k;
-			if (len <= 1) { tau[k] = 0.0; continue; }
+        // Perform blocked Householder QR factorization
+        factorizeBlocked(AT, tau, m, n, kMax, ws);
 
-			int diag = k * n + k;
-			double x0 = a[diag];
+        // Build Q in column-major, then transpose back to row-major
+        final int qRows = thin ? kMax : m;
+        double[] QT = buildQ(AT, tau, m, n, qRows, kMax);
 
-			// Compute sigma = ||x[1:]||^2 using vector API
-			double sigma = computeSigmaVectorized(a, m, n, k);
+        // Extract R from column-major representation
+        Matrix R = extractR(AT, m, n, kMax, thin);
 
-			if (sigma <= EPS) {
-				tau[k] = 0.0;
-				continue;
-			}
+        Matrix Q = fromColumnMajor(QT, m, qRows);
 
-			double mu = Math.sqrt(x0 * x0 + sigma);
-			double beta = -Math.copySign(mu, x0);
-			double v0 = x0 - beta;
-			double v0sq = v0 * v0;
+        return new QRResult(A, Q, R);
+    }
 
-			if (v0sq <= EPS) {
-				tau[k] = 0.0;
-				continue;
-			}
+    /**
+     * Convert row-major matrix to column-major (transposed)
+     */
+    private static double[] toColumnMajor(double[] a, int rows, int cols) {
+        double[] at = new double[rows * cols];
+        transposeBlocked(a, at, rows, cols);
+        return at;
+    }
 
-			double tauK = 2.0 * v0sq / (sigma + v0sq);
-			tau[k] = tauK;
+    /**
+     * Convert column-major matrix back to row-major
+     */
+    private static Matrix fromColumnMajor(double[] at, int rows, int cols) {
+        double[] a = new double[rows * cols];
+        transposeBlocked(at, a, cols, rows);
+        return Matrix.wrap(a, rows, cols);
+    }
 
-			// Store R(k,k) = beta
-			a[diag] = beta;
+    private static void transposeBlocked(double[] src, double[] dst, int rows, int cols) {
+        int block = TRANSPOSE_BLOCK;
+        for (int i = 0; i < rows; i += block) {
+            int iMax = Math.min(i + block, rows);
+            for (int j = 0; j < cols; j += block) {
+                int jMax = Math.min(j + block, cols);
+                for (int r = i; r < iMax; r++) {
+                    int srcBase = r * cols;
+                    for (int c = j; c < jMax; c++) {
+                        dst[c * rows + r] = src[srcBase + c];
+                    }
+                }
+            }
+        }
+    }
 
-			// Store Householder vector below diagonal
-			for (int r = k + 1; r < m; r++) {
-				a[r * n + k] /= v0;
-			}
+    /**
+     * Blocked Householder QR factorization (LAPACK style)
+     * Works on column-major matrix AT (n x m) where original A is m x n
+     */
+    private static void factorizeBlocked(double[] AT, double[] tau, int m, int n, int kMax, Workspace ws) {
+        // Process matrix in blocks for cache efficiency
+        for (int kStart = 0; kStart < kMax; kStart += BLOCK_SIZE) {
+            int kEnd = Math.min(kStart + BLOCK_SIZE, kMax);
+            
+            // 1. Compute panel factorization (current block)
+            factorizePanel(AT, tau, m, n, kStart, kEnd);
+            
+            // 2. Update trailing matrix if there are more columns
+            if (kEnd < n) {
+                updateTrailingMatrix(AT, tau, m, n, kStart, kEnd, ws);
+            }
+        }
+    }
 
-			// Apply reflector to trailing matrix with vectorized updates
-			applyReflectorVectorized(a, tauK, m, n, k);
-		}
+    /**
+     * Factorize a panel of columns [kStart, kEnd)
+     */
+    private static void factorizePanel(double[] AT, double[] tau, int m, int n, 
+                                       int kStart, int kEnd) {
+        for (int k = kStart; k < kEnd; k++) {
+            // Compute Householder vector for column k
+            double beta = computeHouseholder(AT, tau, m, n, k, k);
+            
+            // Apply to remaining columns in panel
+            for (int j = k + 1; j < kEnd; j++) {
+                applyHouseholderToColumn(AT, tau[k], m, n, k, j);
+            }
+        }
+    }
 
-		// Build Q
-		final int qCols = thin ? kMax : m;
-		Matrix Q = new Matrix(m, qCols);
-		double[] q = Q.getRawData();
-		setIdentity(q, m, qCols);
+    /**
+     * Update trailing matrix after panel factorization
+     */
+    private static void updateTrailingMatrix(double[] AT, double[] tau, int m, int n,
+                                             int kStart, int kEnd, Workspace ws) {
+        int trailingCols = n - kEnd;
+        int panelSizeActual = kEnd - kStart;
+        int panelSize = ws.panelSize;
 
-		// Apply reflectors in reverse to build Q
-		buildQVectorized(a, tau, q, m, n, qCols, kMax);
+        if (trailingCols <= 0 || panelSizeActual <= 0) {
+            return;
+        }
 
-		// Zero below diagonal to make R explicit
-		zeroBelowDiagonal(a, m, n);
+        int rows = m;
 
-		if (thin) {
-			if (kMax == 0) return new QRResult(A, Q, R);
-			Matrix Rthin = R.crop(0, kMax - 1, 0, n - 1);
-			return new QRResult(A, Q, Rthin);
-		}
-		return new QRResult(A, Q, R);
-	}
+        // Build packed V and V^T for compact WY representation
+        packV(AT, m, kStart, kEnd, panelSize, ws.vPack, ws.vtPack);
 
-	/**
-	 * Vectorized computation of sigma = ||x[1:]||^2 for column k
-	 */
-	private static double computeSigmaVectorized(double[] a, int m, int n, int k) {
-		int startRow = k + 1;
-		int colStart = k * n + k + 1;
-		double sigma = 0.0;
+        // Build T for compact WY representation
+        buildT(ws.vPack, tau, panelSizeActual, panelSize, rows, kStart, ws.t);
 
-		// Vectorized accumulation
-		int upperBound = SPECIES.loopBound(m - startRow);
-		int i = startRow;
-		for (; i < upperBound + startRow; i += LANE_SIZE) {
-			DoubleVector vec = DoubleVector.fromArray(SPECIES, a, i * n + k);
-			DoubleVector squared = vec.mul(vec);
-			sigma += squared.reduceLanes(VectorOperators.ADD);
-		}
+        DispatchPolicy policy = DispatchPolicy.defaultPolicy();
 
-		// Process remaining elements
-		for (; i < m; i++) {
-			double v = a[i * n + k];
-			sigma += v * v;
-		}
+        int blockCols = ws.blockCols;
+        for (int colStart = 0; colStart < trailingCols; colStart += blockCols) {
+            int blockColsUsed = Math.min(blockCols, trailingCols - colStart);
 
-		return sigma;
-	}
+            packTrailingBlock(AT, m, kEnd, kStart, colStart, blockColsUsed, blockCols, ws.cBlock);
 
-	/**
-	 * Vectorized application of Householder reflector to trailing matrix
-	 */
-	private static void applyReflectorVectorized(double[] a, double tauK, int m, int n, int k) {
-		int startCol = k + 1;
+            Matrix Vt = Matrix.wrap(ws.vtPack, panelSize, rows);
+            Matrix Cb = Matrix.wrap(ws.cBlock, rows, blockCols);
+            Matrix Wm = Matrix.wrap(ws.w, panelSize, blockCols);
 
-		// Process columns in blocks for better cache utilization
-		for (int colBlock = startCol; colBlock < n; colBlock += LANE_SIZE * 4) {
-			int colEnd = Math.min(colBlock + LANE_SIZE * 4, n);
+            // W = V^T * C
+            BLAS3Kernels.gemm(Vt, Cb, Wm, 1.0, 0.0, policy);
 
-			for (int col = colBlock; col < colEnd; col++) {
-				// Compute dot = v^T * AcolSegment
-				double dot = a[k * n + col];
+            // W = T^T * W
+            applyTTranspose(ws.t, ws.w, panelSize, blockCols, ws.temp);
 
-				int row = k + 1;
-				int upperBound = SPECIES.loopBound(m - row);
+            // C = C - V * W
+            Matrix V = Matrix.wrap(ws.vPack, rows, panelSize);
+            BLAS3Kernels.gemm(V, Wm, Cb, -1.0, 1.0, policy);
 
-				// Vectorized dot product accumulation
-				DoubleVector dotVec = DoubleVector.zero(SPECIES);
-				for (; row < upperBound + k + 1; row += LANE_SIZE) {
-					DoubleVector vVec = DoubleVector.fromArray(SPECIES, a, row * n + k);
-					DoubleVector aVec = DoubleVector.fromArray(SPECIES, a, row * n + col);
-					dotVec = vVec.fma(aVec, dotVec);
-				}
-				dot += dotVec.reduceLanes(VectorOperators.ADD);
+            unpackTrailingBlock(AT, m, kEnd, kStart, colStart, blockColsUsed, blockCols, ws.cBlock);
+        }
+    }
 
-				// Process remaining rows
-				for (; row < m; row++) {
-					dot += a[row * n + k] * a[row * n + col];
-				}
+    /**
+     * Compute W = V^T * AT_trailing where V contains Householder vectors
+     */
 
-				dot *= tauK;
+    /**
+     * Compute Householder vector for column k starting at row startRow
+     */
+    private static double computeHouseholder(double[] AT, double[] tau,
+                                             int m, int n, int k, int startRow) {
+        int colBase = k * m;
+        int len = m - startRow;
+        
+        if (len <= 1) {
+            tau[k] = 0.0;
+            return AT[colBase + startRow];
+        }
+        
+        // Extract column segment (contiguous in column-major)
+        double x0 = AT[colBase + startRow];
+        
+        // Compute sigma = ||x[1:]||^2 using vector API
+        double sigma = 0.0;
+        int i = startRow + 1;
+        int upperBound = SPECIES.loopBound(m);
+        
+        DoubleVector sumVec = DoubleVector.zero(SPECIES);
+        for (; i <= upperBound - LANE_SIZE; i += LANE_SIZE) {
+            DoubleVector vec = DoubleVector.fromArray(SPECIES, AT, colBase + i);
+            sumVec = sumVec.add(vec.mul(vec));
+        }
+        sigma = sumVec.reduceLanes(VectorOperators.ADD);
+        
+        // Process remainder
+        for (; i < m; i++) {
+            double v = AT[colBase + i];
+            sigma += v * v;
+        }
+        
+        // Compute Householder vector using LAPACK-style stable formula
+        double xnorm = Math.sqrt(sigma);
+        if (xnorm == 0.0) {
+            if (x0 >= 0.0) {
+                tau[k] = 0.0;
+                return x0;
+            } else {
+                tau[k] = 2.0;
+                AT[colBase + startRow] = -x0;
+                return -x0;
+            }
+        }
 
-				// Apply update: AcolSegment -= dot * v
-				a[k * n + col] -= dot;
+        double beta = -Math.copySign(Math.hypot(x0, xnorm), x0);
+        double tauK = (beta - x0) / beta;
+        double v0Inv = 1.0 / (x0 - beta);
 
-				row = k + 1;
-				upperBound = SPECIES.loopBound(m - row);
+        for (i = startRow + 1; i < m; i++) {
+            AT[colBase + i] *= v0Inv;
+        }
 
-				// Vectorized update of rows
-				DoubleVector dotVecConst = DoubleVector.broadcast(SPECIES, dot);
-				for (; row < upperBound + k + 1; row += LANE_SIZE) {
-					int idx = row * n;
-					DoubleVector vVec = DoubleVector.fromArray(SPECIES, a, idx + k);
-					DoubleVector aVec = DoubleVector.fromArray(SPECIES, a, idx + col);
-					DoubleVector updated = aVec.sub(vVec.mul(dotVecConst));
-					updated.intoArray(a, idx + col);
-				}
+        tau[k] = tauK;
+        AT[colBase + startRow] = beta;
+        return beta;
+    }
 
-				// Process remaining rows
-				for (; row < m; row++) {
-					a[row * n + col] -= dot * a[row * n + k];
-				}
-			}
-		}
-	}
+    /**
+     * Build the upper triangular T for compact WY representation
+     */
+    private static void buildT(double[] vPack, double[] tau, int panelSizeActual, int panelSize,
+                               int rows, int kStart, double[] T) {
+        java.util.Arrays.fill(T, 0.0);
+        for (int i = 0; i < panelSizeActual; i++) {
+            double tauK = tau[kStart + i];
+            T[i * panelSize + i] = tauK;
+            int rowStart = kStart + i;
 
-	/**
-	 * Vectorized construction of Q matrix
-	 */
-	private static void buildQVectorized(double[] a, double[] tau, double[] q,
-										 int m, int n, int qCols, int kMax) {
-		// Apply reflectors in reverse order
-		for (int k = kMax - 1; k >= 0; k--) {
-			double tauK = tau[k];
-			if (tauK == 0.0) continue;
+            for (int r = 0; r < i; r++) {
+                double dot = 0.0;
+                for (int row = rowStart; row < rows; row++) {
+                    dot += vPack[row * panelSize + r] * vPack[row * panelSize + i];
+                }
+                T[r * panelSize + i] = -tauK * dot;
+            }
 
-			int len = m - k;
-			int vBase = (k + 1) * n + k;
-			int qRowStart = k * qCols;
+            for (int r = 0; r < i; r++) {
+                double sum = 0.0;
+                for (int c = r; c < i; c++) {
+                    sum += T[r * panelSize + c] * T[c * panelSize + i];
+                }
+                T[r * panelSize + i] = sum;
+            }
+        }
+    }
 
-			// Process Q columns in blocks
-			for (int colBlock = 0; colBlock < qCols; colBlock += LANE_SIZE * 4) {
-				int colEnd = Math.min(colBlock + LANE_SIZE * 4, qCols);
+    /**
+     * Apply W = T^T * W for upper triangular T
+     */
+    private static void applyTTranspose(double[] T, double[] W,
+                                        int panelSize, int trailingCols, double[] temp) {
+        for (int i = 0; i < panelSize; i++) {
+            for (int j = 0; j < trailingCols; j++) {
+                double sum = 0.0;
+                for (int k = 0; k <= i; k++) {
+                    sum = Math.fma(T[k * panelSize + i], W[k * trailingCols + j], sum);
+                }
+                temp[i * trailingCols + j] = sum;
+            }
+        }
 
-				for (int col = colBlock; col < colEnd; col++) {
-					int idx = qRowStart + col;
+        System.arraycopy(temp, 0, W, 0, panelSize * trailingCols);
+    }
 
-					// Compute dot = v^T * Q segment
-					double dot = q[idx];
+    /**
+     * Apply Householder reflector from column k to column j
+     */
+    private static void applyHouseholderToColumn(double[] AT, double tauK,
+                                                 int m, int n, int k, int j) {
+        int colKBase = k * m;
+        int colJBase = j * m;
+        
+        // Compute dot = v^T * col_j
+        double dot = AT[colJBase + k]; // First element (v0 = 1)
+        
+        // Vectorized dot product
+        int i = k + 1;
+        int upperBound = SPECIES.loopBound(m);
+        
+        DoubleVector dotVec = DoubleVector.zero(SPECIES);
+        for (; i <= upperBound - LANE_SIZE; i += LANE_SIZE) {
+            DoubleVector vVec = DoubleVector.fromArray(SPECIES, AT, colKBase + i);
+            DoubleVector aVec = DoubleVector.fromArray(SPECIES, AT, colJBase + i);
+            dotVec = dotVec.add(vVec.mul(aVec));
+        }
+        dot += dotVec.reduceLanes(VectorOperators.ADD);
+        
+        // Process remainder
+        for (; i < m; i++) {
+            dot += AT[colKBase + i] * AT[colJBase + i];
+        }
+        
+        dot *= tauK;
+        
+        // Apply update: col_j -= dot * v
+        AT[colJBase + k] -= dot;
+        
+        // Vectorized update
+        i = k + 1;
+        for (; i <= upperBound - LANE_SIZE; i += LANE_SIZE) {
+            DoubleVector vVec = DoubleVector.fromArray(SPECIES, AT, colKBase + i);
+            DoubleVector aVec = DoubleVector.fromArray(SPECIES, AT, colJBase + i);
+            aVec.sub(vVec.mul(dot)).intoArray(AT, colJBase + i);
+        }
+        
+        // Process remainder
+        for (; i < m; i++) {
+            AT[colJBase + i] -= dot * AT[colKBase + i];
+        }
+    }
 
-					int qIdx = idx + qCols;
-					int vIdx = vBase;
-					int i = 1;
+    /**
+     * Build Q matrix from Householder vectors
+     */
+    private static double[] buildQ(double[] AT, double[] tau,
+                                   int m, int n, int qRows, int kMax) {
+        // Initialize Q^T as identity (column-major)
+        double[] QT = new double[m * qRows];
 
-					// Vectorized dot product
-					int upperBound = SPECIES.loopBound(len - 1);
-					DoubleVector dotVec = DoubleVector.zero(SPECIES);
-					for (; i < upperBound + 1; i += LANE_SIZE) {
-						DoubleVector vVec = DoubleVector.fromArray(SPECIES, a, vIdx);
-						DoubleVector qVec = DoubleVector.fromArray(SPECIES, q, qIdx);
-						dotVec = vVec.fma(qVec, dotVec);
-						qIdx += qCols * LANE_SIZE;
-						vIdx += n * LANE_SIZE;
-					}
-					dot += dotVec.reduceLanes(VectorOperators.ADD);
+        int diagLimit = Math.min(m, qRows);
+        for (int i = 0; i < diagLimit; i++) {
+            QT[i * m + i] = 1.0;
+        }
 
-					// Process remaining elements
-					for (; i < len; i++) {
-						dot += a[vIdx] * q[qIdx];
-						qIdx += qCols;
-						vIdx += n;
-					}
+        // Apply Householder reflectors in reverse order to build Q^T
+        for (int k = kMax - 1; k >= 0; k--) {
+            double tauK = tau[k];
+            if (tauK == 0.0) continue;
 
-					dot *= tauK;
+            int colKBase = k * m;
 
-					// Apply update: Q segment -= dot * v
-					q[idx] -= dot;
+            for (int j = k; j < qRows; j++) {
+                int colQBase = j * m;
+                double dot = QT[colQBase + k];
 
-					qIdx = idx + qCols;
-					vIdx = vBase;
-					i = 1;
+                int i = k + 1;
+                int upperBound = SPECIES.loopBound(m);
 
-					// Vectorized update
-					DoubleVector dotVecConst = DoubleVector.broadcast(SPECIES, dot);
-					upperBound = SPECIES.loopBound(len - 1);
-					for (; i < upperBound + 1; i += LANE_SIZE) {
-						DoubleVector vVec = DoubleVector.fromArray(SPECIES, a, vIdx);
-						DoubleVector qVec = DoubleVector.fromArray(SPECIES, q, qIdx);
-						DoubleVector updated = qVec.sub(vVec.mul(dotVecConst));
-						updated.intoArray(q, qIdx);
-						qIdx += qCols * LANE_SIZE;
-						vIdx += n * LANE_SIZE;
-					}
+                DoubleVector dotVec = DoubleVector.zero(SPECIES);
+                for (; i <= upperBound - LANE_SIZE; i += LANE_SIZE) {
+                    DoubleVector vVec = DoubleVector.fromArray(SPECIES, AT, colKBase + i);
+                    DoubleVector qVec = DoubleVector.fromArray(SPECIES, QT, colQBase + i);
+                    dotVec = dotVec.add(vVec.mul(qVec));
+                }
+                dot += dotVec.reduceLanes(VectorOperators.ADD);
 
-					// Process remaining elements
-					for (; i < len; i++) {
-						q[qIdx] -= dot * a[vIdx];
-						qIdx += qCols;
-						vIdx += n;
-					}
-				}
-			}
-		}
-	}
+                for (; i < m; i++) {
+                    dot += AT[colKBase + i] * QT[colQBase + i];
+                }
 
-	private static void setIdentity(double[] q, int m, int n) {
-		// Vectorized identity initialization
-		int total = m * n;
-		int i = 0;
-		int upperBound = SPECIES.loopBound(total);
+                dot *= tauK;
 
-		DoubleVector zeroVec = DoubleVector.zero(SPECIES);
-		for (; i < upperBound; i += LANE_SIZE) {
-			zeroVec.intoArray(q, i);
-		}
+                QT[colQBase + k] -= dot;
 
-		// Process remaining elements
-		for (; i < total; i++) {
-			q[i] = 0.0;
-		}
+                i = k + 1;
+                for (; i <= upperBound - LANE_SIZE; i += LANE_SIZE) {
+                    DoubleVector vVec = DoubleVector.fromArray(SPECIES, AT, colKBase + i);
+                    DoubleVector qVec = DoubleVector.fromArray(SPECIES, QT, colQBase + i);
+                    qVec.sub(vVec.mul(dot)).intoArray(QT, colQBase + i);
+                }
 
-		// Set diagonal elements
-		int d = Math.min(m, n);
-		for (i = 0; i < d; i++) {
-			q[i * n + i] = 1.0;
-		}
-	}
+                for (; i < m; i++) {
+                    QT[colQBase + i] -= dot * AT[colKBase + i];
+                }
+            }
+        }
 
-	private static void zeroBelowDiagonal(double[] a, int m, int n) {
-		int limit = Math.min(m, n);
+        return QT;
+    }
 
-		// Vectorized zeroing of below-diagonal elements
-		DoubleVector zeroVec = DoubleVector.zero(SPECIES);
-		for (int c = 0; c < limit; c++) {
-			int startRow = c + 1;
-			int i = startRow;
-			int upperBound = SPECIES.loopBound(m - startRow);
+    private static void packV(double[] AT, int m, int kStart, int kEnd, int panelSize,
+                              double[] vPack, double[] vtPack) {
+        int panelSizeActual = kEnd - kStart;
 
-			// Vectorized store of zeros
-			for (; i < upperBound + startRow; i += LANE_SIZE) {
-				zeroVec.intoArray(a, i * n + c);
-			}
+        for (int i = 0; i < panelSize; i++) {
+            int k = kStart + i;
+            for (int row = 0; row < m; row++) {
+                double val;
+                if (i >= panelSizeActual) {
+                    val = 0.0;
+                } else if (row < kStart) {
+                    val = 0.0;
+                } else {
+                    int r = row - kStart;
+                    if (r < i) {
+                        val = 0.0;
+                    } else if (r == i) {
+                        val = 1.0;
+                    } else {
+                        val = AT[(k * m) + row];
+                    }
+                }
+                vPack[row * panelSize + i] = val;
+                vtPack[i * m + row] = val;
+            }
+        }
+    }
 
-			// Process remaining rows
-			for (; i < m; i++) {
-				a[i * n + c] = 0.0;
-			}
-		}
-	}
+    private static void packTrailingBlock(double[] AT, int m, int kEnd, int kStart,
+                                          int colStart, int blockColsUsed, int blockCols, double[] cBlock) {
+        int trailingStart = kEnd + colStart;
+        for (int row = 0; row < m; row++) {
+            for (int j = 0; j < blockCols; j++) {
+                if (j < blockColsUsed) {
+                    int col = trailingStart + j;
+                    cBlock[row * blockCols + j] = AT[col * m + row];
+                } else {
+                    cBlock[row * blockCols + j] = 0.0;
+                }
+            }
+        }
+    }
+
+    private static void unpackTrailingBlock(double[] AT, int m, int kEnd, int kStart,
+                                            int colStart, int blockColsUsed, int blockCols, double[] cBlock) {
+        int trailingStart = kEnd + colStart;
+        for (int row = 0; row < m; row++) {
+            for (int j = 0; j < blockColsUsed; j++) {
+                int col = trailingStart + j;
+                AT[col * m + row] = cBlock[row * blockCols + j];
+            }
+        }
+    }
+
+    private static void packQBlock(double[] Q, int m, int qRows, int kStart,
+                                   int colStart, int blockColsUsed, int blockCols, double[] cBlock) {
+        for (int row = 0; row < m; row++) {
+            int rowBase = row * qRows;
+            for (int j = 0; j < blockCols; j++) {
+                if (j < blockColsUsed) {
+                    cBlock[row * blockCols + j] = Q[rowBase + colStart + j];
+                } else {
+                    cBlock[row * blockCols + j] = 0.0;
+                }
+            }
+        }
+    }
+
+    private static void unpackQBlock(double[] Q, int m, int qRows, int kStart,
+                                     int colStart, int blockColsUsed, int blockCols, double[] cBlock) {
+        for (int row = 0; row < m; row++) {
+            int rowBase = row * qRows;
+            for (int j = 0; j < blockColsUsed; j++) {
+                Q[rowBase + colStart + j] = cBlock[row * blockCols + j];
+            }
+        }
+    }
+
+    private static final class Workspace {
+        final double[] vPack;
+        final double[] vtPack;
+        final double[] cBlock;
+        final double[] w;
+        final double[] t;
+        final double[] temp;
+        final int blockCols;
+        final int panelSize;
+
+        Workspace(int m, int n) {
+            int maxPanel = BLOCK_SIZE;
+            int maxRows = m;
+            int maxCols = Math.min(TRAILING_BLOCK, Math.max(m, n));
+            this.blockCols = maxCols;
+            this.panelSize = maxPanel;
+            this.vPack = new double[maxRows * maxPanel];
+            this.vtPack = new double[maxPanel * maxRows];
+            this.cBlock = new double[maxRows * maxCols];
+            this.w = new double[maxPanel * maxCols];
+            this.t = new double[maxPanel * maxPanel];
+            this.temp = new double[maxPanel * maxCols];
+        }
+    }
+
+    /**
+     * Extract R matrix from column-major factorization result
+     */
+    private static Matrix extractR(double[] AT, int m, int n, int kMax, boolean thin) {
+        int rRows = thin ? kMax : m;
+        int rCols = n;
+        double[] R = new double[rRows * rCols];
+        
+        // Extract upper triangular part
+        for (int c = 0; c < rCols; c++) {
+            int srcBase = c * m;
+            int rowLimit = Math.min(c + 1, rRows);
+
+            for (int r = 0; r < rowLimit; r++) {
+                R[r * rCols + c] = AT[srcBase + r];
+            }
+
+            for (int r = rowLimit; r < rRows; r++) {
+                R[r * rCols + c] = 0.0;
+            }
+        }
+        
+        return Matrix.wrap(R, rRows, rCols);
+    }
 }
