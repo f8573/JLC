@@ -299,36 +299,40 @@ public class ApiController {
             // dimension is the geometric multiplicity (dimension of eigenspace)
             info.put("dimension", geom != null && origIndex >= 0 && origIndex < geom.length ? geom[origIndex] : null);
 
-            // eigenspace basis and dimension
-            Map<String, Object> spaceMap = new LinkedHashMap<>();
+            // NOTE: The diagnostic lists were historically labeled incorrectly.
+            // Swap: the `eigenspace` diagnostic item actually provides the eigenbasis
+            // and the `eigenbasis` diagnostic item provides the eigenspace. Put them
+            // into the canonical fields with corrected labels.
+            // eigenbasis (from spaceItem)
+            Map<String, Object> basisMap = new LinkedHashMap<>();
             if (spaceItem != null && spaceItem.getValue() != null) {
-                List<double[]> vectors = new ArrayList<>();
+                List<Object> vectors = new ArrayList<>();
                 for (Vector v : spaceItem.getValue()) {
-                    vectors.add(v.getData());
+                    vectors.add(vectorToPayload(v));
                 }
-                spaceMap.put("vectors", vectors);
-                spaceMap.put("dimension", spaceItem.getValue().size());
+                basisMap.put("vectors", vectors);
+                basisMap.put("dimension", spaceItem.getValue().size());
             } else {
-                spaceMap.put("vectors", null);
-                spaceMap.put("dimension", 0);
+                basisMap.put("vectors", null);
+                basisMap.put("dimension", 0);
             }
-            info.put("eigenspace", spaceMap);
+            info.put("eigenbasis", basisMap);
 
-            // eigenbasis (set of eigenvectors) and representative eigenvector
+            // eigenspace (from basisList) and representative eigenvector
             if (basisList != null && i < basisList.size()) {
                 DiagnosticItem<Set<Vector>> basisItem = basisList.get(i);
                 if (basisItem != null && basisItem.getValue() != null && !basisItem.getValue().isEmpty()) {
-                    List<double[]> basisVectors = new ArrayList<>();
-                    for (Vector v : basisItem.getValue()) basisVectors.add(v.getData());
-                    info.put("eigenbasis", Map.of("vectors", basisVectors, "dimension", basisVectors.size()));
-                    // representative is first vector
-                    info.put("representativeEigenvector", basisVectors.get(0));
+                    List<Object> spaceVectors = new ArrayList<>();
+                    for (Vector v : basisItem.getValue()) spaceVectors.add(vectorToPayload(v));
+                    info.put("eigenspace", Map.of("vectors", spaceVectors, "dimension", spaceVectors.size()));
+                    // representative is first vector of this eigenspace
+                    info.put("representativeEigenvector", spaceVectors.get(0));
                 } else {
-                    info.put("eigenbasis", null);
+                    info.put("eigenspace", null);
                     info.put("representativeEigenvector", null);
                 }
             } else {
-                info.put("eigenbasis", null);
+                info.put("eigenspace", null);
                 info.put("representativeEigenvector", null);
             }
 
@@ -363,7 +367,7 @@ public class ApiController {
         spectral.put("normalityAndOrthogonality", normality);
 
         spectral.put("definiteness", diagnostics.getDefiniteness());
-        spectral.put("spectralClass", diagnostics.getSpectral());
+        spectral.put("spectralClass", diagnostics.getSpectralClass());
 
         out.put("spectralAnalysis", spectral);
 
@@ -502,13 +506,29 @@ public class ApiController {
         out.put("status", item.getStatus().name());
         out.put("message", item.getMessage());
         if (item.getValue() != null) {
-            List<double[]> vectors = new ArrayList<>();
+            List<Object> vectors = new ArrayList<>();
             for (Vector v : item.getValue()) {
-                vectors.add(v.getData());
+                vectors.add(vectorToPayload(v));
             }
             out.put("vectors", vectors);
         }
         return out;
+    }
+
+    private Object vectorToPayload(Vector v) {
+        if (v == null) {
+            return null;
+        }
+        // Always return an array of { real, imag } entries for consistency
+        List<Map<String, Object>> entries = new ArrayList<>();
+        int n = v.dimension();
+        for (int i = 0; i < n; i++) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("real", v.get(i));
+            entry.put("imag", v.getImag(i));
+            entries.add(entry);
+        }
+        return entries;
     }
 
     /**
@@ -630,9 +650,40 @@ public class ApiController {
             out.put("t", matrixToMap(schur.getT()));
             out.put("u", matrixToMap(schur.getU()));
             out.put("eigenvalues", toComplexList(schur.getEigenvalues()));
-            out.put("eigenvectors", matrixToMap(schur.getEigenvectors()));
+            out.put("eigenvectors", matrixToMapWithImagFallback(schur.getEigenvectors(), schur.getEigenvalues()));
         }
         return out;
+    }
+
+    /**
+     * Serialize a matrix but ensure an 'imag' array exists when eigenvalues indicate complex values.
+     * This is a best-effort fallback to keep the JSON shape consistent even when the Matrix
+     * does not store an imaginary backing array.
+     */
+    private Map<String, Object> matrixToMapWithImagFallback(Matrix matrix, net.faulj.scalar.Complex[] eigenvalues) {
+        Map<String,Object> base = matrixToMap(matrix);
+        if (base == null) return null;
+        if (base.containsKey("imag")) return base;
+
+        // If there are no complex eigenvalues, nothing to do
+        boolean anyComplex = false;
+        if (eigenvalues != null) {
+            for (net.faulj.scalar.Complex c : eigenvalues) {
+                if (Math.abs(c.imag) > 0.0) { anyComplex = true; break; }
+            }
+        }
+        if (!anyComplex) return base;
+
+        // Create zero-filled imag array matching data dimensions
+        Object rowsObj = base.get("rows");
+        Object colsObj = base.get("cols");
+        if (!(rowsObj instanceof Integer) || !(colsObj instanceof Integer)) return base;
+        int rows = (Integer) rowsObj;
+        int cols = (Integer) colsObj;
+        double[][] imag = new double[rows][cols];
+        // zeros by default
+        base.put("imag", imag);
+        return base;
     }
 
     /**

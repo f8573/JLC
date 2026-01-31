@@ -1,5 +1,6 @@
-﻿import React from 'react'
-import MatrixHeader from '../components/MatrixHeader'
+﻿import React, { useState } from 'react'
+import Header from '../components/Header'
+import Sidebar from '../components/Sidebar'
 import { useMatrixCompute } from '../hooks/useMatrixCompute'
 
 /**
@@ -7,52 +8,27 @@ import { useMatrixCompute } from '../hooks/useMatrixCompute'
  */
 export default function SettingsPage() {
   const handleCompute = useMatrixCompute()
+  
+  // Settings state
+  const [theme, setTheme] = useState('light')
+  const [accentColor, setAccentColor] = useState('#7c3aed')
+  const [precision, setPrecision] = useState('6')
+  const [outputFormat, setOutputFormat] = useState('numeric')
+  
+  const accentColors = ['#7c3aed', '#9333ea', '#a855f7', '#c084fc', '#6366f1']
+  
+  const handleResetDefaults = () => {
+    setTheme('light')
+    setAccentColor('#7c3aed')
+    setPrecision('6')
+    setOutputFormat('numeric')
+  }
+  
   return (
-    <div className="bg-background-light font-display text-slate-900 min-h-screen">
-      <MatrixHeader inputValue="" onCompute={handleCompute} />
+    <div className="bg-background-light font-display text-slate-900 h-screen overflow-hidden">
+      <Header inputValue="" onCompute={handleCompute} />
       <div className="flex h-[calc(100vh-68px)] overflow-hidden">
-        <aside className="w-64 border-r border-slate-200 hidden lg:flex flex-col bg-white p-4 overflow-y-auto">
-          <div className="flex flex-col h-full justify-between">
-            <div className="space-y-8">
-              <div>
-                <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4 px-3">Library</h3>
-                <div className="space-y-1">
-                  <a className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-primary/5 text-slate-600 transition-colors group" href="#">
-                    <span className="material-symbols-outlined text-[20px]">analytics</span>
-                    <span className="text-sm font-medium">Current Analysis</span>
-                  </a>
-                  <a className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-primary/5 text-slate-600 transition-colors group" href="/recent">
-                    <span className="material-symbols-outlined text-[20px]">history</span>
-                    <span className="text-sm font-medium">Recent Queries</span>
-                  </a>
-                  <a className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-primary/5 text-slate-600 transition-colors group" href="/favorites">
-                    <span className="material-symbols-outlined text-[20px]">star</span>
-                    <span className="text-sm font-medium">Favorites</span>
-                  </a>
-                </div>
-              </div>
-              <div>
-                <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4 px-3">Example Matrices</h3>
-                <div className="space-y-1">
-                  <button className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-primary/5 text-sm transition-colors text-slate-600">
-                    <span>Identity Matrix</span>
-                    <span className="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded font-mono">I_n</span>
-                  </button>
-                  <button className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-primary/5 text-sm transition-colors text-slate-600">
-                    <span>Hilbert Matrix</span>
-                    <span className="material-symbols-outlined text-[16px]">chevron_right</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-            <div className="pt-4 border-t border-slate-100">
-              <a className="flex items-center gap-3 px-3 py-2 rounded-lg bg-primary/10 text-primary group" href="/settings">
-                <span className="material-symbols-outlined text-[20px]">settings</span>
-                <span className="text-sm font-semibold">Settings</span>
-              </a>
-            </div>
-          </div>
-        </aside>
+        <Sidebar active="settings" />
         <main className="flex-1 overflow-y-auto custom-scrollbar bg-background-light">
           <div className="max-w-[800px] mx-auto p-8 space-y-10">
             <div className="space-y-1">
@@ -73,8 +49,18 @@ export default function SettingsPage() {
                     <p className="text-xs text-slate-500">Switch between light and dark visual interfaces</p>
                   </div>
                   <div className="flex items-center bg-slate-100 p-1 rounded-xl">
-                    <button className="px-4 py-1.5 text-xs font-bold rounded-lg bg-white shadow-sm text-primary">Light</button>
-                    <button className="px-4 py-1.5 text-xs font-bold rounded-lg text-slate-400 hover:text-slate-600">Dark</button>
+                    <button 
+                      onClick={() => setTheme('light')}
+                      className={`px-4 py-1.5 text-xs font-bold rounded-lg ${theme === 'light' ? 'bg-white shadow-sm text-primary' : 'text-slate-400 hover:text-slate-600'}`}
+                    >
+                      Light
+                    </button>
+                    <button 
+                      onClick={() => setTheme('dark')}
+                      className={`px-4 py-1.5 text-xs font-bold rounded-lg ${theme === 'dark' ? 'bg-white shadow-sm text-primary' : 'text-slate-400 hover:text-slate-600'}`}
+                    >
+                      Dark
+                    </button>
                   </div>
                 </div>
                 <div className="space-y-4">
@@ -83,11 +69,14 @@ export default function SettingsPage() {
                     <p className="text-xs text-slate-500">Choose your primary theme color (shades of purple)</p>
                   </div>
                   <div className="flex gap-4">
-                    <button className="size-10 rounded-full bg-[#7c3aed] ring-4 ring-primary/20 border-2 border-white"></button>
-                    <button className="size-10 rounded-full bg-[#9333ea] hover:scale-110 transition-transform"></button>
-                    <button className="size-10 rounded-full bg-[#a855f7] hover:scale-110 transition-transform"></button>
-                    <button className="size-10 rounded-full bg-[#c084fc] hover:scale-110 transition-transform"></button>
-                    <button className="size-10 rounded-full bg-[#6366f1] hover:scale-110 transition-transform"></button>
+                    {accentColors.map((color, idx) => (
+                      <button 
+                        key={color}
+                        onClick={() => setAccentColor(color)}
+                        className={`size-10 rounded-full hover:scale-110 transition-transform ${accentColor === color ? 'ring-4 ring-primary/20 border-2 border-white' : ''}`}
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
                   </div>
                 </div>
               </div>
@@ -105,7 +94,8 @@ export default function SettingsPage() {
                     <label className="font-bold text-slate-800 block">Decimal Precision</label>
                     <select
                       className="w-full bg-slate-50 border-slate-200 rounded-xl text-sm focus:ring-primary focus:border-primary"
-                      defaultValue="6"
+                      value={precision}
+                      onChange={(e) => setPrecision(e.target.value)}
                     >
                       <option value="2">2 decimal places</option>
                       <option value="4">4 decimal places</option>
@@ -117,14 +107,15 @@ export default function SettingsPage() {
                   <div className="space-y-3">
                     <label className="font-bold text-slate-800 block">Output Format</label>
                     <div className="flex gap-2">
-                      <label className="flex-1 cursor-pointer">
-                        <input defaultChecked className="hidden peer" name="format" type="radio" />
-                        <div className="p-3 text-center rounded-xl border border-slate-200 peer-checked:border-primary peer-checked:bg-primary/5 peer-checked:text-primary transition-all">
+                      <label className="flex-1 cursor-not-allowed">
+                        <input disabled className="hidden peer" name="format" type="radio" value="symbolic" checked={outputFormat === 'symbolic'} onChange={() => {}} />
+                        <div className="p-3 text-center rounded-xl border border-slate-200 bg-slate-50 text-slate-400 relative">
                           <span className="text-xs font-bold">Symbolic</span>
+                          <span className="block text-[10px] text-slate-400 mt-1">Coming Soon...</span>
                         </div>
                       </label>
                       <label className="flex-1 cursor-pointer">
-                        <input className="hidden peer" name="format" type="radio" />
+                        <input className="hidden peer" name="format" type="radio" value="numeric" checked={outputFormat === 'numeric'} onChange={() => setOutputFormat('numeric')} />
                         <div className="p-3 text-center rounded-xl border border-slate-200 peer-checked:border-primary peer-checked:bg-primary/5 peer-checked:text-primary transition-all">
                           <span className="text-xs font-bold">Numeric</span>
                         </div>
@@ -137,50 +128,36 @@ export default function SettingsPage() {
             <section className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
               <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
                 <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-                  <span className="material-symbols-outlined text-primary text-[18px]">person</span>
-                  Account
+                  <span className="material-symbols-outlined text-primary text-[18px]">folder</span>
+                  Data Management
                 </h2>
               </div>
-              <div className="p-6 space-y-8">
-                <div className="flex items-center gap-6">
-                  <div className="relative group">
-                    <img
-                      alt="User Profile"
-                      className="size-20 rounded-full border-2 border-slate-100 object-cover"
-                      src="https://lh3.googleusercontent.com/aida-public/AB6AXuAJiIRXYX-3Xir4i7i6igKSQQ67lM9-pSu4Z8LmnYu9iNcGWBhcjzJckudN_73g5dhoqqwVWHxGtkC96FsA3CDHjj4G3KaoSTCL9uvSC-slGYOoqCc4Y2M2RDp7rbDrsfzw5fmN2JnsFtpxu6EQSNlFTxaYFCkhYixMfXpuzzK8R71nzBIUYDZA5vk648RHEJWDbRHHhKNZxpTGAf8E52HNGbsEv43rQQa4zWm4hdZytpYUx3JjqXo2jOIt2GfvriRo9iN7MXiVEWeZ"
-                    />
-                    <button className="absolute bottom-0 right-0 size-7 bg-primary text-white rounded-full flex items-center justify-center shadow-md hover:scale-110 transition-transform">
-                      <span className="material-symbols-outlined text-[16px]">photo_camera</span>
-                    </button>
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-bold text-slate-800">Professor Lambda</p>
-                    <p className="text-sm text-slate-500">lambda.admin@matrixsolve.ai</p>
-                    <button className="mt-2 text-xs font-bold text-primary hover:underline">Change Password</button>
-                  </div>
-                </div>
-                <div className="pt-6 border-t border-slate-100">
-                  <p className="font-bold text-slate-800 mb-4">Data Management</p>
-                  <div className="flex flex-wrap gap-3">
-                    <button className="flex items-center gap-2 px-4 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 transition-colors">
-                      <span className="material-symbols-outlined text-[18px]">download</span>
-                      Export All Matrices (JSON)
-                    </button>
-                    <button className="flex items-center gap-2 px-4 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 transition-colors">
-                      <span className="material-symbols-outlined text-[18px]">history</span>
-                      Clear Search History
-                    </button>
-                  </div>
+              <div className="p-6">
+                <div className="flex flex-wrap gap-3">
+                  <button className="flex items-center gap-2 px-4 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 transition-colors">
+                    <span className="material-symbols-outlined text-[18px]">download</span>
+                    Export All Matrices (JSON)
+                  </button>
+                  <button className="flex items-center gap-2 px-4 py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 transition-colors">
+                    <span className="material-symbols-outlined text-[18px]">history</span>
+                    Clear Search History
+                  </button>
                 </div>
               </div>
             </section>
             <div className="flex items-center justify-between pt-4 pb-12">
-              <button className="flex items-center gap-2 text-slate-400 hover:text-red-500 text-sm font-bold transition-colors">
+              <button 
+                onClick={handleResetDefaults}
+                className="flex items-center gap-2 text-slate-400 hover:text-red-500 text-sm font-bold transition-colors"
+              >
                 <span className="material-symbols-outlined text-[18px]">restart_alt</span>
                 Reset to Defaults
               </button>
               <div className="flex gap-4">
-                <button className="px-6 py-2.5 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-100 transition-colors">Cancel</button>
+                <button 
+                  onClick={() => window.history.back()}
+                  className="px-6 py-2.5 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-100 transition-colors"
+                >Cancel</button>
                 <button className="px-8 py-2.5 bg-primary text-white rounded-xl text-sm font-bold shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95">Save Changes</button>
               </div>
             </div>

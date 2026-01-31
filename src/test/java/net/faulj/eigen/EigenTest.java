@@ -583,6 +583,278 @@ public class EigenTest {
         }
     }
 
+    // ========== Complex Eigenvector Tests ==========
+
+    /**
+     * Tests that complex eigenvectors are correctly computed for a rotation matrix.
+     * The matrix [[0,-1,0],[1,0,0],[0,0,1]] has eigenvalues i, -i, 1.
+     * The eigenvectors should be [i,1,0], [-i,1,0], [0,0,1] (up to scaling).
+     */
+    @Test
+    public void testComplexEigenvectors_RotationMatrix() {
+        System.out.println("\n=== Complex Eigenvectors: 3x3 Rotation Matrix ===");
+        
+        // Matrix [[0,-1,0],[1,0,0],[0,0,1]] - rotation in xy-plane
+        double[][] data = {{0, -1, 0}, {1, 0, 0}, {0, 0, 1}};
+        Matrix A = fromRowMajor(data);
+        
+        SchurResult result = RealSchurDecomposition.decompose(A);
+        Matrix eigenvectors = result.getEigenvectors();
+        
+        assertNotNull("Eigenvectors should not be null", eigenvectors);
+        
+        // Verify eigenvector equation: A*v = λ*v for each eigenvalue-eigenvector pair
+        net.faulj.scalar.Complex[] eigenvalues = result.getEigenvalues();
+        
+        System.out.println("Eigenvalues: " + java.util.Arrays.toString(eigenvalues));
+        System.out.println("Eigenvectors matrix:");
+        printMatrix(eigenvectors);
+        
+        for (int j = 0; j < eigenvalues.length; j++) {
+            net.faulj.scalar.Complex lambda = eigenvalues[j];
+            
+            // Extract eigenvector column j (may be complex)
+            double[] vrData = new double[3];
+            double[] viData = new double[3];
+            for (int r = 0; r < 3; r++) {
+                vrData[r] = eigenvectors.get(r, j);
+                viData[r] = eigenvectors.getImag(r, j);
+            }
+            
+            // Compute A*v (where v = vr + i*vi)
+            // A*v = A*vr + i*A*vi
+            double[] AvR = new double[3];
+            double[] AvI = new double[3];
+            for (int r = 0; r < 3; r++) {
+                for (int c = 0; c < 3; c++) {
+                    AvR[r] += A.get(r, c) * vrData[c];
+                    AvI[r] += A.get(r, c) * viData[c];
+                }
+            }
+            
+            // Compute λ*v = (λr + i*λi)*(vr + i*vi) = (λr*vr - λi*vi) + i*(λr*vi + λi*vr)
+            double lambdaR = lambda.real;
+            double lambdaI = lambda.imag;
+            double[] lambdaVR = new double[3];
+            double[] lambdaVI = new double[3];
+            for (int r = 0; r < 3; r++) {
+                lambdaVR[r] = lambdaR * vrData[r] - lambdaI * viData[r];
+                lambdaVI[r] = lambdaR * viData[r] + lambdaI * vrData[r];
+            }
+            
+            // Compute ||A*v - λ*v||
+            double errorSq = 0.0;
+            for (int r = 0; r < 3; r++) {
+                double diffR = AvR[r] - lambdaVR[r];
+                double diffI = AvI[r] - lambdaVI[r];
+                errorSq += diffR * diffR + diffI * diffI;
+            }
+            double error = Math.sqrt(errorSq);
+            
+            // Compute ||v||
+            double vNormSq = 0.0;
+            for (int r = 0; r < 3; r++) {
+                vNormSq += vrData[r] * vrData[r] + viData[r] * viData[r];
+            }
+            double vNorm = Math.sqrt(vNormSq);
+            
+            System.out.printf("  λ[%d] = %.4f + %.4fi, ||v|| = %.4f, ||Av - λv|| = %.2e\n",
+                    j, lambdaR, lambdaI, vNorm, error);
+            
+            // The eigenvector should not be zero
+            assertTrue("Eigenvector " + j + " should not be zero (norm = " + vNorm + ")",
+                    vNorm > 1e-10);
+            
+            // The eigenvector equation should be satisfied
+            double relError = error / Math.max(vNorm, 1e-14);
+            assertTrue("Eigenvector " + j + " should satisfy A*v = λ*v (rel error = " + relError + ")",
+                    relError < 1e-8);
+        }
+    }
+
+    /**
+     * Tests complex eigenvectors for a 2x2 rotation matrix.
+     * The matrix [[0,-1],[1,0]] has eigenvalues i and -i.
+     */
+    @Test
+    public void testComplexEigenvectors_2x2Rotation() {
+        System.out.println("\n=== Complex Eigenvectors: 2x2 Rotation Matrix ===");
+        
+        double[][] data = {{0, -1}, {1, 0}};
+        Matrix A = fromRowMajor(data);
+        
+        SchurResult result = RealSchurDecomposition.decompose(A);
+        Matrix eigenvectors = result.getEigenvectors();
+        
+        assertNotNull("Eigenvectors should not be null", eigenvectors);
+        
+        net.faulj.scalar.Complex[] eigenvalues = result.getEigenvalues();
+        
+        System.out.println("Eigenvalues: " + java.util.Arrays.toString(eigenvalues));
+        System.out.println("Eigenvectors matrix:");
+        printMatrix(eigenvectors);
+        
+        // Verify the eigenvalue-eigenvector equation for each pair
+        for (int j = 0; j < 2; j++) {
+            net.faulj.scalar.Complex lambda = eigenvalues[j];
+            
+            double[] vrData = new double[2];
+            double[] viData = new double[2];
+            for (int r = 0; r < 2; r++) {
+                vrData[r] = eigenvectors.get(r, j);
+                viData[r] = eigenvectors.getImag(r, j);
+            }
+            
+            // Compute A*v
+            double[] AvR = new double[2];
+            double[] AvI = new double[2];
+            for (int r = 0; r < 2; r++) {
+                for (int c = 0; c < 2; c++) {
+                    AvR[r] += A.get(r, c) * vrData[c];
+                    AvI[r] += A.get(r, c) * viData[c];
+                }
+            }
+            
+            // Compute λ*v
+            double lambdaR = lambda.real;
+            double lambdaI = lambda.imag;
+            double[] lambdaVR = new double[2];
+            double[] lambdaVI = new double[2];
+            for (int r = 0; r < 2; r++) {
+                lambdaVR[r] = lambdaR * vrData[r] - lambdaI * viData[r];
+                lambdaVI[r] = lambdaR * viData[r] + lambdaI * vrData[r];
+            }
+            
+            // Compute error
+            double errorSq = 0.0;
+            for (int r = 0; r < 2; r++) {
+                double diffR = AvR[r] - lambdaVR[r];
+                double diffI = AvI[r] - lambdaVI[r];
+                errorSq += diffR * diffR + diffI * diffI;
+            }
+            double error = Math.sqrt(errorSq);
+            
+            double vNormSq = 0.0;
+            for (int r = 0; r < 2; r++) {
+                vNormSq += vrData[r] * vrData[r] + viData[r] * viData[r];
+            }
+            double vNorm = Math.sqrt(vNormSq);
+            
+            System.out.printf("  λ[%d] = %.4f + %.4fi, ||v|| = %.4f, ||Av - λv|| = %.2e\n",
+                    j, lambdaR, lambdaI, vNorm, error);
+            
+            assertTrue("Eigenvector " + j + " should not be zero", vNorm > 1e-10);
+            
+            double relError = error / Math.max(vNorm, 1e-14);
+            assertTrue("Eigenvector " + j + " equation error = " + relError, relError < 1e-8);
+        }
+    }
+
+    /**
+     * Tests complex eigenvectors for a matrix with mixed real and complex eigenvalues.
+     */
+    @Test
+    public void testComplexEigenvectors_MixedEigenvalues() {
+        System.out.println("\n=== Complex Eigenvectors: 4x4 Mixed Eigenvalues ===");
+        
+        // Matrix with real eigenvalues 2, 3 and complex pair 1±2i
+        // Block diagonal: [[1,-2],[2,1]] with complex eigenvalues
+        //                 [[2,0],[0,3]] with real eigenvalues
+        double[][] data = {
+            {1, -2, 0, 0},
+            {2,  1, 0, 0},
+            {0,  0, 2, 0},
+            {0,  0, 0, 3}
+        };
+        Matrix A = fromRowMajor(data);
+        
+        SchurResult result = RealSchurDecomposition.decompose(A);
+        Matrix eigenvectors = result.getEigenvectors();
+        
+        assertNotNull("Eigenvectors should not be null", eigenvectors);
+        
+        net.faulj.scalar.Complex[] eigenvalues = result.getEigenvalues();
+        
+        System.out.println("Eigenvalues: " + java.util.Arrays.toString(eigenvalues));
+        
+        for (int j = 0; j < 4; j++) {
+            net.faulj.scalar.Complex lambda = eigenvalues[j];
+            
+            double[] vrData = new double[4];
+            double[] viData = new double[4];
+            for (int r = 0; r < 4; r++) {
+                vrData[r] = eigenvectors.get(r, j);
+                viData[r] = eigenvectors.getImag(r, j);
+            }
+            
+            // Compute A*v
+            double[] AvR = new double[4];
+            double[] AvI = new double[4];
+            for (int r = 0; r < 4; r++) {
+                for (int c = 0; c < 4; c++) {
+                    AvR[r] += A.get(r, c) * vrData[c];
+                    AvI[r] += A.get(r, c) * viData[c];
+                }
+            }
+            
+            // Compute λ*v
+            double lambdaR = lambda.real;
+            double lambdaI = lambda.imag;
+            double[] lambdaVR = new double[4];
+            double[] lambdaVI = new double[4];
+            for (int r = 0; r < 4; r++) {
+                lambdaVR[r] = lambdaR * vrData[r] - lambdaI * viData[r];
+                lambdaVI[r] = lambdaR * viData[r] + lambdaI * vrData[r];
+            }
+            
+            // Compute error
+            double errorSq = 0.0;
+            for (int r = 0; r < 4; r++) {
+                double diffR = AvR[r] - lambdaVR[r];
+                double diffI = AvI[r] - lambdaVI[r];
+                errorSq += diffR * diffR + diffI * diffI;
+            }
+            double error = Math.sqrt(errorSq);
+            
+            double vNormSq = 0.0;
+            for (int r = 0; r < 4; r++) {
+                vNormSq += vrData[r] * vrData[r] + viData[r] * viData[r];
+            }
+            double vNorm = Math.sqrt(vNormSq);
+            
+            System.out.printf("  λ[%d] = %.4f + %.4fi, ||v|| = %.4f, ||Av - λv|| = %.2e\n",
+                    j, lambdaR, lambdaI, vNorm, error);
+            
+            assertTrue("Eigenvector " + j + " should not be zero", vNorm > 1e-10);
+            
+            double relError = error / Math.max(vNorm, 1e-14);
+            assertTrue("Eigenvector " + j + " equation error = " + relError, relError < 1e-8);
+        }
+    }
+
+    private void printMatrix(Matrix m) {
+        if (m == null) {
+            System.out.println("  null");
+            return;
+        }
+        for (int r = 0; r < m.getRowCount(); r++) {
+            System.out.print("  [");
+            for (int c = 0; c < m.getColumnCount(); c++) {
+                double real = m.get(r, c);
+                double imag = m.getImag(r, c);
+                if (Math.abs(imag) < 1e-14) {
+                    System.out.printf("%8.4f", real);
+                } else if (imag >= 0) {
+                    System.out.printf("%6.3f+%.3fi", real, imag);
+                } else {
+                    System.out.printf("%6.3f%.3fi", real, imag);
+                }
+                if (c < m.getColumnCount() - 1) System.out.print(", ");
+            }
+            System.out.println("]");
+        }
+    }
+
     // ========== Accuracy Summary Test ==========
 
     /**
@@ -609,5 +881,69 @@ public class EigenTest {
             
             System.out.printf("%d\t%.2e\t%.2e\t%.2e\n", n, orthError, reconError, traceError);
         }
+    }
+
+    /**
+     * Test that a diagonalizable matrix with repeated eigenvalues is correctly identified
+     * as diagonalizable (not defective).
+     * 
+     * Matrix: [[1,0,0,0],[0,1,0,0],[0,0,1,2],[0,0,0,0]]
+     * Eigenvalues: 1 (algebraic multiplicity 3), 0 (algebraic multiplicity 1)
+     * 
+     * For eigenvalue 1: 
+     *   (A - I) = [[0,0,0,0],[0,0,0,0],[0,0,0,2],[0,0,0,-1]]
+     *   rank(A - I) = 1, so nullity = 3, geometric multiplicity = 3 = algebraic multiplicity
+     * 
+     * For eigenvalue 0:
+     *   rank(A) = 3, so nullity = 1, geometric multiplicity = 1 = algebraic multiplicity
+     * 
+     * Since geometric = algebraic for all eigenvalues, the matrix IS diagonalizable.
+     */
+    @Test
+    public void testDiagonalizableMatrixWithRepeatedEigenvalues() {
+        // Matrix with repeated eigenvalue 1 (multiplicity 3) and eigenvalue 0 (multiplicity 1)
+        // This is diagonalizable because geometric multiplicity = algebraic multiplicity
+        double[][] data = {
+            {1, 0, 0, 0},
+            {0, 1, 0, 0},
+            {0, 0, 1, 2},
+            {0, 0, 0, 0}
+        };
+        Matrix A = fromRowMajor(data);
+        
+        Diagonalization diag = Diagonalization.decompose(A);
+        Matrix P = diag.getP();
+        Matrix D = diag.getD();
+        
+        assertNotNull("Eigenvector matrix P should not be null", P);
+        assertNotNull("Diagonal matrix D should not be null", D);
+        
+        // P should be 4x4 and have rank 4 (full rank) for diagonalizable matrix
+        assertEquals("P should have 4 rows", 4, P.getRowCount());
+        assertEquals("P should have 4 columns", 4, P.getColumnCount());
+        
+        // Verify P has full rank by checking that det(P) != 0
+        // or equivalently, that P is invertible (A = P D P^{-1} should work)
+        try {
+            Matrix Pinv = P.inverse();
+            Matrix reconstructed = P.multiply(D).multiply(Pinv);
+            double reconError = reconstructionError(A, reconstructed);
+            System.out.println("Diagonalization reconstruction error: " + reconError);
+            assertTrue("Reconstruction error should be small for diagonalizable matrix", reconError < 1e-10);
+        } catch (RuntimeException e) {
+            fail("Eigenvector matrix P should be invertible for diagonalizable matrix: " + e.getMessage());
+        }
+        
+        // Verify eigenvalues: should have three 1s and one 0
+        int countOne = 0, countZero = 0;
+        for (int i = 0; i < 4; i++) {
+            double dVal = D.get(i, i);
+            if (Math.abs(dVal - 1.0) < 1e-10) countOne++;
+            else if (Math.abs(dVal) < 1e-10) countZero++;
+        }
+        assertEquals("Should have 3 eigenvalues equal to 1", 3, countOne);
+        assertEquals("Should have 1 eigenvalue equal to 0", 1, countZero);
+        
+        System.out.println("✓ Matrix correctly identified as diagonalizable with repeated eigenvalues");
     }
 }

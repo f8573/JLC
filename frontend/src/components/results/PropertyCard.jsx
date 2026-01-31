@@ -19,7 +19,7 @@ export default function PropertyCard({ icon, label, value, iconBg = 'bg-primary/
         </div>
         <div>
           <p className="text-[10px] font-bold text-slate-500 uppercase">{label}</p>
-          <p className="text-xl font-bold math-font">{value}</p>
+          <div className="text-xl font-bold math-font">{value}</div>
         </div>
       </div>
     </div>

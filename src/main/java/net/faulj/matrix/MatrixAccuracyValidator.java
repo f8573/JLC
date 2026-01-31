@@ -256,19 +256,27 @@ public class MatrixAccuracyValidator {
         int n = A.getColumnCount();
         double maxError = 0.0;
         
+        // Threshold for considering an element "effectively zero"
+        // Use a more generous threshold than machine epsilon to avoid
+        // spurious relative errors when dividing by tiny values
+        final double ZERO_THRESHOLD = 1e-12;
+        
         for (int i = 0; i < m; i++) {
             for (int j = 0; j < n; j++) {
                 double a = A.get(i, j);
                 double ahat = Ahat.get(i, j);
                 double error = Math.abs(a - ahat);
                 
-                // Use max absolute value for scale (avoids overly harsh relative error)
-                double scale = Math.max(Math.abs(a), Math.abs(ahat));
-                if (scale < EPS) {
-                    // Both near zero: use absolute error instead of relative
+                // Compute relative error with appropriate scaling
+                // If the original value is effectively zero, use absolute error
+                // to avoid division by tiny values creating spurious large relative errors
+                if (Math.abs(a) < ZERO_THRESHOLD) {
+                    // Original is ~0: report absolute error only
+                    // (reconstruction error relative to actual should be ~0)
                     maxError = Math.max(maxError, error);
                 } else {
-                    double relError = error / scale;
+                    // Use relative error scaled by the original value
+                    double relError = error / Math.abs(a);
                     maxError = Math.max(maxError, relError);
                 }
             }

@@ -1,5 +1,5 @@
 ﻿import React from 'react'
-import { formatNumber } from '../../utils/format'
+import { formatComplex, formatNumber } from '../../utils/format'
 
 /**
  * Render a numeric matrix as a CSS grid.
@@ -35,6 +35,22 @@ export default function MatrixDisplay({
     gap: `${gap}px`
   }
 
+  const renderValue = (value) => {
+    if (value === null || value === undefined) return '—'
+    if (typeof value === 'string') return value
+    if (Array.isArray(value) && value.length === 2) {
+      const real = Number(value[0])
+      const imag = Number(value[1])
+      return formatComplex({ real, imag }, 2)
+    }
+    if (typeof value === 'object' && (value.real !== undefined || value.imag !== undefined)) {
+      const real = Number(value.real ?? value.r ?? 0)
+      const imag = Number(value.imag ?? value.i ?? 0)
+      return formatComplex({ real, imag }, 2)
+    }
+    return formatNumber(value, 2)
+  }
+
   return (
     <div className={className} style={gridStyle}>
       {data.flatMap((row, rIdx) =>
@@ -43,7 +59,7 @@ export default function MatrixDisplay({
             key={`m-${rIdx}-${cIdx}`}
             className={`${cellClassName} ${highlightDiagonal && rIdx === cIdx ? 'purple-glow' : ''}`.trim()}
           >
-            {formatNumber(value, 2)}
+            {renderValue(value)}
           </div>
         ))
       )}

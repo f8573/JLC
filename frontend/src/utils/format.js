@@ -46,15 +46,26 @@ export function formatDimension(rows, cols) {
  */
 export function formatComplex(value, digits = 3) {
   if (!value) return '—'
-  const real = formatNumber(value.real, digits)
-  const imag = formatNumber(value.imag, digits)
-  const imagNum = Number(value.imag)
-  if (!imagNum || Math.abs(imagNum) < 1e-12) {
+  const realNum = Number(value.real) || 0
+  const imagNum = Number(value.imag) || 0
+  const real = formatNumber(realNum, digits)
+  const imagAbs = Math.abs(imagNum)
+
+  // Pure real
+  if (Math.abs(imagNum) < 1e-12) {
     return real
   }
+
+  // Pure imaginary
+  if (Math.abs(realNum) < 1e-12) {
+    if (Math.abs(imagAbs - 1.0) < 1e-12) return imagNum < 0 ? '-i' : 'i'
+    return imagNum < 0 ? `-${formatNumber(imagAbs, digits)}i` : `${formatNumber(imagAbs, digits)}i`
+  }
+
+  // Both real and imaginary present. Omit '1' coefficient.
   const sign = imagNum >= 0 ? '+' : '-'
-  const imagAbs = formatNumber(Math.abs(imagNum), digits)
-  return `${real} ${sign} ${imagAbs}i`
+  const imagCoeff = Math.abs(imagAbs - 1.0) < 1e-12 ? 'i' : `${formatNumber(imagAbs, digits)}i`
+  return `${real}${sign}${imagCoeff}`
 }
 
 /**
@@ -68,5 +79,36 @@ export function formatMatrixSummary(matrix) {
   const rows = matrix.length
   const cols = matrix[0]?.length || 0
   return `${rows}x${cols}`
+}
+
+/**
+ * Convert backend definiteness enum to a human-friendly label.
+ *
+ * @param {string|null|undefined} val
+ * @returns {string}
+ */
+export function formatDefiniteness(val) {
+  if (val === null || val === undefined) return 'Unknown'
+  switch (val) {
+    case 'POSITIVE_DEFINITE':
+      return 'Positive Definite'
+    case 'POSITIVE_SEMIDEFINITE':
+      return 'Positive Semidefinite'
+    case 'NEGATIVE_DEFINITE':
+      return 'Negative Definite'
+    case 'NEGATIVE_SEMIDEFINITE':
+      return 'Negative Semidefinite'
+    case 'INDEFINITE':
+      return 'Indefinite'
+    case 'UNDEFINED':
+      return 'Undefined'
+    default:
+      // Fallback: prettify enum-like strings
+      try {
+        return String(val).replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
+      } catch (e) {
+        return String(val)
+      }
+  }
 }
 

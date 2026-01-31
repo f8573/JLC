@@ -58,6 +58,7 @@ public class QuadraticForm {
     
     private final Matrix A;
     private final int n;
+    private final boolean isSquare;
     private SpectralDecomposition spectral;
     private static final double EPS = 2.220446049250313e-16;
     
@@ -69,7 +70,8 @@ public class QuadraticForm {
         POSITIVE_SEMIDEFINITE,  // All λ ≥ 0, at least one λ = 0
         NEGATIVE_DEFINITE,      // All λ < 0
         NEGATIVE_SEMIDEFINITE,  // All λ ≤ 0, at least one λ = 0
-        INDEFINITE              // Mixed signs
+        INDEFINITE,             // Mixed signs
+        UNDEFINED               // Not defined for rectangular matrices
     }
     
     /**
@@ -82,13 +84,17 @@ public class QuadraticForm {
         if (A == null) {
             throw new IllegalArgumentException("Matrix must not be null");
         }
-        if (!A.isSquare()) {
-            throw new IllegalArgumentException("Matrix must be square");
+        this.isSquare = A.isSquare();
+
+        if (this.isSquare) {
+            // Symmetrize if nearly symmetric
+            this.A = symmetrize(A);
+            this.n = A.getRowCount();
+        } else {
+            // Keep original rectangular matrix; definiteness will be UNDEFINED
+            this.A = A;
+            this.n = A.getRowCount();
         }
-        
-        // Symmetrize if nearly symmetric
-        this.A = symmetrize(A);
-        this.n = A.getRowCount();
     }
     
     /**
@@ -99,6 +105,9 @@ public class QuadraticForm {
      */
     private static Matrix symmetrize(Matrix A) {
         int n = A.getRowCount();
+        if (!A.isSquare()) {
+            throw new IllegalArgumentException("Symmetrize requires a square matrix");
+        }
         Matrix sym = new Matrix(n, n);
         
         for (int i = 0; i < n; i++) {
@@ -185,6 +194,9 @@ public class QuadraticForm {
      * @return Hessian matrix (2*A)
      */
     public Matrix hessian() {
+        if (!A.isSquare()) {
+            throw new IllegalArgumentException("Hessian is defined only for square matrices");
+        }
         return A.multiplyScalar(2.0);
     }
     
@@ -194,6 +206,10 @@ public class QuadraticForm {
      * @return Definiteness classification
      */
     public Definiteness classify() {
+        if (!A.isSquare()) {
+            return Definiteness.UNDEFINED;
+        }
+
         ensureSpectral();
         double[] eigenvalues = spectral.getEigenvalues();
         
@@ -286,8 +302,14 @@ public class QuadraticForm {
      * Ensure spectral decomposition is computed.
      */
     private void ensureSpectral() {
+        if (!A.isSquare()) {
+            throw new IllegalStateException("Spectral decomposition is only available for square matrices");
+        }
+
         if (spectral == null) {
-            spectral = SymmetricEigenDecomposition.decompose(A);
+            // Use symmetric part H = (A + A^T)/2 for eigenvalue computation
+            Matrix H = symmetrize(A);
+            spectral = SymmetricEigenDecomposition.decompose(H);
         }
     }
     

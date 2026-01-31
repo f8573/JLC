@@ -8,7 +8,7 @@ import Button from '../ui/Button'
  * @param {() => void} [props.onAnalyze]
  * @param {() => void} [props.onTranspose]
  */
-export default function MatrixActions({ onAnalyze, onTranspose }) {
+export default function MatrixActions({ onAnalyze, onTranspose, onFavorite }) {
   return (
     <div className="flex flex-col sm:flex-row items-center justify-center gap-5 w-full max-w-md">
       <Button 
@@ -27,6 +27,13 @@ export default function MatrixActions({ onAnalyze, onTranspose }) {
           swap_horiz
         </span>
         Transpose
+      </Button>
+      <Button
+        onClick={onFavorite}
+        variant="ghost"
+      >
+        <span className="material-symbols-outlined text-[20px] text-yellow-500">star</span>
+        Favorite
       </Button>
     </div>
   )

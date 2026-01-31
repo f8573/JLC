@@ -158,6 +158,7 @@ public class DiagnosticMetrics {
         private Boolean defective;
         private Boolean diagonalizable;
         private String definiteness;
+        private String spectralClass;
 
         private Boolean orthogonal;
         private Boolean unitary;
@@ -507,6 +508,13 @@ public class DiagnosticMetrics {
          */
         public String getDefiniteness() {
             return definiteness;
+        }
+
+        /**
+         * @return spectral class label
+         */
+        public String getSpectralClass() {
+            return spectralClass;
         }
 
         /**
@@ -1091,6 +1099,11 @@ public class DiagnosticMetrics {
                 diag.eigenvalues = schur.getEigenvalues();
                 if (schur.getEigenvectors() != null) {
                     diag.eigenvectors = schur.getEigenvectors();
+                    try {
+                        System.err.println("[DEBUG] DiagnosticMetrics: schur eigenvectors hasImagData=" + diag.eigenvectors.hasImagData());
+                    } catch (Exception ex) {
+                        System.err.println("[DEBUG] DiagnosticMetrics: failed to inspect schur eigenvectors: " + ex.getMessage());
+                    }
                 }
             } catch (RuntimeException ex) {
                 diag.schurDecomposition = errorItem("schur", "Schur decomposition failed", ex);
@@ -1104,22 +1117,28 @@ public class DiagnosticMetrics {
                 Diagonalization diagResult = Diagonalization.decompose(A);
                 Matrix P = diagResult.getP();
                 Matrix D = diagResult.getD();
-                Matrix pinv;
-                try {
-                    pinv = P.inverse();
-                } catch (RuntimeException ex) {
-                    diag.diagonalization = errorItem("diagonalization",
-                            "Eigenvector matrix is singular; matrix is not diagonalizable", ex);
-                    pinv = null;
-                }
-                if (pinv != null) {
-                    Matrix reconstructed = P.multiply(D).multiply(pinv);
-                    MatrixAccuracyValidator.ValidationResult validation =
-                            MatrixAccuracyValidator.validate(A, reconstructed, "Diagonalization",
-                                    safeConditionEstimate(conditionEstimate));
-                    diag.diagonalization = itemFromValidation("diagonalization", diagResult, validation, null);
-                    diag.eigenvalues = diagResult.getEigenvalues();
-                    diag.eigenvectors = P;
+                if (P != null) {
+                    Matrix pinv = null;
+                    try {
+                        pinv = P.inverse();
+                    } catch (RuntimeException ex) {
+                        diag.diagonalization = errorItem("diagonalization",
+                                "Eigenvector matrix is singular; matrix is not diagonalizable", ex);
+                        pinv = null;
+                    }
+                    if (pinv != null) {
+                        Matrix reconstructed = P.multiply(D).multiply(pinv);
+                        String extraMsg = null;
+                        if (P.hasImagData()) {
+                            extraMsg = "Computed complex eigendecomposition; performed inverse validation in complex domain";
+                        }
+                        MatrixAccuracyValidator.ValidationResult validation =
+                                MatrixAccuracyValidator.validate(A, reconstructed, "Diagonalization",
+                                        safeConditionEstimate(conditionEstimate));
+                        diag.diagonalization = itemFromValidation("diagonalization", diagResult, validation, extraMsg);
+                        diag.eigenvalues = diagResult.getEigenvalues();
+                        diag.eigenvectors = P;
+                    }
                 }
             } catch (RuntimeException ex) {
                 diag.diagonalization = errorItem("diagonalization", "Diagonalization failed", ex);
@@ -1183,9 +1202,9 @@ public class DiagnosticMetrics {
             diag.polar = errorItem("polar", "Polar decomposition requires a real-valued matrix", null);
         }
 
-        if (diag.square && diag.real) {
+        if (diag.square) {
             try {
-                Matrix inverse = LUInverse.compute(A);
+            Matrix inverse = diag.real ? LUInverse.compute(A) : A.inverse();
                 Matrix identity = Matrix.Identity(diag.rows);
                 MatrixAccuracyValidator.ValidationResult left =
                         MatrixAccuracyValidator.validate(identity, A.multiply(inverse), "Inverse A*inv",
@@ -1201,7 +1220,7 @@ public class DiagnosticMetrics {
                 diag.inverse = errorItem("inverse", "Matrix inversion failed", ex);
             }
         } else {
-            diag.inverse = errorItem("inverse", "Inverse requires a real square matrix", null);
+            diag.inverse = errorItem("inverse", "Inverse requires a square matrix", null);
         }
 
         if (diag.eigenvalues == null && diag.symmetricSpectral != null
@@ -1269,11 +1288,22 @@ public class DiagnosticMetrics {
             diag.characteristicPolynomials = diag.characteristicPolynomial;
         }
 
-        // If sum of geometric multiplicities equals n, then an eigenbasis exists and the matrix is diagonalizable
-        if (diag.geometricMultiplicity != null) {
+        // If sum of geometric multiplicities (per unique eigenvalue) equals n, then an eigenbasis exists and the matrix is diagonalizable.
+        // Note: geometricMultiplicity array has one entry per eigenvalue (including repeats), where each entry
+        // holds the geometric multiplicity of that eigenvalue. We must sum only unique entries to avoid overcounting.
+        if (diag.geometricMultiplicity != null && diag.eigenvalues != null) {
             int sumGeom = 0;
-            for (int gm : diag.geometricMultiplicity) {
-                sumGeom += gm;
+            boolean[] counted = new boolean[diag.eigenvalues.length];
+            for (int i = 0; i < diag.eigenvalues.length; i++) {
+                if (counted[i]) continue;
+                // Mark all duplicates of this eigenvalue as counted
+                for (int j = i; j < diag.eigenvalues.length; j++) {
+                    if (!counted[j] && close(diag.eigenvalues[i], diag.eigenvalues[j], tol)) {
+                        counted[j] = true;
+                    }
+                }
+                // Add geometric multiplicity only once per unique eigenvalue
+                sumGeom += diag.geometricMultiplicity[i];
             }
             if (diag.rows > 0) {
                 diag.diagonalizable = sumGeom == diag.rows;
@@ -1324,8 +1354,28 @@ public class DiagnosticMetrics {
                     } catch (RuntimeException ex) {
                         diag.eigenspaceList.add(errorItem("eigenspace-" + i, "Failed to compute eigenspace", ex));
                     }
+                } else if (diag.eigenvectors != null) {
+                    try {
+                        Vector[] cols = diag.eigenvectors.getData();
+                        Set<Vector> basis = new LinkedHashSet<>();
+                        for (int k = 0; k < nEv; k++) {
+                            if (close(lambda, diag.eigenvalues[k], tol)) {
+                                Vector v = cols[k];
+                                if (v != null) {
+                                    basis.add(v);
+                                }
+                            }
+                        }
+                        if (basis.isEmpty()) {
+                            diag.eigenspaceList.add(errorItem("eigenspace-" + i, "Eigenspace is empty", null));
+                        } else {
+                            diag.eigenspaceList.add(new DiagnosticItem<>("eigenspace-" + i, Status.OK, null, basis, null));
+                        }
+                    } catch (RuntimeException ex) {
+                        diag.eigenspaceList.add(errorItem("eigenspace-" + i, "Failed to compute eigenspace from eigenvectors", ex));
+                    }
                 } else {
-                    diag.eigenspaceList.add(errorItem("eigenspace-" + i, "Eigenspace computation requires a real eigenvalue and real matrix", null));
+                    diag.eigenspaceList.add(errorItem("eigenspace-" + i, "Eigenspace computation requires eigenvectors", null));
                 }
 
                 // Eigenbasis: only exists when matrix is diagonalizable. Provide the full set
@@ -1338,37 +1388,44 @@ public class DiagnosticMetrics {
                             if (close(lambda, diag.eigenvalues[k], tol)) {
                                 Vector v = cols[k];
                                 if (v != null) {
-                                    // Check if vector is linearly independent from existing basis vectors
-                                    boolean isIndependent = true;
-                                    for (Vector existing : basis) {
-                                        // Two vectors are dependent if one is a scalar multiple of the other
-                                        // Check if v = c * existing for some scalar c
-                                        double ratio = 0.0;
-                                        boolean ratioSet = false;
-                                        boolean dependent = true;
-                                        for (int idx = 0; idx < Math.min(v.dimension(), existing.dimension()); idx++) {
-                                            double vVal = v.get(idx);
-                                            double eVal = existing.get(idx);
-                                            if (Math.abs(vVal) > tol || Math.abs(eVal) > tol) {
-                                                if (!ratioSet && Math.abs(eVal) > tol) {
-                                                    ratio = vVal / eVal;
-                                                    ratioSet = true;
-                                                } else if (ratioSet) {
-                                                    double expectedVal = ratio * eVal;
-                                                    if (Math.abs(vVal - expectedVal) > tol) {
-                                                        dependent = false;
-                                                        break;
+                                    if (v.hasImag()) {
+                                        basis.add(v);
+                                    } else {
+                                        // Check if vector is linearly independent from existing basis vectors
+                                        boolean isIndependent = true;
+                                        for (Vector existing : basis) {
+                                            if (existing.hasImag()) {
+                                                continue;
+                                            }
+                                            // Two vectors are dependent if one is a scalar multiple of the other
+                                            // Check if v = c * existing for some scalar c
+                                            double ratio = 0.0;
+                                            boolean ratioSet = false;
+                                            boolean dependent = true;
+                                            for (int idx = 0; idx < Math.min(v.dimension(), existing.dimension()); idx++) {
+                                                double vVal = v.get(idx);
+                                                double eVal = existing.get(idx);
+                                                if (Math.abs(vVal) > tol || Math.abs(eVal) > tol) {
+                                                    if (!ratioSet && Math.abs(eVal) > tol) {
+                                                        ratio = vVal / eVal;
+                                                        ratioSet = true;
+                                                    } else if (ratioSet) {
+                                                        double expectedVal = ratio * eVal;
+                                                        if (Math.abs(vVal - expectedVal) > tol) {
+                                                            dependent = false;
+                                                            break;
+                                                        }
                                                     }
                                                 }
                                             }
+                                            if (dependent && ratioSet) {
+                                                isIndependent = false;
+                                                break;
+                                            }
                                         }
-                                        if (dependent && ratioSet) {
-                                            isIndependent = false;
-                                            break;
+                                        if (isIndependent) {
+                                            basis.add(v);
                                         }
-                                    }
-                                    if (isIndependent) {
-                                        basis.add(v);
                                     }
                                 }
                             }
@@ -1405,22 +1462,31 @@ public class DiagnosticMetrics {
             diag.nilpotent = isNilpotent(A, tol);
         }
 
-        if (diag.square && diag.real && diag.symmetric) {
+        // Compute definiteness only for square, real, symmetric matrices.
+        // If asymmetric or rectangular, mark definiteness as UNDEFINED.
+        if (diag.square && diag.real && Boolean.TRUE.equals(diag.symmetric)) {
             QuadraticForm form = new QuadraticForm(A);
             diag.definiteness = form.classify().name();
+        } else {
+            // Explicitly mark asymmetric or rectangular matrices as undefined
+            diag.definiteness = QuadraticForm.Definiteness.UNDEFINED.name();
         }
 
-        if (diag.square && diag.eigenvectors != null && diag.eigenvectors.isReal()) {
+        // Use rank estimation of eigenvector matrix only as a fallback when diagonalizability
+        // hasn't been determined from eigenspace dimensions. The sum of geometric multiplicities
+        // (eigenspace dimensions) is the mathematically correct criterion and should take precedence.
+        if (diag.diagonalizable == null && diag.square && diag.eigenvectors != null && diag.eigenvectors.isReal()) {
             Integer eigRank = rankEstimate(diag.eigenvectors, tol);
             if (eigRank != null) {
                 diag.defective = eigRank < diag.rows;
+                diag.diagonalizable = !diag.defective;
             }
+        } else if (diag.diagonalizable != null) {
+            // Derive defective from the already-computed diagonalizable value
+            diag.defective = !diag.diagonalizable;
         }
 
-        if (diag.defective != null) {
-            diag.diagonalizable = !diag.defective;
-        }
-
+        diag.spectralClass = buildSpectralClass(diag, tol);
         diag.spectral = diag.normal;
         diag.companion = diag.square && isCompanion(A, tol);
         diag.block = diag.square && isBlockDiagonal(A, tol);
@@ -1442,6 +1508,105 @@ public class DiagnosticMetrics {
         String message = validation == null ? null : validation.message;
         message = joinMessages(message, extraMessage);
         return new DiagnosticItem<>(name, status, message, value, validation);
+    }
+
+    private static String buildSpectralClass(MatrixDiagnostics diag, double tol) {
+        if (diag == null) {
+            return null;
+        }
+
+        List<String> parts = new ArrayList<>();
+
+        // Normal
+        if (Boolean.TRUE.equals(diag.normal)) {
+            parts.add("Normal");
+        }
+
+        // Hermitian/Symmetric (A = A^T for real, A = A^* for complex)
+        if (Boolean.TRUE.equals(diag.hermitian)) {
+            if (diag.real) {
+                parts.add("Symmetric");
+            } else {
+                parts.add("Hermitian");
+            }
+        } else if (diag.real && Boolean.TRUE.equals(diag.symmetric)) {
+            parts.add("Symmetric");
+        }
+
+        // Stable/Unstable (continuous-time): all eigenvalues strictly in left half-plane
+        if (diag.square && diag.eigenvalues != null && diag.eigenvalues.length > 0) {
+            boolean allLeft = true;
+            boolean allReal = true;
+            for (Complex v : diag.eigenvalues) {
+                if (v == null) {
+                    continue;
+                }
+                double re = v.real;
+                double im = v.imag;
+                if (re >= -tol) {
+                    allLeft = false;
+                }
+                if (Math.abs(im) > tol) {
+                    allReal = false;
+                }
+            }
+            if (allLeft) {
+                parts.add("Stable");
+            } else {
+                parts.add("Unstable");
+            }
+        }
+
+        // Diagonalizable or Defective (XOR)
+        if (Boolean.TRUE.equals(diag.diagonalizable)) {
+            parts.add("Diagonalizable");
+        } else if (Boolean.TRUE.equals(diag.defective)) {
+            parts.add("Defective");
+        }
+
+        // Real/complex spectrum
+        if (diag.square && diag.eigenvalues != null && diag.eigenvalues.length > 0) {
+            boolean allReal = true;
+            for (Complex v : diag.eigenvalues) {
+                if (v == null) {
+                    continue;
+                }
+                if (Math.abs(v.imag) > tol) {
+                    allReal = false;
+                    break;
+                }
+            }
+            if (allReal) {
+                parts.add("Real");
+            } else {
+                parts.add("Complex");
+            }
+        }
+
+        // Positive/Negative/Indefinite (only for symmetric matrices)
+        if (Boolean.TRUE.equals(diag.symmetric) && diag.definiteness != null) {
+            switch (diag.definiteness) {
+                case "POSITIVE_DEFINITE":
+                case "POSITIVE_SEMIDEFINITE":
+                    parts.add("Positive");
+                    break;
+                case "NEGATIVE_DEFINITE":
+                case "NEGATIVE_SEMIDEFINITE":
+                    parts.add("Negative");
+                    break;
+                case "INDEFINITE":
+                    parts.add("Indefinite");
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        if (parts.isEmpty()) {
+            return null;
+        }
+
+        return String.join(" ", parts);
     }
 
     private static <T> DiagnosticItem<T> elevateIfNeeded(DiagnosticItem<T> item,

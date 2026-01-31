@@ -1,6 +1,7 @@
 ﻿import React from 'react'
 import MatrixAnalysisLayout from '../components/layout/MatrixAnalysisLayout'
 import Breadcrumb from '../components/results/Breadcrumb'
+import MatrixActionBar, { MatrixFooterBar } from '../components/matrix/MatrixActionBar'
 import { useDiagnostics } from '../hooks/useDiagnostics'
 import { formatPercent } from '../utils/format'
 
@@ -106,12 +107,7 @@ export default function MatrixStructurePage({ matrixString }) {
       title="Structural Properties"
       subtitle="Categorical classification and structural patterns"
       breadcrumbs={<Breadcrumb items={[{ label: 'Dashboard', href: '#' }, { label: 'Structure' }]} />}
-      actions={
-        <button className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl text-sm font-bold transition-all text-slate-700">
-          <span className="material-symbols-outlined text-[20px]">description</span>
-          Export LaTeX
-        </button>
-      }
+      actions={<MatrixActionBar matrixString={matrixString} diagnostics={diagnostics} />}
     >
       <div className="p-8 flex-1">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -183,13 +179,7 @@ export default function MatrixStructurePage({ matrixString }) {
           </div>
         </div>
       </div>
-      <footer className="flex items-center justify-between bg-slate-50 px-8 py-5 border-t border-slate-100">
-        <div className="flex gap-3">
-          <a href="#" className="text-xs font-bold hover:underline text-slate-400">↑ Back to Top</a>
-          <a href="#" className="text-xs font-bold hover:underline text-slate-400">Matrix Dashboard</a>
-        </div>
-        <p className="text-xs text-slate-400">All property checks complete.</p>
-      </footer>
+      <MatrixFooterBar matrixString={matrixString} diagnostics={diagnostics} />
     </MatrixAnalysisLayout>
   )
 }

@@ -23,12 +23,12 @@ export default function MatrixHeader({ inputValue, onCompute }) {
   return (
     <header className="flex items-center justify-between border-b border-solid border-slate-200 bg-white px-6 py-3 sticky top-0 z-50">
       <div className="flex items-center gap-8">
-        <div className="flex items-center gap-3">
+        <a href="/" className="flex items-center gap-3">
           <div className="size-9 bg-primary rounded-xl flex items-center justify-center text-white shadow-lg shadow-primary/20">
             <span className="text-xl font-bold italic">Λ</span>
           </div>
-          <h2 className="text-lg font-bold leading-tight tracking-tight hidden md:block text-slate-800">MatrixSolve AI</h2>
-        </div>
+          <h2 className="text-lg font-bold leading-tight tracking-tight hidden md:block text-slate-800">ΛCompute</h2>
+        </a>
         <div className="flex flex-col min-w-[320px] lg:min-w-[600px]">
           <div className="flex w-full items-stretch rounded-xl h-11 border border-slate-200 bg-slate-50 overflow-hidden focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all">
             <div className="text-slate-400 flex items-center justify-center pl-4">
