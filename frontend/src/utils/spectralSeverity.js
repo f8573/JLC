@@ -13,10 +13,25 @@ export const SEVERITY_COLORS = {
 
 export const SEVERITY_LABELS = {
   critical: 'Critical 🚨',
-  severe: 'Severe ❗',
+  severe: 'Severe ✴️',
   moderate: 'Moderate ⚠️',
   mild: 'Mild ℹ️',
   safe: 'Safe ✅'
+}
+
+// Display mode toggle for how eigen-information is presented.
+export const EIGEN_DISPLAY_MODES = {
+  ALL_WITH_REPS: 'all_with_reps',       // show every eigenvalue and representative eigenvector
+  UNIQUE_NO_REPS: 'unique_no_reps'      // show unique eigenvalues and ignore representative eigenvectors
+}
+
+// Default mode (can be changed at runtime via `setEigenDisplayMode`).
+// Default to hiding representative eigenvectors in the UI
+export let eigenDisplayMode = EIGEN_DISPLAY_MODES.UNIQUE_NO_REPS
+export function setEigenDisplayMode(mode) {
+  if (mode === EIGEN_DISPLAY_MODES.ALL_WITH_REPS || mode === EIGEN_DISPLAY_MODES.UNIQUE_NO_REPS) {
+    eigenDisplayMode = mode
+  }
 }
 
 /**
@@ -25,14 +40,15 @@ export const SEVERITY_LABELS = {
  * @param {any} diagnostics
  * @returns {{level: string, color: string, label: string, issues: string[], criticalArtifacts?: any}}
  */
-export function computeSpectralSeverity(diagnostics) {
+export function computeSpectralSeverity(diagnostics, options = {}) {
   if (!diagnostics) return { level: 'safe', color: SEVERITY_COLORS.safe, issues: [] }
+  const mode = options.displayMode || eigenDisplayMode
 
   const issues = []
   let severity = 'safe'
 
   const eigenvalues = diagnostics.eigenvalues || []
-  const eigenvectors = diagnostics.eigenvectors?.data
+  const eigenvectors = normalizeMatrix(diagnostics.eigenvectors)
   const alg = diagnostics.algebraicMultiplicity || []
   const geom = diagnostics.geometricMultiplicity || []
   const perEigen = diagnostics.eigenInformationPerValue || null
@@ -45,8 +61,25 @@ export function computeSpectralSeverity(diagnostics) {
   // CRITICAL checks
   // 1. No eigenbasis (matrix is defective)
   if (diagonalizable === false) {
-    const totalGeom = geom.reduce((sum, g) => sum + g, 0)
-    const n = eigenvalues.length
+    // Compute sum of geometric multiplicities per unique eigenvalue
+    const tol = 1e-9
+    const counted = new Array(eigenvalues.length).fill(false)
+    let totalGeom = 0
+    for (let i = 0; i < eigenvalues.length; i++) {
+      if (counted[i]) continue
+      const lambda = eigenvalues[i]
+      for (let j = i; j < eigenvalues.length; j++) {
+        if (!counted[j]) {
+          const other = eigenvalues[j]
+          const dist = Math.hypot((lambda?.real ?? lambda ?? 0) - (other?.real ?? other ?? 0), (lambda?.imag ?? 0) - (other?.imag ?? 0))
+          if (dist <= tol) {
+            counted[j] = true
+          }
+        }
+      }
+      totalGeom += (geom[i] ?? 0)
+    }
+    const n = diagnostics.rows || diagnostics.n || eigenvalues.length
     if (totalGeom < n) {
       severity = 'critical'
       issues.push(`Eigenbasis does not exist (${totalGeom} independent eigenvectors < ${n} dimension)`)
@@ -55,7 +88,8 @@ export function computeSpectralSeverity(diagnostics) {
 
   // 1b. Representative eigenvectors for unique eigenvalues are not independent
   try {
-    if (perEigen && Array.isArray(perEigen) && perEigen.length > 0) {
+    // Only use representative eigenvectors when display mode requests them.
+    if (mode === EIGEN_DISPLAY_MODES.ALL_WITH_REPS && perEigen && Array.isArray(perEigen) && perEigen.length > 0) {
       const reps = perEigen.map(p => p.representativeEigenvector).filter(Boolean)
       if (reps.length > 0) {
         const indep = estimateIndependentColumns(reps)
@@ -74,9 +108,10 @@ export function computeSpectralSeverity(diagnostics) {
     // ignore numeric failures
   }
 
-  // 2. Geometric multiplicity much smaller than algebraic
+  // 2. Geometric multiplicity much smaller than algebraic (strongly defective)
+  // Note: geom[i] can be -1 if computation failed, treat as unknown rather than defective
   for (let i = 0; i < alg.length; i++) {
-    if (alg[i] && geom[i] && geom[i] < alg[i] * 0.5) {
+    if (alg[i] && alg[i] > 1 && geom[i] !== undefined && geom[i] !== null && geom[i] >= 0 && geom[i] < alg[i] * 0.5) {
       severity = severity === 'safe' ? 'critical' : severity
       issues.push(`Eigenvalue ${i + 1}: geometric multiplicity (${geom[i]}) << algebraic (${alg[i]})`)
     }
@@ -99,10 +134,11 @@ export function computeSpectralSeverity(diagnostics) {
   }
 
   // SEVERE checks
-  // 1. Eigenvector sensitivity due to close eigenvalues
+  // 1. Eigenvector sensitivity due to close eigenvalues (only for non-normal, non-diagonalizable matrices)
+  // For normal matrices or diagonalizable matrices with repeated eigenvalues, eigenvectors are stable.
   const gaps = computeEigenvalueGaps(eigenvalues)
   for (let i = 0; i < gaps.length; i++) {
-    if (gaps[i] < 1e-6 && !normal) {
+    if (gaps[i] < 1e-6 && !normal && diagonalizable === false) {
       if (severity === 'safe' || severity === 'mild' || severity === 'moderate') {
         severity = 'severe'
       }
@@ -110,13 +146,14 @@ export function computeSpectralSeverity(diagnostics) {
     }
   }
 
-  // 2. Repeated eigenvalues with uncertain geometric multiplicity
+  // 2. Repeated eigenvalues with deficient geometric multiplicity (truly defective)
+  // Only flag if geometric < algebraic (defective), not just for repeated eigenvalues
   for (let i = 0; i < alg.length; i++) {
-    if (alg[i] > 1 && geom[i] !== alg[i]) {
+    if (alg[i] > 1 && geom[i] !== undefined && geom[i] !== null && geom[i] >= 0 && geom[i] < alg[i]) {
       if (severity === 'safe' || severity === 'mild' || severity === 'moderate') {
         severity = 'severe'
       }
-      issues.push(`Eigenvalue ${i + 1}: repeated (alg=${alg[i]}) with uncertain geometry (geo=${geom[i]})`)
+      issues.push(`Eigenvalue ${i + 1}: defective (alg=${alg[i]}, geo=${geom[i]})`)
     }
   }
 
@@ -149,10 +186,12 @@ export function computeSpectralSeverity(diagnostics) {
   }
 
   // MILD checks
-  // 1. Non-orthogonal eigenvectors
-  if (!orthogonal && eigenvectors && eigenvectors.length > 0) {
+  // 1. Non-orthogonal eigenvectors - eigenvectors that are not orthogonal to each other
+  // indicate potential numerical sensitivity even if the matrix is otherwise healthy
+  if (eigenvectors && eigenvectors.length > 0) {
     const orthoScore = checkOrthogonality(eigenvectors)
     if (orthoScore < 0.9) {
+      // Non-orthogonal eigenvectors should always be flagged as mild at minimum
       if (severity === 'safe') {
         severity = 'mild'
       }
@@ -186,8 +225,9 @@ export function computeSpectralSeverity(diagnostics) {
  * @param {any} diagnostics
  * @returns {{level: string, color: string, label: string, issues: string[]}}
  */
-export function computePerEigenvalueSeverity(eigenvalue, index, diagnostics) {
+export function computePerEigenvalueSeverity(eigenvalue, index, diagnostics, options = {}) {
   if (!diagnostics) return { level: 'safe', color: SEVERITY_COLORS.safe, issues: [] }
+  const mode = options.displayMode || eigenDisplayMode
 
   const issues = []
   let severity = 'safe'
@@ -230,7 +270,7 @@ export function computePerEigenvalueSeverity(eigenvalue, index, diagnostics) {
   let myRep = null
   try {
     const perEigen = diagnostics.eigenInformationPerValue || null
-    if (perEigen && Array.isArray(perEigen) && perEigen.length > 0) {
+    if (mode === EIGEN_DISPLAY_MODES.ALL_WITH_REPS && perEigen && Array.isArray(perEigen) && perEigen.length > 0) {
       reps = perEigen.map(p => p.representativeEigenvector).filter(Boolean)
       myRep = perEntry?.representativeEigenvector || null
     }
@@ -253,9 +293,10 @@ export function computePerEigenvalueSeverity(eigenvalue, index, diagnostics) {
     }
   }
 
-  // 2) SEVERE: Eigenvector sensitive to perturbations (small eigenvalue gap, non-normal matrix)
+  // 2) SEVERE: Eigenvector sensitive to perturbations (small eigenvalue gap, non-normal AND non-diagonalizable)
+  // For diagonalizable matrices, repeated eigenvalues have a full eigenspace and eigenvectors are stable.
   const gap = computeEigenvalueGap(eigenvalue, eigenvalues, index)
-  if (gap < 1e-6 && !diagnostics.normal) {
+  if (gap < 1e-6 && !diagnostics.normal && diagnostics.diagonalizable === false) {
     severity = 'severe'
     issues.push(`Eigenvector sensitive to perturbations (eigenvalue gap ≈ ${gap.toExponential(2)})`)
     return { level: severity, color: SEVERITY_COLORS[severity], label: SEVERITY_LABELS[severity], issues }
@@ -283,16 +324,10 @@ export function computePerEigenvalueSeverity(eigenvalue, index, diagnostics) {
         issues.push(`Representative eigenvector non-orthogonal to others (max cos θ ≈ ${maxDot.toFixed(3)})`)
         return { level: severity, color: SEVERITY_COLORS[severity], label: SEVERITY_LABELS[severity], issues }
       }
+      // Note: If maxDot <= 0.1, orthogonality is acceptable - continue to check multiplicities
     } catch (e) {
-      // ignore
+      // ignore numeric failures - continue to multiplicity checks
     }
-  }
-
-  // 4) SAFE: Representative eigenvector is orthogonal to others
-  if (myRep && reps && reps.length > 1) {
-    severity = 'safe'
-    issues.push('Representative eigenvector is orthogonal to others')
-    return { level: severity, color: SEVERITY_COLORS[severity], label: SEVERITY_LABELS[severity], issues }
   }
 
   // Extract algebraic/geometric multiplicity values
@@ -332,25 +367,26 @@ export function computePerEigenvalueSeverity(eigenvalue, index, diagnostics) {
     return { level: severity, color: SEVERITY_COLORS[severity], label: SEVERITY_LABELS[severity], issues }
   }
 
-  // 5) Critical: algebraic multiplicity is high relative to matrix dimension
-  // Treat "high multiplicity" as a large fraction of the matrix dimension.
-  // Use 75% of n as the threshold so small matrices (n=3) treat multiplicity 2 as severe, not critical.
+  // 5) Critical: high algebraic multiplicity WITH deficient geometric multiplicity
+  // Only flag as critical if truly defective (geom < alg), not just for large multiplicity
   const highMultThreshold = Math.max(2, Math.ceil(0.75 * n))
 
-  if (algVal && algVal >= highMultThreshold) {
+  if (algVal && algVal >= highMultThreshold && dimVal !== null && dimVal < algVal) {
     severity = 'critical'
-    issues.push(`High algebraic multiplicity (${algVal}) relative to dimension ${n}`)
-    if (dimVal && dimVal < algVal) issues.push(`Geometric multiplicity (${dimVal}) < algebraic (${algVal})`)
+    issues.push(`High algebraic multiplicity (${algVal}) with deficient geometric multiplicity (${dimVal})`)
     return { level: severity, color: SEVERITY_COLORS[severity], label: SEVERITY_LABELS[severity], issues }
   }
 
-  // 2) Severe: repeated eigenvalue (alg > 1) but not high multiplicity
-  if (algVal && algVal > 1) {
+  // 2) Severe: repeated eigenvalue with deficient geometric multiplicity (defective)
+  // Only flag if geom < alg; repeated eigenvalues with alg == geom are perfectly healthy
+  if (algVal && algVal > 1 && dimVal !== null && dimVal < algVal) {
     severity = 'severe'
-    issues.push(`Repeated eigenvalue (algebraic multiplicity = ${algVal})`)
-    if (dimVal && dimVal < algVal) issues.push(`Geometric multiplicity (${dimVal}) < algebraic (${algVal})`)
+    issues.push(`Repeated eigenvalue with deficient geometry (alg=${algVal}, geo=${dimVal})`)
     return { level: severity, color: SEVERITY_COLORS[severity], label: SEVERITY_LABELS[severity], issues }
   }
+
+  // Repeated eigenvalue with alg == geom is NOT a problem - it's diagonalizable
+  // Don't flag healthy repeated eigenvalues as severe
 
   // 7) Moderate: eigenvalue approximately numerically equal to others (clustered)
   if (gap < 1e-6) {
@@ -360,7 +396,19 @@ export function computePerEigenvalueSeverity(eigenvalue, index, diagnostics) {
   }
 
   // 8) Mild: this eigenvalue's alg==geom but not all eigenvalues satisfy alg==geom
-  const allMatch = (alg.length === geom.length) && alg.every((a, i) => a === geom[i])
+  // Use perEigen data if available for more accurate comparison, otherwise fall back to arrays
+  let allMatch = false
+  if (perEigen && Array.isArray(perEigen) && perEigen.length > 0) {
+    // Check using perEigenInfo: each unique eigenvalue should have alg == geom
+    allMatch = perEigen.every(p => {
+      const pAlg = p?.algebraicMultiplicity
+      const pGeom = p?.geometricMultiplicity ?? p?.dimension
+      return pAlg !== undefined && pGeom !== undefined && pAlg === pGeom
+    })
+  } else {
+    // Fallback to direct array comparison
+    allMatch = (alg.length === geom.length) && alg.length > 0 && alg.every((a, i) => a === geom[i])
+  }
 
   if (algVal !== null && dimVal !== null && algVal === dimVal && !allMatch) {
     severity = 'mild'
@@ -391,22 +439,34 @@ function computeDeterminant(matrix) {
   // Simple determinant for small matrices (up to 3x3)
   const n = matrix.length
   if (n === 0) return 0
-  if (n === 1) return matrix[0][0] || 0
+  if (n === 1) return complexAbs(toComplex(matrix[0][0] || 0))
   if (n === 2) {
-    return (matrix[0][0] || 0) * (matrix[1][1] || 0) - (matrix[0][1] || 0) * (matrix[1][0] || 0)
+    const a = toComplex(matrix[0][0] || 0)
+    const b = toComplex(matrix[0][1] || 0)
+    const c = toComplex(matrix[1][0] || 0)
+    const d = toComplex(matrix[1][1] || 0)
+    return complexAbs(complexSub(complexMul(a, d), complexMul(b, c)))
   }
   if (n === 3) {
-    return (
-      (matrix[0][0] || 0) * ((matrix[1][1] || 0) * (matrix[2][2] || 0) - (matrix[1][2] || 0) * (matrix[2][1] || 0)) -
-      (matrix[0][1] || 0) * ((matrix[1][0] || 0) * (matrix[2][2] || 0) - (matrix[1][2] || 0) * (matrix[2][0] || 0)) +
-      (matrix[0][2] || 0) * ((matrix[1][0] || 0) * (matrix[2][1] || 0) - (matrix[1][1] || 0) * (matrix[2][0] || 0))
-    )
+    const a = toComplex(matrix[0][0] || 0)
+    const b = toComplex(matrix[0][1] || 0)
+    const c = toComplex(matrix[0][2] || 0)
+    const d = toComplex(matrix[1][0] || 0)
+    const e = toComplex(matrix[1][1] || 0)
+    const f = toComplex(matrix[1][2] || 0)
+    const g = toComplex(matrix[2][0] || 0)
+    const h = toComplex(matrix[2][1] || 0)
+    const i = toComplex(matrix[2][2] || 0)
+    const term1 = complexMul(a, complexSub(complexMul(e, i), complexMul(f, h)))
+    const term2 = complexMul(b, complexSub(complexMul(d, i), complexMul(f, g)))
+    const term3 = complexMul(c, complexSub(complexMul(d, h), complexMul(e, g)))
+    return complexAbs(complexAdd(complexSub(term1, term2), term3))
   }
   
   // For larger matrices, estimate via product of diagonal (rough estimate)
   let prod = 1
   for (let i = 0; i < Math.min(n, matrix[0]?.length || 0); i++) {
-    prod *= matrix[i][i] || 0
+    prod *= complexAbs(toComplex(matrix[i][i] || 0))
   }
   return prod
 }
@@ -419,7 +479,7 @@ function computeDeterminant(matrix) {
  */
 function estimateConditionNumber(matrix) {
   // Rough estimate: ratio of max to min absolute row sums
-  const rowNorms = matrix.map(row => row.reduce((sum, val) => sum + Math.abs(val || 0), 0))
+  const rowNorms = matrix.map(row => row.reduce((sum, val) => sum + complexAbs(toComplex(val || 0)), 0))
   const maxNorm = Math.max(...rowNorms)
   const minNorm = Math.min(...rowNorms.filter(n => n > 0))
   return minNorm > 0 ? maxNorm / minNorm : Infinity
@@ -529,23 +589,23 @@ function checkOrthogonality(matrix) {
   
   for (let i = 0; i < m; i++) {
     for (let j = i + 1; j < m; j++) {
-      let dot = 0
+      let dot = { r: 0, i: 0 }
       let normI = 0
       let normJ = 0
       
       for (let k = 0; k < n; k++) {
-        const vi = matrix[k][i] || 0
-        const vj = matrix[k][j] || 0
-        dot += vi * vj
-        normI += vi * vi
-        normJ += vj * vj
+        const vi = toComplex(matrix[k][i] || 0)
+        const vj = toComplex(matrix[k][j] || 0)
+        dot = complexAdd(dot, complexMul(complexConj(vi), vj))
+        normI += complexAbs2(vi)
+        normJ += complexAbs2(vj)
       }
       
       normI = Math.sqrt(normI)
       normJ = Math.sqrt(normJ)
       
       if (normI > 1e-10 && normJ > 1e-10) {
-        const cosine = Math.abs(dot / (normI * normJ))
+        const cosine = complexAbs(dot) / (normI * normJ)
         totalScore += (1 - cosine) // 1 if orthogonal, 0 if parallel
         count++
       }
@@ -567,33 +627,199 @@ function estimateIndependentColumns(cols, tol = 1e-8) {
   // ensure all columns have same length
   const n = Math.max(...cols.map(c => (c ? c.length : 0)))
   const normalizeCol = (c) => {
-    const v = new Array(n).fill(0)
+    const v = new Array(n).fill(null).map(() => ({ r: 0, i: 0 }))
     if (!c) return v
-    for (let i = 0; i < c.length; i++) v[i] = c[i] || 0
+    for (let i = 0; i < c.length; i++) v[i] = toComplex(c[i] || 0)
     return v
   }
 
   const basis = []
   for (const col of cols) {
     const v = normalizeCol(col)
-    let w = v.slice()
+    let w = v.map(z => ({ r: z.r, i: z.i }))
     for (const b of basis) {
       // projection of w onto b
-      let dotWB = 0, dotBB = 0
-      for (let i = 0; i < n; i++) { dotWB += w[i] * b[i]; dotBB += b[i] * b[i] }
-      if (dotBB > 0) {
-        const scale = dotWB / dotBB
-        for (let i = 0; i < n; i++) w[i] -= scale * b[i]
+      let dotWB = { r: 0, i: 0 }
+      let dotBB = { r: 0, i: 0 }
+      for (let i = 0; i < n; i++) {
+        dotWB = complexAdd(dotWB, complexMul(w[i], complexConj(b[i])))
+        dotBB = complexAdd(dotBB, complexMul(b[i], complexConj(b[i])))
+      }
+      if (complexAbs(dotBB) > tol * tol) {
+        const scale = complexDiv(dotWB, dotBB)
+        for (let i = 0; i < n; i++) {
+          w[i] = complexSub(w[i], complexMul(scale, b[i]))
+        }
       }
     }
     let norm = 0
-    for (let i = 0; i < n; i++) norm += w[i] * w[i]
+    for (let i = 0; i < n; i++) norm += complexAbs2(w[i])
     norm = Math.sqrt(norm)
     if (norm > tol) {
       // normalize and add to basis
-      for (let i = 0; i < n; i++) w[i] = w[i] / norm
+      for (let i = 0; i < n; i++) w[i] = { r: w[i].r / norm, i: w[i].i / norm }
       basis.push(w)
     }
   }
   return basis.length
 }
+
+function normalizeMatrix(matrix) {
+  if (!matrix) return null
+  if (Array.isArray(matrix)) return matrix
+  const data = matrix.data
+  const imag = matrix.imag
+  if (!Array.isArray(data)) return null
+  if (imag && Array.isArray(imag)) {
+    return data.map((row, rIdx) => row.map((val, cIdx) => ({
+      real: val ?? 0,
+      imag: imag?.[rIdx]?.[cIdx] ?? 0
+    })))
+  }
+  return data
+}
+
+function toComplex(value) {
+  if (value === null || value === undefined) return { r: 0, i: 0 }
+  if (typeof value === 'number') return { r: value, i: 0 }
+  if (typeof value === 'string') return parseComplexString(value)
+  if (Array.isArray(value) && value.length === 2) return { r: Number(value[0]) || 0, i: Number(value[1]) || 0 }
+  if (typeof value === 'object') {
+    return { r: Number(value.real ?? value.r ?? 0) || 0, i: Number(value.imag ?? value.i ?? 0) || 0 }
+  }
+  return { r: 0, i: 0 }
+}
+
+function parseComplexString(input) {
+  const s = String(input).trim()
+  if (s === 'i' || s === '+i') return { r: 0, i: 1 }
+  if (s === '-i') return { r: 0, i: -1 }
+  if (s.toLowerCase().includes('i')) {
+    const core = s.replace(/i$/i, '')
+    let splitPos = -1
+    for (let i = core.length - 1; i > 0; i--) {
+      const ch = core[i]
+      if (ch === '+' || ch === '-') { splitPos = i; break }
+    }
+    if (splitPos === -1) {
+      const b = Number(core)
+      return { r: 0, i: Number.isFinite(b) ? b : 0 }
+    }
+    const aStr = core.slice(0, splitPos)
+    const bStr = core.slice(splitPos)
+    const a = Number(aStr)
+    const b = Number(bStr)
+    return { r: Number.isFinite(a) ? a : 0, i: Number.isFinite(b) ? b : 0 }
+  }
+  const a = Number(s)
+  return { r: Number.isFinite(a) ? a : 0, i: 0 }
+}
+
+function complexAdd(a, b) {
+  return { r: a.r + b.r, i: a.i + b.i }
+}
+
+function complexSub(a, b) {
+  return { r: a.r - b.r, i: a.i - b.i }
+}
+
+function complexMul(a, b) {
+  return { r: a.r * b.r - a.i * b.i, i: a.r * b.i + a.i * b.r }
+}
+
+function complexDiv(a, b) {
+  const denom = b.r * b.r + b.i * b.i
+  if (denom === 0) return { r: 0, i: 0 }
+  return { r: (a.r * b.r + a.i * b.i) / denom, i: (a.i * b.r - a.r * b.i) / denom }
+}
+
+function complexConj(a) {
+  return { r: a.r, i: -a.i }
+}
+
+function complexAbs2(a) {
+  return a.r * a.r + a.i * a.i
+}
+
+function complexAbs(a) {
+  return Math.sqrt(complexAbs2(a))
+}
+
+/**
+ * Compute which eigenvector indices are non-orthogonal to all other eigenvectors.
+ * An eigenvector is considered non-orthogonal if it has |cos θ| > threshold with ANY other eigenvector.
+ * 
+ * @param {Object} diagnostics - The diagnostics object containing eigenvectors
+ * @param {number} [threshold=0.1] - Threshold for non-orthogonality (|cos θ| > threshold)
+ * @returns {Set<number>} Set of column indices that are non-orthogonal to all others
+ */
+export function computeNonOrthogonalEigenvectors(diagnostics, threshold = 0.1) {
+  const nonOrthogonalIndices = new Set()
+  
+  if (!diagnostics) return nonOrthogonalIndices
+  
+  // Get eigenvector matrix
+  const eigenvectors = normalizeMatrix(diagnostics.eigenvectors)
+  if (!eigenvectors || eigenvectors.length === 0) return nonOrthogonalIndices
+  
+  const numRows = eigenvectors.length
+  const numCols = eigenvectors[0]?.length || 0
+  if (numCols === 0) return nonOrthogonalIndices
+  
+  // Extract each column as a vector
+  const columns = []
+  for (let c = 0; c < numCols; c++) {
+    const col = []
+    for (let r = 0; r < numRows; r++) {
+      const val = eigenvectors[r][c]
+      if (typeof val === 'object' && (val.real !== undefined || val.imag !== undefined)) {
+        col.push({ r: val.real ?? 0, i: val.imag ?? 0 })
+      } else if (typeof val === 'number') {
+        col.push({ r: val, i: 0 })
+      } else {
+        col.push({ r: 0, i: 0 })
+      }
+    }
+    columns.push(col)
+  }
+  
+  // Compute norms
+  const norms = columns.map(col => {
+    let sum = 0
+    for (const v of col) {
+      sum += complexAbs2(v)
+    }
+    return Math.sqrt(sum)
+  })
+  
+  // Check orthogonality between each pair
+  for (let i = 0; i < numCols; i++) {
+    if (norms[i] < 1e-10) continue // skip zero vectors
+    
+    let isOrthogonalToAll = true
+    for (let j = 0; j < numCols; j++) {
+      if (i === j || norms[j] < 1e-10) continue
+      
+      // Compute inner product <col_i, col_j> (conjugate linear in second arg)
+      let innerProduct = { r: 0, i: 0 }
+      for (let k = 0; k < numRows; k++) {
+        // <u, v> = sum(u_k * conj(v_k))
+        const prod = complexMul(columns[i][k], complexConj(columns[j][k]))
+        innerProduct = complexAdd(innerProduct, prod)
+      }
+      
+      const cosAngle = complexAbs(innerProduct) / (norms[i] * norms[j])
+      if (cosAngle > threshold) {
+        isOrthogonalToAll = false
+        break
+      }
+    }
+    
+    if (!isOrthogonalToAll) {
+      nonOrthogonalIndices.add(i)
+    }
+  }
+  
+  return nonOrthogonalIndices
+}
+

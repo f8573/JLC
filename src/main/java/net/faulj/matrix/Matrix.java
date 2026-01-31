@@ -943,9 +943,11 @@ public class Matrix {
      * @return inverse matrix
      */
     public Matrix inverse() {
-        ensureReal("Inverse");
         if (rows != columns) {
             throw new ArithmeticException("Row-column count mismatch");
+        }
+        if (!isReal()) {
+            return inverseComplex();
         }
         int n = rows;
         double tol = Tolerance.get();
@@ -963,6 +965,43 @@ public class Matrix {
             invCols[c] = augmented.getData()[originalCols + c].copy();
         }
         return new Matrix(invCols);
+    }
+
+    /**
+     * Compute the inverse of a complex matrix using a real block-matrix expansion.
+     *
+     * <p>For A = X + iY, form the real block matrix:
+     * [[X, -Y], [Y, X]] and invert it as a real matrix. The complex inverse is then
+     * given by the upper-left (real) and lower-left (imaginary) blocks of the real inverse.</p>
+     *
+     * @return inverse matrix (complex)
+     */
+    private Matrix inverseComplex() {
+        int n = rows;
+        double[][] block = new double[2 * n][2 * n];
+        for (int i = 0; i < n; i++) {
+            for (int j = 0; j < n; j++) {
+                double real = get(i, j);
+                double imagVal = getImag(i, j);
+                block[i][j] = real;
+                block[i][j + n] = -imagVal;
+                block[i + n][j] = imagVal;
+                block[i + n][j + n] = real;
+            }
+        }
+
+        Matrix blockMatrix = new Matrix(block);
+        Matrix blockInverse = blockMatrix.inverse();
+
+        double[][] invReal = new double[n][n];
+        double[][] invImag = new double[n][n];
+        for (int i = 0; i < n; i++) {
+            for (int j = 0; j < n; j++) {
+                invReal[i][j] = blockInverse.get(i, j);
+                invImag[i][j] = blockInverse.get(i + n, j);
+            }
+        }
+        return new Matrix(invReal, invImag);
     }
 
     public static Matrix Identity(int n) {

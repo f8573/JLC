@@ -9,6 +9,7 @@ import RecentPage from './pages/RecentPage'
 import FavoritesPage from './pages/FavoritesPage'
 import HistoryPage from './pages/HistoryPage'
 import SettingsPage from './pages/SettingsPage'
+import DocumentationPage from './pages/DocumentationPage'
 
 /**
  * Root application component that handles lightweight client-side routing.
@@ -32,6 +33,7 @@ export default function App() {
   if (path === '/history') return <HistoryPage />
   if (path === '/recent') return <RecentPage />
   if (path === '/settings') return <SettingsPage />
+  if (path === '/documentation') return <DocumentationPage />
   if (path.startsWith('/matrix=')) {
     const match = path.match(/^\/matrix=([^/]+)(?:\/(basic|spectral|decompose|structure|report))?$/)
     if (match) {

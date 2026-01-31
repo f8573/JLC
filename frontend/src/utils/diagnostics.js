@@ -271,6 +271,106 @@ function normalizeDiagnostics(resp) {
   if (flat.persymmetric !== undefined && flat.persymetric === undefined) flat.persymetric = flat.persymmetric
   if (flat.singular !== undefined && flat.singularity === undefined) flat.singularity = flat.singular
 
+  // Add spectrum location and stability labels derived from eigenvalues (no backend dependency).
+  if (flat.spectrumLocation === undefined || flat.odeStability === undefined || flat.discreteStability === undefined) {
+    const spectrumInfo = classifySpectrum(flat.eigenvalues || [])
+    if (flat.spectrumLocation === undefined) flat.spectrumLocation = spectrumInfo.location
+    if (flat.odeStability === undefined) flat.odeStability = spectrumInfo.odeStability
+    if (flat.discreteStability === undefined) flat.discreteStability = spectrumInfo.discreteStability
+  }
+
   return flat
+}
+
+function parseComplexLike(value) {
+  if (value === null || value === undefined) return { real: 0, imag: 0 }
+  if (typeof value === 'number') return { real: value, imag: 0 }
+  if (Array.isArray(value)) {
+    const real = Number(value[0])
+    const imag = Number(value[1])
+    return { real: Number.isFinite(real) ? real : 0, imag: Number.isFinite(imag) ? imag : 0 }
+  }
+  if (typeof value === 'string') {
+    const s = value.trim()
+    if (s === 'i' || s === '+i') return { real: 0, imag: 1 }
+    if (s === '-i') return { real: 0, imag: -1 }
+    if (s.toLowerCase().includes('i')) {
+      const core = s.replace(/i$/i, '')
+      let splitPos = -1
+      for (let i = core.length - 1; i > 0; i--) {
+        const ch = core[i]
+        if (ch === '+' || ch === '-') { splitPos = i; break }
+      }
+      if (splitPos === -1) {
+        const imag = Number(core)
+        return { real: 0, imag: Number.isFinite(imag) ? imag : 0 }
+      }
+      const real = Number(core.slice(0, splitPos))
+      const imag = Number(core.slice(splitPos))
+      return { real: Number.isFinite(real) ? real : 0, imag: Number.isFinite(imag) ? imag : 0 }
+    }
+    const real = Number(s)
+    return { real: Number.isFinite(real) ? real : 0, imag: 0 }
+  }
+  if (typeof value === 'object') {
+    const real = Number(value.real ?? value.r ?? 0)
+    const imag = Number(value.imag ?? value.i ?? 0)
+    return { real: Number.isFinite(real) ? real : 0, imag: Number.isFinite(imag) ? imag : 0 }
+  }
+  return { real: 0, imag: 0 }
+}
+
+function classifySpectrum(eigenvalues, tol = 1e-8) {
+  if (!Array.isArray(eigenvalues) || eigenvalues.length === 0) {
+    return { location: 'Unknown', odeStability: 'Unknown', discreteStability: 'Unknown' }
+  }
+
+  const parsed = eigenvalues.map(parseComplexLike)
+  const realParts = parsed.map(v => v.real)
+  const imagParts = parsed.map(v => v.imag)
+  const mags = parsed.map(v => Math.hypot(v.real, v.imag))
+
+  const allReal = imagParts.every(im => Math.abs(im) <= tol)
+  const allRealNeg = realParts.every(re => re < -tol)
+  const allRealPos = realParts.every(re => re > tol)
+  const allRealNonPos = realParts.every(re => re <= tol)
+  const allRealNonNeg = realParts.every(re => re >= -tol)
+  const allImagAxis = realParts.every(re => Math.abs(re) <= tol)
+  const anyRealPos = realParts.some(re => re > tol)
+
+  let location = 'Mixed/General (across half-planes)'
+  if (allImagAxis) {
+    location = 'Imaginary Axis (Re λ = 0)'
+  } else if (allRealNeg) {
+    location = 'Left Half-Plane (Hurwitz)'
+  } else if (allRealPos) {
+    location = 'Right Half-Plane'
+  } else if (allRealNonPos) {
+    location = 'Closed Left Half-Plane (Re λ ≤ 0)'
+  } else if (allRealNonNeg) {
+    location = 'Closed Right Half-Plane (Re λ ≥ 0)'
+  } else if (allReal) {
+    location = 'Real Axis (mixed sign)'
+  }
+
+  let odeStability = 'Unstable'
+  if (allRealNeg) {
+    odeStability = 'Asymptotically Stable (Hurwitz)'
+  } else if (!anyRealPos && allRealNonPos) {
+    odeStability = 'Marginal (Re λ ≤ 0)'
+  }
+
+  const allInside = mags.every(m => m < 1 - tol)
+  const anyOutside = mags.some(m => m > 1 + tol)
+  const allInsideOrOn = mags.every(m => m <= 1 + tol)
+
+  let discreteStability = 'Unstable (outside unit disk)'
+  if (allInside) {
+    discreteStability = 'Asymptotically Stable (inside unit disk)'
+  } else if (!anyOutside && allInsideOrOn) {
+    discreteStability = 'Marginal (on unit circle)'
+  }
+
+  return { location, odeStability, discreteStability }
 }
 

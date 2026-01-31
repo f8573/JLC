@@ -1,6 +1,6 @@
 ﻿import React, { useMemo } from 'react'
-import MatrixHeader from '../MatrixHeader'
-import MatrixSidebar from '../MatrixSidebar'
+import Header from '../Header'
+import Sidebar from '../Sidebar'
 import MatrixTabs from './MatrixTabs'
 import MatrixDisplay from '../matrix/MatrixDisplay'
 import { parseMatrixString, analyzeAndCache, matrixToString } from '../../utils/diagnostics'
@@ -61,10 +61,10 @@ export default function MatrixAnalysisLayout({
   const density = diagnostics?.density
 
   return (
-    <div className="bg-background-light font-display text-slate-900 min-h-screen">
-      <MatrixHeader inputValue={matrixString} onCompute={handleCompute} />
+    <div className="bg-background-light font-display text-slate-900 h-screen overflow-hidden">
+      <Header inputValue={matrixString} onCompute={handleCompute} />
       <div className="flex h-[calc(100vh-68px)] overflow-hidden">
-        <MatrixSidebar />
+        <Sidebar active="analysis" showCurrentAnalysis={true} />
         <main className="flex-1 overflow-y-auto custom-scrollbar bg-background-light">
           <div className="max-w-[1800px] mx-auto p-8 space-y-6">
             <div className="flex flex-col gap-2">

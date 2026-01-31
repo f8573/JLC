@@ -3,7 +3,8 @@ import MatrixAnalysisLayout from '../components/layout/MatrixAnalysisLayout'
 import Breadcrumb from '../components/results/Breadcrumb'
 import PropertyCard from '../components/results/PropertyCard'
 import SummaryItem from '../components/results/SummaryItem'
-import MatrixDisplay from '../components/matrix/MatrixDisplay'
+import MatrixLatex from '../components/matrix/MatrixLatex'
+import MatrixActionBar, { MatrixFooterBar } from '../components/matrix/MatrixActionBar'
 import Latex from '../components/ui/Latex'
 import { useDiagnostics } from '../hooks/useDiagnostics'
 import { formatNumber, formatDimension, formatPercent } from '../utils/format'
@@ -193,12 +194,7 @@ export default function MatrixBasicPage({ matrixString }) {
       title="Analysis Results"
       subtitle="Real-time property inspection and categorical decomposition"
       breadcrumbs={<Breadcrumb items={[{ label: 'Dashboard', href: '#' }, { label: 'Analysis Results' }]} />}
-      actions={
-        <button className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl text-sm font-bold transition-all text-slate-700">
-          <span className="material-symbols-outlined text-[20px]">description</span>
-          Export LaTeX
-        </button>
-      }
+      actions={<MatrixActionBar matrixString={matrixString} diagnostics={diagnostics} />}
     >
       <div className="p-8 flex-1">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -241,25 +237,13 @@ export default function MatrixBasicPage({ matrixString }) {
                 <div>
                   <p className="mb-1 text-[10px] font-bold uppercase text-slate-400">Q</p>
                   <div className="border border-slate-100 rounded p-2 bg-slate-50">
-                    <MatrixDisplay
-                      data={qrQ}
-                      minCellWidth={18}
-                      gap={4}
-                      className="text-[9px]"
-                      cellClassName="text-center"
-                    />
+                    <MatrixLatex data={qrQ} className="text-[9px] math-font" />
                   </div>
                 </div>
                 <div>
                   <p className="mb-1 text-[10px] font-bold uppercase text-slate-400">R</p>
                   <div className="border border-slate-100 rounded p-2 bg-slate-50">
-                    <MatrixDisplay
-                      data={qrR}
-                      minCellWidth={18}
-                      gap={4}
-                      className="text-[9px]"
-                      cellClassName="text-center"
-                    />
+                    <MatrixLatex data={qrR} className="text-[9px] math-font" />
                   </div>
                 </div>
               </div>
@@ -278,23 +262,7 @@ export default function MatrixBasicPage({ matrixString }) {
           </div>
         </div>
       </div>
-      <div className="bg-slate-50 border-t border-slate-200 px-8 py-4 flex items-center justify-between">
-        <span className="text-xs text-slate-400 italic">Solved using high-precision JLA subroutines.</span>
-        <div className="flex gap-6">
-          <a
-            className="text-xs font-bold text-primary hover:text-primary/80 flex items-center gap-1.5"
-            href={`/matrix=${encodeURIComponent(matrixString)}/report`}
-            onClick={(e) => { e.preventDefault(); import('../utils/navigation').then(m => m.navigate(`/matrix=${encodeURIComponent(matrixString)}/report`)) }}
-          >
-            <span className="material-symbols-outlined text-[18px]">visibility</span>
-            Full Report
-          </a>
-          <button className="text-xs font-bold text-primary hover:text-primary/80 flex items-center gap-1.5">
-            <span className="material-symbols-outlined text-[18px]">download</span>
-            JSON Data
-          </button>
-        </div>
-      </div>
+      <MatrixFooterBar matrixString={matrixString} diagnostics={diagnostics} />
     </MatrixAnalysisLayout>
   )
 }

@@ -9,8 +9,8 @@ const features = [
   },
   {
     icon: 'auto_graph',
-    title: 'Live Plotting',
-    description: 'Visualizations for eigenvalues and row reduction are generated instantly.',
+    title: 'Spectrum Visualization',
+    description: 'The spectrum of the matrix is visualized with eigenvalue distribution and spectral plots.',
     hasBorder: true
   },
   {

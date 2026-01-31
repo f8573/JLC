@@ -69,6 +69,10 @@ public class LUInverse {
             throw new IllegalArgumentException("Matrix inversion requires a square matrix");
         }
 
+        if (!A.isReal()) {
+            return A.inverse();
+        }
+
         int n = A.getRowCount();
         LUDecomposition decomp = new LUDecomposition();
         LUResult lu = decomp.decompose(A);

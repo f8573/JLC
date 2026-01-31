@@ -1,38 +1,73 @@
-import React from 'react'
-import Logo from './ui/Logo'
-import SearchBar from './ui/SearchBar'
-import IconButton from './ui/IconButton'
-import UserAvatar from './ui/UserAvatar'
+import React, { useState, useEffect } from 'react'
 
 /**
- * Top navigation header for the landing experience.
+ * Unified top navigation header across all pages.
+ * Accepts an optional inputValue for matrix input and onCompute callback.
+ *
+ * @param {Object} props
+ * @param {string} [props.inputValue]
+ * @param {(matrixString: string) => void} [props.onCompute]
  */
-export default function Header() {
+export default function Header({ inputValue: initialValue, onCompute }) {
+  const [inputValue, setInputValue] = useState(initialValue || '')
+
+  useEffect(() => {
+    setInputValue(initialValue || '')
+  }, [initialValue])
+
+  function handleSubmit() {
+    if (inputValue.trim()) {
+      if (onCompute) {
+        onCompute(inputValue.trim())
+      } else {
+        window.location.href = `/matrix=${encodeURIComponent(inputValue.trim())}/basic`
+      }
+    }
+  }
+
   return (
-    <header className="flex items-center justify-between border-b border-border-color bg-white px-6 py-2.5 shrink-0">
-      <div className="flex items-center gap-10">
-        <div className="flex items-center gap-2.5">
-          <Logo />
-          <h2 className="text-lg font-bold tracking-tight text-slate-900 uppercase italic">Mathpad</h2>
+    <header className="flex items-center justify-between border-b border-solid border-slate-200 bg-white px-6 py-3 sticky top-0 z-50">
+      <div className="flex items-center gap-8">
+        <a href="/" className="flex items-center gap-3">
+          <div className="size-9 bg-primary rounded-xl flex items-center justify-center text-white shadow-lg shadow-primary/20">
+            <span className="text-xl font-bold italic">Λ</span>
+          </div>
+          <h2 className="text-lg font-bold leading-tight tracking-tight hidden md:block text-slate-800">ΛCompute</h2>
+        </a>
+        <div className="flex flex-col min-w-[320px] lg:min-w-[600px]">
+          <div className="flex w-full items-stretch rounded-xl h-11 border border-slate-200 bg-slate-50 overflow-hidden focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all">
+            <div className="text-slate-400 flex items-center justify-center pl-4">
+              <span className="material-symbols-outlined text-[20px]">function</span>
+            </div>
+            <input
+              className="w-full bg-transparent border-none focus:ring-0 text-sm font-medium px-4 placeholder:text-slate-400"
+              placeholder="Enter Matrix (e.g. [[1,2],[3,4]])"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  handleSubmit()
+                }
+              }}
+            />
+            <button
+              className="bg-primary text-white px-8 text-xs font-bold uppercase tracking-widest hover:bg-primary/90 transition-all active:scale-95"
+              onClick={handleSubmit}
+            >
+              Compute
+            </button>
+          </div>
         </div>
-        <nav className="hidden md:flex items-center gap-6">
-          <a className="text-primary font-semibold text-sm" href="#">Documentation</a>
-        </nav>
-      </div>
-      <div className="flex-1 max-w-xl mx-8">
-        <SearchBar placeholder="Compute matrix determinants or solve systems..." />
       </div>
       <div className="flex items-center gap-4">
-        <div className="flex gap-1">
-          <IconButton icon="notifications" />
-          <IconButton icon="settings" />
-        </div>
-        <div className="h-8 w-[1px] bg-border-color mx-1"></div>
-        <div className="flex items-center gap-3 ml-2">
-          <UserAvatar 
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuCiPdSzqA7b7pSM7J5PtlaeVYe_zxTFm0RXF77N-S3d5dGCaW3fS7DahL4Pn4HsWrK75GS9wk9bd3CaUAkuIz2R3QkkfuD5ix0s1bIvSmRSeUbDeT8BWu7YLdnEQlFDOnOueNo8YKH2vZrgtXStHCf4oqpSs8vnqcz_Gmy95Wy8hnvFK-EWdGSvlzkMSl6FdbEJS-10IZ9XcGbctoou9QRCiwT6jH7ihmURoCpBVAHZWlEL04sW6GsA8ANpzjQHAXNrrdry2ACBiGN6"
-          />
-        </div>
+        <nav className="hidden xl:flex items-center gap-6">
+          <a className="text-sm font-semibold text-slate-600 hover:text-primary transition-colors" href="/documentation">Documentation</a>
+        </nav>
+        <div className="h-8 w-[1px] bg-slate-200 mx-2"></div>
+        <a href="/settings" className="p-2 hover:bg-primary/5 rounded-lg transition-colors text-slate-500">
+          <span className="material-symbols-outlined">settings</span>
+        </a>
       </div>
     </header>
   )

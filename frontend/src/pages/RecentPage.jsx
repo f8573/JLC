@@ -1,6 +1,6 @@
 ﻿import React from 'react'
-import MatrixHeader from '../components/MatrixHeader'
-import MatrixSidebar from '../components/MatrixSidebar'
+import Header from '../components/Header'
+import Sidebar from '../components/Sidebar'
 import { useMatrixCompute } from '../hooks/useMatrixCompute'
 
 /**
@@ -8,12 +8,23 @@ import { useMatrixCompute } from '../hooks/useMatrixCompute'
  */
 export default function RecentPage() {
   const handleCompute = useMatrixCompute()
+  const [recent, setRecent] = React.useState([])
+
+  React.useEffect(() => {
+    try {
+      const raw = localStorage.getItem('recentSessions')
+      const arr = raw ? JSON.parse(raw) : []
+      setRecent(arr)
+    } catch (e) {
+      setRecent([])
+    }
+  }, [])
 
   return (
-    <div className="bg-background-light font-display text-slate-900 min-h-screen">
-      <MatrixHeader inputValue="" onCompute={handleCompute} />
+    <div className="bg-background-light font-display text-slate-900 h-screen overflow-hidden">
+      <Header inputValue="" onCompute={handleCompute} />
       <div className="flex h-[calc(100vh-68px)] overflow-hidden">
-        <MatrixSidebar active="recent" />
+        <Sidebar active="recent" />
         <main className="flex-1 overflow-y-auto custom-scrollbar bg-background-light">
           <div className="max-w-[1200px] mx-auto p-8 space-y-6">
             <div className="flex flex-col gap-2">
@@ -46,80 +57,40 @@ export default function RecentPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  <tr className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-6 py-5">
-                      <div className="flex items-center gap-3">
-                        <div className="size-8 rounded bg-primary-light flex items-center justify-center text-primary">
-                          <span className="material-symbols-outlined text-[18px]">psychology</span>
-                        </div>
-                        <span className="text-sm font-bold text-slate-800">eigenvalues of A</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-5">
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 border border-slate-200 rounded p-1 bg-white">
-                          <div className="matrix-thumb-grid h-full w-full opacity-60">
-                            <div className="bg-primary/20 rounded-sm"></div>
-                            <div className="bg-slate-100 rounded-sm"></div>
-                            <div className="bg-slate-100 rounded-sm"></div>
-                            <div className="bg-slate-100 rounded-sm"></div>
-                            <div className="bg-primary/20 rounded-sm"></div>
-                            <div className="bg-slate-100 rounded-sm"></div>
-                            <div className="bg-slate-100 rounded-sm"></div>
-                            <div className="bg-slate-100 rounded-sm"></div>
-                            <div className="bg-primary/20 rounded-sm"></div>
+                  {recent.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="px-6 py-8 text-center text-slate-400">No recent sessions</td>
+                    </tr>
+                  )}
+                  {recent.map((item, idx) => (
+                    <tr key={item.ts || idx} className="hover:bg-slate-50/50 transition-colors cursor-pointer" onClick={() => { import('../utils/navigation').then(m => m.navigate(`/matrix=${encodeURIComponent(item.title)}/basic`)) }}>
+                      <td className="px-6 py-5">
+                        <div className="flex items-center gap-3">
+                          <div className="size-8 rounded bg-primary-light flex items-center justify-center text-primary">
+                            <span className="material-symbols-outlined text-[18px]">history</span>
                           </div>
+                          <span className="text-sm font-bold text-slate-800 truncate">{(item.title || '').slice(0, 60)}</span>
                         </div>
-                        <span className="text-xs font-mono text-slate-500">3x3 Real</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-5">
-                      <span className="text-xs font-medium text-slate-500">Oct 24, 2023 - 14:32</span>
-                    </td>
-                    <td className="px-6 py-5 text-right">
-                      <button className="inline-flex items-center gap-2 px-4 py-1.5 rounded-lg border border-primary/20 text-primary text-xs font-bold hover:bg-primary hover:text-white transition-all">
-                        <span className="material-symbols-outlined text-[16px]">play_arrow</span>
-                        Re-run
-                      </button>
-                    </td>
-                  </tr>
-                  <tr className="hover:bg-slate-50/50 transition-colors">
-                    <td className="px-6 py-5">
-                      <div className="flex items-center gap-3">
-                        <div className="size-8 rounded bg-primary-light flex items-center justify-center text-primary">
-                          <span className="material-symbols-outlined text-[18px]">rebase_edit</span>
-                        </div>
-                        <span className="text-sm font-bold text-slate-800">inverse of Hilbert 3x3</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-5">
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 border border-slate-200 rounded p-1 bg-white">
-                          <div className="matrix-thumb-grid h-full w-full opacity-60">
-                            <div className="bg-primary/40 rounded-sm"></div>
-                            <div className="bg-primary/30 rounded-sm"></div>
-                            <div className="bg-primary/20 rounded-sm"></div>
-                            <div className="bg-primary/30 rounded-sm"></div>
-                            <div className="bg-primary/20 rounded-sm"></div>
-                            <div className="bg-primary/10 rounded-sm"></div>
-                            <div className="bg-primary/20 rounded-sm"></div>
-                            <div className="bg-primary/10 rounded-sm"></div>
-                            <div className="bg-primary/5 rounded-sm"></div>
+                      </td>
+                      <td className="px-6 py-5">
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 border border-slate-200 rounded p-1 bg-white">
+                            <div className="matrix-thumb-grid h-full w-full opacity-60" />
                           </div>
+                          <span className="text-xs font-mono text-slate-500">{item.rows && item.cols ? `${item.rows}x${item.cols}` : 'Matrix'}</span>
                         </div>
-                        <span className="text-xs font-mono text-slate-500">3x3 Hilbert</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-5">
-                      <span className="text-xs font-medium text-slate-500">Oct 23, 2023 - 09:15</span>
-                    </td>
-                    <td className="px-6 py-5 text-right">
-                      <button className="inline-flex items-center gap-2 px-4 py-1.5 rounded-lg border border-primary/20 text-primary text-xs font-bold hover:bg-primary hover:text-white transition-all">
-                        <span className="material-symbols-outlined text-[16px]">play_arrow</span>
-                        Re-run
-                      </button>
-                    </td>
-                  </tr>
+                      </td>
+                      <td className="px-6 py-5">
+                        <span className="text-xs font-medium text-slate-500">{item.ts ? new Date(item.ts).toLocaleString() : '—'}</span>
+                      </td>
+                      <td className="px-6 py-5 text-right">
+                        <button onClick={(e) => { e.stopPropagation(); import('../utils/navigation').then(m => m.navigate(`/matrix=${encodeURIComponent(item.title)}/basic`)) }} className="inline-flex items-center gap-2 px-4 py-1.5 rounded-lg border border-primary/20 text-primary text-xs font-bold hover:bg-primary hover:text-white transition-all">
+                          <span className="material-symbols-outlined text-[16px]">play_arrow</span>
+                          Re-run
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
               <div className="p-6 bg-slate-50/50 border-t border-slate-200 flex items-center justify-between">
