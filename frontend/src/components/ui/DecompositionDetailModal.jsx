@@ -106,7 +106,7 @@ export default function DecompositionDetailModal({
               </h3>
               <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 flex justify-center overflow-x-auto">
                 {originalMatrix ? (
-                  <MatrixLatex data={originalMatrix} className="text-sm" />
+                  <MatrixLatex data={originalMatrix} className="text-sm" precision={2} />
                 ) : (
                   <span className="text-xs text-slate-400">Not available</span>
                 )}
@@ -120,7 +120,7 @@ export default function DecompositionDetailModal({
               </h3>
               <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 flex justify-center overflow-x-auto">
                 {reconstructedMatrix ? (
-                  <MatrixLatex data={reconstructedMatrix} className="text-sm" />
+                  <MatrixLatex data={reconstructedMatrix} className="text-sm" precision={2} />
                 ) : (
                   <span className="text-xs text-slate-400">Not available</span>
                 )}

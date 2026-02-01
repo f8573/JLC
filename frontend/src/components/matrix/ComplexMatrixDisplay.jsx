@@ -1,11 +1,15 @@
 import React from 'react'
 import { formatNumber } from '../../utils/format'
+import { usePrecisionUpdate } from '../../hooks/usePrecisionUpdate'
 
 /**
  * Render a complex-valued matrix where each entry is shown as `a + bi`.
  * Accepts matrix in the form { data: number[][], imag?: number[][] } or a plain 2D array
  */
 export default function ComplexMatrixDisplay({ matrix, minCellWidth = 60, gap = 8, className = '', cellClassName = '' }) {
+  // Subscribe to precision changes to trigger re-render
+  usePrecisionUpdate()
+
   if (!matrix) {
     return <div className={`text-xs text-slate-400 ${className}`.trim()}>No matrix data</div>
   }
@@ -32,9 +36,9 @@ export default function ComplexMatrixDisplay({ matrix, minCellWidth = 60, gap = 
     const im = Number(imRaw) || 0
     const isReZero = Math.abs(re) < eps
     const isImZero = Math.abs(im) < eps
-    const a = formatNumber(re, 3)
+    const a = formatNumber(re)
     const bAbs = Math.abs(im)
-    const b = formatNumber(bAbs, 3)
+    const b = formatNumber(bAbs)
 
     // Pure real
     if (isImZero) {

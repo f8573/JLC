@@ -4,6 +4,7 @@ import Breadcrumb from '../components/results/Breadcrumb'
 import MatrixLatex from '../components/matrix/MatrixLatex'
 import MatrixActionBar, { MatrixFooterBar } from '../components/matrix/MatrixActionBar'
 import { useDiagnostics } from '../hooks/useDiagnostics'
+import { usePrecisionUpdate } from '../hooks/usePrecisionUpdate'
 import Latex from '../components/ui/Latex'
 import AccuracyBadge from '../components/ui/AccuracyBadge'
 import DecompositionDetailModal from '../components/ui/DecompositionDetailModal'
@@ -79,7 +80,7 @@ function BasisSetSection({ title, vectors }) {
  * @param {string} props.title
  * @param {React.ReactNode} [props.formula]
  * @param {string} [props.formulaTex] - LaTeX formula for the modal
- * @param {Array<{label: React.ReactNode, data?: number[][], w?: number, g?: number, s?: string}>} [props.data]
+ * @param {Array<{label: React.ReactNode, data?: number[][], w?: number, g?: number, s?: string, precision?: number}>} [props.data]
  * @param {string} [props.label]
  * @param {boolean} [props.available=true]
  * @param {Object} [props.validation] - Validation object from API
@@ -112,7 +113,7 @@ function DecompSection({ title, formula, formulaTex, data, label, available = tr
                 <p className="text-xs font-bold text-slate-400 uppercase tracking-widest text-center">{item.label}</p>
                 <div className="flex justify-center">
                   {item.data ? (
-                    <MatrixLatex data={item.data} className={`math-font ${item.s||'text-sm'} font-medium`} />
+                    <MatrixLatex data={item.data} className={`math-font ${item.s||'text-sm'} font-medium`} precision={item.precision || 2} />
                   ) : <div className="text-xs text-slate-400">—</div>}
                 </div>
               </div>
@@ -144,6 +145,9 @@ function DecompSection({ title, formula, formulaTex, data, label, available = tr
  * @param {string} props.matrixString - Serialized matrix payload from the URL.
  */
 export default function MatrixDecomposePage({ matrixString }) {
+  // Subscribe to precision changes
+  usePrecisionUpdate()
+  
   const { diagnostics } = useDiagnostics(matrixString)
 
   // Get original matrix data

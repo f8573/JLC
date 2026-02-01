@@ -137,14 +137,13 @@ export default function MatrixInput() {
   function decCols() { updateDimensions(rows, Math.max(1, cols - 1)) }
 
   return (<>
-    <main className="flex-1 overflow-y-auto bg-white math-grid relative flex flex-col items-center">
+    <main className="flex-1 overflow-y-auto bg-white dark:bg-slate-900 math-grid relative flex flex-col items-center transition-colors duration-300">
       <div className="w-full max-w-4xl px-8 pt-16 pb-24 flex flex-col items-center">
         <div className="text-center mb-12">
-          <Badge animated>Computation Node 01</Badge>
-          <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight mb-4 mt-6">
+          <h1 className="text-4xl font-extrabold text-slate-900 dark:text-white tracking-tight mb-4 mt-6">
             Matrix Input Console
           </h1>
-          <p className="text-slate-600 text-lg max-w-lg mx-auto">
+          <p className="text-slate-600 dark:text-slate-400 text-lg max-w-lg mx-auto">
             Define your matrix below to perform characteristic analysis and decomposition.
           </p>
         </div>
@@ -178,7 +177,7 @@ export default function MatrixInput() {
     </main>
     <FavoriteModal open={favoriteModalOpen} defaultName={favoriteDefaultName} onCancel={() => { setFavoriteModalOpen(false); window.__pendingFavoriteMatrix = null }} onSave={(name) => saveFavorite(name)} />
     {savedMessage && (
-      <div className="fixed bottom-6 right-6 bg-black text-white px-4 py-2 rounded shadow">{savedMessage}</div>
+      <div className="fixed bottom-6 right-6 bg-black dark:bg-slate-700 text-white px-4 py-2 rounded shadow">{savedMessage}</div>
     )}
   </>)
 }

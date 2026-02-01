@@ -20,13 +20,14 @@ export default function Button({
 }) {
   const variants = {
     primary: 'bg-primary text-white hover:bg-primary-hover shadow-lg shadow-primary/20',
-    secondary: 'bg-white border border-border-color text-slate-700 hover:bg-slate-50',
+    secondary: 'bg-white dark:bg-slate-700 border border-border-color dark:border-slate-600 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-600',
+    ghost: 'bg-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
   }
 
   return (
     <button 
       onClick={onClick} 
-      className={`flex items-center justify-center gap-3 px-8 py-4 text-base font-bold rounded-lg transition-all group ${variants[variant]} ${className}`}
+      className={`flex items-center justify-center gap-3 px-8 py-4 text-base font-bold rounded-lg transition-all group ${variants[variant] || variants.primary} ${className}`}
       {...props}
     >
       {icon && (

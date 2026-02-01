@@ -1,5 +1,6 @@
 ﻿import React from 'react'
 import { formatComplex, formatNumber } from '../../utils/format'
+import { usePrecisionUpdate } from '../../hooks/usePrecisionUpdate'
 
 /**
  * Render a numeric matrix as a CSS grid.
@@ -20,6 +21,8 @@ export default function MatrixDisplay({
   cellClassName = '',
   highlightDiagonal = false
 }) {
+  // Subscribe to precision changes to trigger re-render
+  usePrecisionUpdate()
   if (!Array.isArray(data) || data.length === 0) {
     return (
       <div className={`text-xs text-slate-400 ${className}`}>
@@ -41,14 +44,14 @@ export default function MatrixDisplay({
     if (Array.isArray(value) && value.length === 2) {
       const real = Number(value[0])
       const imag = Number(value[1])
-      return formatComplex({ real, imag }, 2)
+      return formatComplex({ real, imag })
     }
     if (typeof value === 'object' && (value.real !== undefined || value.imag !== undefined)) {
       const real = Number(value.real ?? value.r ?? 0)
       const imag = Number(value.imag ?? value.i ?? 0)
-      return formatComplex({ real, imag }, 2)
+      return formatComplex({ real, imag })
     }
-    return formatNumber(value, 2)
+    return formatNumber(value)
   }
 
   return (

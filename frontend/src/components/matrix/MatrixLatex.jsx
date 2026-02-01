@@ -11,8 +11,9 @@ import { formatComplex, formatNumber } from '../../utils/format'
  * @param {boolean} [props.displayMode=false]
  * @param {string} [props.className='']
  * @param {Set<number>} [props.highlightColumns] - Set of column indices to highlight in blue (for non-orthogonal eigenvectors)
+ * @param {number} [props.precision=2] - Number of decimal places for formatting
  */
-export default function MatrixLatex({ data, matrix, displayMode = false, className = '', highlightColumns = null }) {
+export default function MatrixLatex({ data, matrix, displayMode = false, className = '', highlightColumns = null, precision = 2 }) {
   const source = matrix ?? data
   if (!source) {
     return <div className={`text-xs text-slate-400 ${className}`.trim()}>No matrix data</div>
@@ -29,21 +30,21 @@ export default function MatrixLatex({ data, matrix, displayMode = false, classNa
     if (imag && Array.isArray(imag) && Array.isArray(imag[rIdx])) {
       const real = Number(value ?? 0)
       const imagVal = Number(imag?.[rIdx]?.[cIdx] ?? 0)
-      return formatComplex({ real, imag: imagVal }, 2)
+      return formatComplex({ real, imag: imagVal }, precision)
     }
     if (value === null || value === undefined) return '\\text{—}'
     if (typeof value === 'string') return value
     if (Array.isArray(value) && value.length === 2) {
       const real = Number(value[0])
       const imagVal = Number(value[1])
-      return formatComplex({ real, imag: imagVal }, 2)
+      return formatComplex({ real, imag: imagVal }, precision)
     }
     if (typeof value === 'object' && (value.real !== undefined || value.imag !== undefined || value.r !== undefined || value.i !== undefined)) {
       const real = Number(value.real ?? value.r ?? 0)
       const imagVal = Number(value.imag ?? value.i ?? 0)
-      return formatComplex({ real, imag: imagVal }, 2)
+      return formatComplex({ real, imag: imagVal }, precision)
     }
-    return formatNumber(value, 2)
+    return formatNumber(value, precision)
   }
 
   const rows = baseData.map((row, rIdx) => {

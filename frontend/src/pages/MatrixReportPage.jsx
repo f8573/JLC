@@ -2,6 +2,7 @@
 import MatrixDisplay from '../components/matrix/MatrixDisplay'
 import MatrixLatex from '../components/matrix/MatrixLatex'
 import { useDiagnostics } from '../hooks/useDiagnostics'
+import { usePrecisionUpdate } from '../hooks/usePrecisionUpdate'
 import { formatComplex, formatDimension, formatNumber, formatDefiniteness } from '../utils/format'
 import Latex from '../components/ui/Latex'
 import Logo from '../components/ui/Logo'
@@ -102,6 +103,9 @@ function JsonModal({ open, onClose, matrixString, diagnostics }) {
  * @param {string} props.matrixString - Serialized matrix payload from the URL.
  */
 export default function MatrixReportPage({ matrixString }) {
+  // Subscribe to precision changes
+  usePrecisionUpdate()
+  
   const { diagnostics } = useDiagnostics(matrixString)
   const [jsonModalOpen, setJsonModalOpen] = useState(false)
 
@@ -272,7 +276,7 @@ export default function MatrixReportPage({ matrixString }) {
                   <div>
                     <p className="text-xs text-slate-400 mb-2">Reduced Row Echelon Form (RREF)</p>
                     {diagnostics?.rrefMatrix?.data ? (
-                      <MatrixLatex data={diagnostics.rrefMatrix.data} className="math-text text-sm" />
+                      <MatrixLatex data={diagnostics.rrefMatrix.data} className="math-text text-sm" precision={2} />
                     ) : (
                       <p className="text-sm text-slate-400">Unavailable</p>
                     )}
@@ -280,7 +284,7 @@ export default function MatrixReportPage({ matrixString }) {
                   <div>
                     <p className="text-xs text-slate-400 mb-2">Row Echelon (Upper Triangular Form)</p>
                     {diagnostics?.rowEchelonMatrix?.data ? (
-                      <MatrixLatex data={diagnostics.rowEchelonMatrix.data} className="math-text text-sm" />
+                      <MatrixLatex data={diagnostics.rowEchelonMatrix.data} className="math-text text-sm" precision={2} />
                     ) : (
                       <p className="text-sm text-slate-400">Unavailable</p>
                     )}
@@ -380,7 +384,7 @@ export default function MatrixReportPage({ matrixString }) {
               <div>
                 <h3 className="text-xs font-bold text-slate-400 mb-4">Eigenvector Matrix (V)</h3>
                 <div className="flex justify-center py-2">
-                  <MatrixLatex matrix={eigenvectors} className="math-text text-sm" />
+                  <MatrixLatex matrix={eigenvectors} className="math-text text-sm" precision={3} />
                 </div>
               </div>
             </div>
@@ -397,10 +401,10 @@ export default function MatrixReportPage({ matrixString }) {
                   <h4 className="text-sm font-bold text-slate-700">LU Decomposition</h4>
                   <div className="flex items-center gap-4">
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={luL} />
+                      <MatrixLatex data={luL} precision={2} />
                     </div>
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={luU} />
+                      <MatrixLatex data={luU} precision={2} />
                     </div>
                   </div>
                 </div>
@@ -408,13 +412,13 @@ export default function MatrixReportPage({ matrixString }) {
                   <h4 className="text-sm font-bold text-slate-700">SVD (USV*)</h4>
                   <div className="flex items-center gap-4">
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={diagnostics?.svd?.u?.data} />
+                      <MatrixLatex data={diagnostics?.svd?.u?.data} precision={2} />
                     </div>
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={svdSigma} />
+                      <MatrixLatex data={svdSigma} precision={2} />
                     </div>
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={diagnostics?.svd?.v?.data} />
+                      <MatrixLatex data={diagnostics?.svd?.v?.data} precision={2} />
                     </div>
                   </div>
                   <p className="text-[10px] text-slate-400 italic">Truncated for display. Full precision in JSON export.</p>
@@ -426,10 +430,10 @@ export default function MatrixReportPage({ matrixString }) {
                   <h4 className="text-sm font-bold text-slate-700">QR Decomposition</h4>
                   <div className="flex items-center gap-4">
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={diagnostics?.qr?.q?.data} />
+                      <MatrixLatex data={diagnostics?.qr?.q?.data} precision={2} />
                     </div>
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={diagnostics?.qr?.r?.data} />
+                      <MatrixLatex data={diagnostics?.qr?.r?.data} precision={2} />
                     </div>
                   </div>
                 </div>
@@ -437,13 +441,13 @@ export default function MatrixReportPage({ matrixString }) {
                   <h4 className="text-sm font-bold text-slate-700">Cholesky / Polar / Hessenberg</h4>
                   <div className="flex items-center gap-4">
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={diagnostics?.cholesky?.l?.data} />
+                      <MatrixLatex data={diagnostics?.cholesky?.l?.data} precision={2} />
                     </div>
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={diagnostics?.polar?.u?.data} />
+                      <MatrixLatex data={diagnostics?.polar?.u?.data} precision={2} />
                     </div>
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={diagnostics?.hessenbergDecomposition?.h?.data} />
+                      <MatrixLatex data={diagnostics?.hessenbergDecomposition?.h?.data} precision={2} />
                     </div>
                   </div>
                 </div>
@@ -454,10 +458,10 @@ export default function MatrixReportPage({ matrixString }) {
                   <h4 className="text-sm font-bold text-slate-700">Schur / Spectral</h4>
                   <div className="flex items-center gap-4">
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={diagnostics?.schurDecomposition?.u?.data} />
+                      <MatrixLatex data={diagnostics?.schurDecomposition?.u?.data} precision={2} />
                     </div>
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={diagnostics?.schurDecomposition?.t?.data} />
+                      <MatrixLatex data={diagnostics?.schurDecomposition?.t?.data} precision={2} />
                     </div>
                   </div>
                 </div>
@@ -465,10 +469,10 @@ export default function MatrixReportPage({ matrixString }) {
                   <h4 className="text-sm font-bold text-slate-700">Eigendecomposition</h4>
                   <div className="flex items-center gap-4">
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={matrixToDisplay(diagP)} />
+                      <MatrixLatex data={matrixToDisplay(diagP)} precision={3} />
                     </div>
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={matrixToDisplay(diagD)} />
+                      <MatrixLatex data={matrixToDisplay(diagD)} precision={3} />
                     </div>
                   </div>
                 </div>

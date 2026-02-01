@@ -9,7 +9,7 @@ import MatrixInput from '../components/MatrixInput'
  */
 export default function MainPage() {
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-[#ffffff] text-slate-800 font-sans selection:bg-primary/20">
+    <div className="flex h-screen flex-col overflow-hidden bg-[#ffffff] dark:bg-slate-900 text-slate-800 dark:text-slate-100 font-sans selection:bg-primary/20 transition-colors duration-300">
       <Header />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar active="home" />
