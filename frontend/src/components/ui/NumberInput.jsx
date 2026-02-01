@@ -24,7 +24,7 @@ export default function NumberInput({
       aria-label={label}
       value={value}
       onChange={onChange}
-      className={`w-16 h-10 bg-slate-50 border border-border-color rounded-lg text-center text-sm font-mono text-slate-900 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all shadow-sm ${className}`}
+      className={`w-16 h-10 bg-slate-50 dark:bg-slate-700 border border-border-color dark:border-slate-600 rounded-lg text-center text-sm font-mono text-slate-900 dark:text-slate-100 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all shadow-sm ${className}`}
       type="number"
       min={min}
       max={max}

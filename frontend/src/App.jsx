@@ -10,6 +10,8 @@ import FavoritesPage from './pages/FavoritesPage'
 import HistoryPage from './pages/HistoryPage'
 import SettingsPage from './pages/SettingsPage'
 import DocumentationPage from './pages/DocumentationPage'
+import { ThemeProvider } from './context/ThemeContext'
+import { SettingsProvider } from './context/SettingsContext'
 
 /**
  * Root application component that handles lightweight client-side routing.
@@ -18,9 +20,12 @@ import DocumentationPage from './pages/DocumentationPage'
  * build dependency-free while still supporting deep links into matrix analysis
  * sections.
  */
-export default function App() {
+function App() {
   useEffect(() => {
-    document.documentElement.classList.add('light')
+    // Theme is now managed by ThemeContext
+    const savedTheme = localStorage.getItem('theme') || 'light'
+    document.documentElement.classList.remove('light', 'dark')
+    document.documentElement.classList.add(savedTheme)
   }, [])
   const [path, setPath] = useState(window.location.pathname || '/')
 
@@ -49,4 +54,16 @@ export default function App() {
 
   return <MainPage />
 }
+
+function AppWrapper() {
+  return (
+    <ThemeProvider>
+      <SettingsProvider>
+        <App />
+      </SettingsProvider>
+    </ThemeProvider>
+  )
+}
+
+export default AppWrapper
 

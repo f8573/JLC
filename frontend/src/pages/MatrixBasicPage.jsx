@@ -7,6 +7,7 @@ import MatrixLatex from '../components/matrix/MatrixLatex'
 import MatrixActionBar, { MatrixFooterBar } from '../components/matrix/MatrixActionBar'
 import Latex from '../components/ui/Latex'
 import { useDiagnostics } from '../hooks/useDiagnostics'
+import { usePrecisionUpdate } from '../hooks/usePrecisionUpdate'
 import { formatNumber, formatDimension, formatPercent } from '../utils/format'
 
 /**
@@ -16,6 +17,9 @@ import { formatNumber, formatDimension, formatPercent } from '../utils/format'
  * @param {string} props.matrixString - Serialized matrix payload from the URL.
  */
 export default function MatrixBasicPage({ matrixString }) {
+  // Subscribe to precision changes
+  usePrecisionUpdate()
+  
   const { diagnostics } = useDiagnostics(matrixString)
 
   const rows = diagnostics?.rows
@@ -237,13 +241,13 @@ export default function MatrixBasicPage({ matrixString }) {
                 <div>
                   <p className="mb-1 text-[10px] font-bold uppercase text-slate-400">Q</p>
                   <div className="border border-slate-100 rounded p-2 bg-slate-50">
-                    <MatrixLatex data={qrQ} className="text-[9px] math-font" />
+                    <MatrixLatex data={qrQ} className="text-[9px] math-font" precision={2} />
                   </div>
                 </div>
                 <div>
                   <p className="mb-1 text-[10px] font-bold uppercase text-slate-400">R</p>
                   <div className="border border-slate-100 rounded p-2 bg-slate-50">
-                    <MatrixLatex data={qrR} className="text-[9px] math-font" />
+                    <MatrixLatex data={qrR} className="text-[9px] math-font" precision={2} />
                   </div>
                 </div>
               </div>

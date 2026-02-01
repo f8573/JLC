@@ -36,28 +36,28 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
 
   function itemClass(id) {
     return `flex items-center gap-3 px-3 py-2 rounded-lg transition-colors group ${
-      active === id ? 'bg-primary/10 text-primary' : 'hover:bg-primary/5 text-slate-600'
+      active === id ? 'bg-primary/10 text-primary' : 'hover:bg-primary/5 dark:hover:bg-primary/10 text-slate-600 dark:text-slate-300'
     }`
   }
 
   function subItemClass(id) {
     return `flex items-center gap-3 px-3 py-2 ml-4 rounded-lg transition-colors group ${
-      active === id ? 'bg-primary/10 text-primary' : 'hover:bg-primary/5 text-slate-600'
+      active === id ? 'bg-primary/10 text-primary' : 'hover:bg-primary/5 dark:hover:bg-primary/10 text-slate-600 dark:text-slate-300'
     }`
   }
 
   return (
-    <aside className="w-64 border-r border-slate-200 hidden lg:flex flex-col bg-white p-4 overflow-y-auto">
+    <aside className="w-64 border-r border-slate-200 dark:border-slate-700 hidden lg:flex flex-col bg-white dark:bg-slate-800 p-4 overflow-y-auto transition-colors duration-300">
       <div className="space-y-6">
         {/* Libraries Section */}
         <div>
-          <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4 px-3">Libraries</h3>
+          <h3 className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-4 px-3">Libraries</h3>
           <div className="space-y-1">
             {/* Compute - Expandable */}
             <div>
               <button 
                 onClick={() => setComputeExpanded(!computeExpanded)}
-                className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-primary/5 text-slate-600 transition-colors"
+                className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-primary/5 dark:hover:bg-primary/10 text-slate-600 dark:text-slate-300 transition-colors"
               >
                 <div className="flex items-center gap-3">
                   <span className="material-symbols-outlined text-[20px]">calculate</span>
@@ -100,23 +100,23 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
 
         {/* Recent Sessions Section */}
         <div>
-          <h3 className="text-[11px] font-bold text-slate-400 uppercase tracking-widest mb-4 px-3">Recent Sessions</h3>
+          <h3 className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-4 px-3">Recent Sessions</h3>
           {sessions.length === 0 ? (
-            <div className="text-xs text-slate-400 px-3">(no recent sessions)</div>
+            <div className="text-xs text-slate-400 dark:text-slate-500 px-3">(no recent sessions)</div>
           ) : (
             <div className="space-y-2">
               {sessions.map((s, i) => (
                 <div 
                   key={i} 
-                  className="group cursor-pointer px-3 py-2 rounded-lg hover:bg-primary/5 transition-colors" 
+                  className="group cursor-pointer px-3 py-2 rounded-lg hover:bg-primary/5 dark:hover:bg-primary/10 transition-colors" 
                   title={s.title} 
                   onClick={() => { import('../utils/navigation').then(m => m.navigate(`/matrix=${encodeURIComponent(s.title)}/basic`)) }}
                 >
                   <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-slate-400 text-[18px] group-hover:text-primary transition-colors">description</span>
-                    <span className="text-sm font-medium text-slate-600 group-hover:text-primary transition-colors truncate">{s.title}</span>
+                    <span className="material-symbols-outlined text-slate-400 dark:text-slate-500 text-[18px] group-hover:text-primary transition-colors">description</span>
+                    <span className="text-sm font-medium text-slate-600 dark:text-slate-300 group-hover:text-primary transition-colors truncate">{s.title}</span>
                   </div>
-                  <p className="text-[11px] text-slate-400 pl-[26px] mt-0.5">{new Date(s.ts).toLocaleString()}</p>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 pl-[26px] mt-0.5">{new Date(s.ts).toLocaleString()}</p>
                 </div>
               ))}
             </div>
@@ -125,13 +125,13 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
       </div>
 
       <div className="mt-auto pt-4">
-        <div className="p-4 rounded-lg bg-slate-50 border border-slate-200">
+        <div className="p-4 rounded-lg bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 transition-colors duration-300">
           <div className="flex items-center gap-2 mb-2">
             <span className="material-symbols-outlined text-primary text-[18px]">info</span>
-            <span className="text-[11px] font-bold text-slate-700 uppercase">System Status</span>
+            <span className="text-[11px] font-bold text-slate-700 dark:text-slate-200 uppercase">System Status</span>
           </div>
-          <p className="text-xs text-slate-500 leading-relaxed mb-3">All computation kernels are currently operational.</p>
-          <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 font-semibold">
+          <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed mb-3">All computation kernels are currently operational.</p>
+          <div className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold">
             <div className="size-2 rounded-full bg-emerald-500"></div>
             <span>UPTIME 99.9%</span>
           </div>

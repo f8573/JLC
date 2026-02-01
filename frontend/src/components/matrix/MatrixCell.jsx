@@ -163,7 +163,7 @@ export default function MatrixCell({ value, onChange, rowIndex, colIndex, rows, 
       data-cell
       data-row={rowIndex}
       data-col={colIndex}
-      className="w-20 h-20 bg-white border border-border-color rounded-lg text-center text-2xl font-mono text-slate-900 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all shadow-sm"
+      className="w-20 h-20 bg-white dark:bg-slate-700 border border-border-color dark:border-slate-600 rounded-lg text-center text-2xl font-mono text-slate-900 dark:text-slate-100 focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all shadow-sm"
       type="text"
       inputMode="decimal"
       value={value}

@@ -28,9 +28,9 @@ export default function MatrixInputCard({
   onAnalyze
 }) {
   return (
-    <div className="w-full bg-white border border-border-color rounded-xl p-10 md:p-16 shadow-xl relative overflow-hidden mb-10">
+    <div className="w-full bg-white dark:bg-slate-800 border border-border-color dark:border-slate-700 rounded-xl p-10 md:p-16 shadow-xl relative overflow-hidden mb-10 transition-colors duration-300">
       <div className="absolute top-0 right-0 p-4">
-        <span className="text-[10px] font-mono text-slate-300 select-none">
+        <span className="text-[10px] font-mono text-slate-300 dark:text-slate-600 select-none">
           ID: MATH-MX-842
         </span>
       </div>
@@ -39,7 +39,7 @@ export default function MatrixInputCard({
           <span className="font-mono text-5xl text-primary font-light italic">A = </span>
           <div 
             ref={matrixRef} 
-            className="matrix-bracket px-6 pt-6 pb-12 flex bg-slate-50 rounded-sm relative" 
+            className="matrix-bracket px-6 pt-6 pb-12 flex bg-slate-50 dark:bg-slate-700/50 rounded-sm relative transition-colors duration-300" 
             style={{ minWidth: cols * 90 }}
           >
             <MatrixGrid 

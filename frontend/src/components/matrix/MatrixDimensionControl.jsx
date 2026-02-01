@@ -12,7 +12,7 @@ import NumberInput from '../ui/NumberInput'
 export default function MatrixDimensionControl({ rows, cols, onDimensionChange }) {
   return (
     <div className="flex flex-col items-center gap-3 mb-10">
-      <label className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">
+      <label className="text-[11px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
         Dimensions
       </label>
       <div className="flex items-center gap-2">

@@ -1,14 +1,30 @@
 ﻿/**
+ * Get the current precision settings from localStorage.
+ * Returns { digits: number }
+ */
+export function getGlobalPrecision() {
+  const precision = localStorage.getItem('precision') || '6'
+  const num = parseInt(precision, 10)
+  return { digits: isNaN(num) ? 6 : num }
+}
+
+/**
  * Format a numeric value with fixed precision and trimmed zeros.
+ * If digits is not provided, uses the global precision setting.
  *
  * @param {number} value
- * @param {number} [digits=4]
+ * @param {number} [digits] - Number of decimal places. If omitted, uses global setting.
  * @returns {string}
  */
-export function formatNumber(value, digits = 4) {
+export function formatNumber(value, digits) {
   if (value === null || value === undefined || Number.isNaN(value)) return '—'
   if (!Number.isFinite(value)) return String(value)
-  const fixed = Number(value).toFixed(digits)
+
+  // Use global precision if digits not specified
+  const { digits: globalDigits } = getGlobalPrecision()
+  const precision = digits !== undefined ? digits : globalDigits
+
+  const fixed = Number(value).toFixed(precision)
   return fixed.replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1')
 }
 
@@ -39,16 +55,22 @@ export function formatDimension(rows, cols) {
 
 /**
  * Format a complex number object as a string.
+ * If digits is not provided, uses the global precision setting.
  *
  * @param {{real: number, imag: number}} value
- * @param {number} [digits=3]
+ * @param {number} [digits] - Number of decimal places. If omitted, uses global setting.
  * @returns {string}
  */
-export function formatComplex(value, digits = 3) {
+export function formatComplex(value, digits) {
   if (!value) return '—'
+  
+  // Use global precision if digits not specified
+  const { digits: globalDigits } = getGlobalPrecision()
+  const precision = digits !== undefined ? digits : globalDigits
+  
   const realNum = Number(value.real) || 0
   const imagNum = Number(value.imag) || 0
-  const real = formatNumber(realNum, digits)
+  const real = formatNumber(realNum, precision)
   const imagAbs = Math.abs(imagNum)
 
   // Pure real
@@ -59,12 +81,12 @@ export function formatComplex(value, digits = 3) {
   // Pure imaginary
   if (Math.abs(realNum) < 1e-12) {
     if (Math.abs(imagAbs - 1.0) < 1e-12) return imagNum < 0 ? '-i' : 'i'
-    return imagNum < 0 ? `-${formatNumber(imagAbs, digits)}i` : `${formatNumber(imagAbs, digits)}i`
+    return imagNum < 0 ? `-${formatNumber(imagAbs, precision)}i` : `${formatNumber(imagAbs, precision)}i`
   }
 
   // Both real and imaginary present. Omit '1' coefficient.
   const sign = imagNum >= 0 ? '+' : '-'
-  const imagCoeff = Math.abs(imagAbs - 1.0) < 1e-12 ? 'i' : `${formatNumber(imagAbs, digits)}i`
+  const imagCoeff = Math.abs(imagAbs - 1.0) < 1e-12 ? 'i' : `${formatNumber(imagAbs, precision)}i`
   return `${real}${sign}${imagCoeff}`
 }
 

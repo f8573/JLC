@@ -3,6 +3,7 @@ import MatrixAnalysisLayout from '../components/layout/MatrixAnalysisLayout'
 import Breadcrumb from '../components/results/Breadcrumb'
 import MatrixActionBar, { MatrixFooterBar } from '../components/matrix/MatrixActionBar'
 import { useDiagnostics } from '../hooks/useDiagnostics'
+import { usePrecisionUpdate } from '../hooks/usePrecisionUpdate'
 import { formatPercent } from '../utils/format'
 
 /**
@@ -36,6 +37,9 @@ function StatusRow({ label, active, detail }) {
  * @param {string} props.matrixString - Serialized matrix payload from the URL.
  */
 export default function MatrixStructurePage({ matrixString }) {
+  // Subscribe to precision changes
+  usePrecisionUpdate()
+  
   const { diagnostics } = useDiagnostics(matrixString)
 
   const basicStructure = [

@@ -11,8 +11,8 @@ import React from 'react'
  */
 export default function IconButton({ icon, onClick, className = '', variant = 'ghost' }) {
   const variants = {
-    ghost: 'p-2 text-slate-gray hover:text-primary hover:bg-purple-light rounded-md transition-all',
-    small: 'size-7 rounded bg-white hover:bg-purple-light border border-border-color flex items-center justify-center transition-colors text-slate-400 hover:text-primary'
+    ghost: 'p-2 text-slate-gray dark:text-slate-400 hover:text-primary hover:bg-purple-light dark:hover:bg-primary/20 rounded-md transition-all',
+    small: 'size-7 rounded bg-white dark:bg-slate-700 hover:bg-purple-light dark:hover:bg-primary/20 border border-border-color dark:border-slate-600 flex items-center justify-center transition-colors text-slate-400 dark:text-slate-500 hover:text-primary'
   }
 
   return (

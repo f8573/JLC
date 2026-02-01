@@ -4,6 +4,7 @@ import Breadcrumb from '../components/results/Breadcrumb'
 import MatrixLatex from '../components/matrix/MatrixLatex'
 import MatrixActionBar, { MatrixFooterBar } from '../components/matrix/MatrixActionBar'
 import { useDiagnostics } from '../hooks/useDiagnostics'
+import { usePrecisionUpdate } from '../hooks/usePrecisionUpdate'
 import { formatComplex, formatNumber, formatDefiniteness } from '../utils/format'
 import Latex from '../components/ui/Latex'
 import { computeSpectralSeverity, computePerEigenvalueSeverity, SEVERITY_COLORS, computeNonOrthogonalEigenvectors, EIGEN_DISPLAY_MODES } from '../utils/spectralSeverity'
@@ -54,6 +55,9 @@ function parseComplexEntry(entry) {
 }
 
 export default function MatrixSpectralPage({ matrixString }) {
+  // Subscribe to precision changes
+  usePrecisionUpdate()
+  
   const { diagnostics } = useDiagnostics(matrixString)
   const [mode, setMode] = useState(EIGEN_DISPLAY_MODES.UNIQUE_NO_REPS)
   
@@ -654,7 +658,7 @@ export default function MatrixSpectralPage({ matrixString }) {
                               <div className="text-[10px] text-slate-400 mb-1">Eigenspace (dim: {eigenbasisDim})</div>
                               {eigenbasisAsColumns ? (
                                 <div style={multiplicityMismatch ? { color: evSeverity.color } : {}}>
-                                  <MatrixLatex data={collapseComplexPairs(eigenbasisAsColumns)} className="text-sm math-font" />
+                                  <MatrixLatex data={collapseComplexPairs(eigenbasisAsColumns)} className="text-sm math-font" precision={3} />
                                 </div>
                               ) : (
                                 <div className="text-xs" style={{ color: SEVERITY_COLORS.critical }}>—</div>
@@ -732,13 +736,7 @@ export default function MatrixSpectralPage({ matrixString }) {
                 </div>
               ) : (
               <div className="py-4 px-4" style={criticalArtifacts.eigenvectorMatrix ? { boxShadow: '0 0 0 2px rgba(220,38,38,0.08)', borderRadius: 8 } : {}}>
-                <MatrixLatex data={eigenvectorsDisplay} className="math-font text-sm font-medium" highlightColumns={nonOrthogonalIndices.size > 0 ? nonOrthogonalIndices : null} />
-                {nonOrthogonalIndices.size > 0 && (
-                  <div className="text-xs text-blue-600 mt-2 text-center italic">
-                    <span className="material-symbols-outlined text-[14px] align-middle mr-1">info</span>
-                    Blue columns indicate non-orthogonal eigenvectors
-                  </div>
-                )}
+                <MatrixLatex data={eigenvectorsDisplay} className="math-font text-sm font-medium" precision={3} />
               </div>
               )}
             </div>
@@ -780,7 +778,7 @@ export default function MatrixSpectralPage({ matrixString }) {
               <div className="text-[10px] text-slate-400 mb-2">P (eigenvector matrix)</div>
               {(diagP || inferredDiagP) ? (
                 <div style={criticalArtifacts.eigendecomposition ? { boxShadow: '0 0 0 2px rgba(220,38,38,0.08)', borderRadius: 6 } : {}}>
-                  <MatrixLatex data={matrixToDisplay(diagP || inferredDiagP)} className="math-font text-sm" />
+                  <MatrixLatex data={matrixToDisplay(diagP || inferredDiagP)} className="math-font text-sm" precision={3} />
                 </div>
               ) : (
                 <div className="text-xs" style={{ color: SEVERITY_COLORS.critical }}>Eigenvector matrix unavailable.</div>
@@ -790,7 +788,7 @@ export default function MatrixSpectralPage({ matrixString }) {
               <div className="text-[10px] text-slate-400 mb-2">D (diagonal eigenvalue matrix)</div>
               {(diagD || inferredDiagD) ? (
                 <div style={criticalArtifacts.eigendecomposition ? { boxShadow: '0 0 0 2px rgba(220,38,38,0.08)', borderRadius: 6 } : {}}>
-                  <MatrixLatex data={matrixToDisplay(diagD || inferredDiagD)} className="math-font text-sm" />
+                  <MatrixLatex data={matrixToDisplay(diagD || inferredDiagD)} className="math-font text-sm" precision={3} />
                 </div>
               ) : (
                 <div className="text-xs" style={{ color: SEVERITY_COLORS.critical }}>Diagonal matrix unavailable.</div>
@@ -800,7 +798,7 @@ export default function MatrixSpectralPage({ matrixString }) {
               <div className="text-[10px] text-slate-400 mb-2"><Latex tex={'P^{-1}'} /> (inverse eigenvector matrix)</div>
               {(diagPInverse || inferredDiagPInverse) ? (
                 <div style={criticalArtifacts.eigendecomposition ? { boxShadow: '0 0 0 2px rgba(220,38,38,0.08)', borderRadius: 6 } : {}}>
-                  <MatrixLatex data={matrixToDisplay(diagPInverse || inferredDiagPInverse)} className="math-font text-sm" />
+                  <MatrixLatex data={matrixToDisplay(diagPInverse || inferredDiagPInverse)} className="math-font text-sm" precision={3} />
                 </div>
               ) : (
                 <div className="text-xs" style={{ color: SEVERITY_COLORS.critical }}>Inverse matrix unavailable.</div>
@@ -809,7 +807,7 @@ export default function MatrixSpectralPage({ matrixString }) {
             <div>
               <div className="text-[10px] text-slate-400 mb-2">Reconstruction <Latex tex={'PDP^{-1}'} /></div>
               {diagProductDisplay ? (
-                <MatrixLatex data={diagProductDisplay} className="math-font text-sm" />
+                <MatrixLatex data={diagProductDisplay} className="math-font text-sm" precision={2} />
               ) : (
                 <div className="text-xs" style={{ color: SEVERITY_COLORS.critical }}>Reconstruction unavailable.</div>
               )}
