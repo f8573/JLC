@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -28,6 +29,10 @@ import net.faulj.matrix.MatrixAccuracyValidator;
 import net.faulj.scalar.Complex;
 import net.faulj.vector.Vector;
 import net.faulj.visualizer.MatrixLatexExporter;
+import java.util.Objects;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @RestController
 @CrossOrigin(origins = "http://localhost:5173")
@@ -37,6 +42,137 @@ import net.faulj.visualizer.MatrixLatexExporter;
 public class ApiController {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+    // SSE emitters for streaming status updates to connected frontend clients
+    private final CopyOnWriteArrayList<SseEmitter> sseEmitters = new CopyOnWriteArrayList<>();
+    private volatile String currentStatus = "SERVICE_INTERRUPTION";
+    private volatile Map<String, Object> currentCpu = cpuTemplate("offline");
+    private final ExecutorService sseExecutor = Executors.newSingleThreadExecutor();
+
+    /**
+     * Notify connected SSE clients only when the status or CPU state changes.
+     */
+    private void maybeNotifyStatus(String status, Map<String, Object> cpu) {
+        if (status == null) status = "SERVICE_INTERRUPTION";
+        if (cpu == null) cpu = cpuTemplate("offline");
+        boolean changed = false;
+        try {
+            if (!Objects.equals(status, currentStatus)) changed = true;
+            else if (!Objects.equals(cpu.get("state"), currentCpu.get("state"))) changed = true;
+        } catch (Exception ex) {
+            changed = true;
+        }
+        if (!changed) return;
+
+        currentStatus = status;
+        currentCpu = cpu;
+
+        // push update to all emitters asynchronously
+        sseExecutor.submit(() -> {
+            List<SseEmitter> toRemove = new ArrayList<>();
+            for (SseEmitter emitter : sseEmitters) {
+                try {
+                    emitter.send(SseEmitter.event().name("status").data(Map.of("status", currentStatus, "cpu", currentCpu)));
+                } catch (Exception ex) {
+                    toRemove.add(emitter);
+                }
+            }
+            sseEmitters.removeAll(toRemove);
+        });
+    }
+
+    private static Map<String, Object> cpuTemplate(String state) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("name", "CPU");
+        m.put("gflops", null);
+        m.put("state", state);
+        return m;
+    }
+
+    public ApiController() {
+        // At startup assume service is available; set ONLINE so front-end sees service
+        maybeNotifyStatus("ONLINE", cpuTemplate("online"));
+        // Run a lightweight CPU benchmark in background to estimate GFLOPs
+        runCpuBenchmark();
+    }
+
+    private void runCpuBenchmark() {
+        sseExecutor.submit(() -> {
+            try {
+                // small-ish size to run quickly but still exercise kernels
+                final int n = 300;
+                final int iterations = 3;
+
+                // approximate flop counts per run (householder/algorithms):
+                // QR (Householder): ~ 2/3 * n^3
+                // Hessenberg reduction (Householder): ~ 10/3 * n^3
+
+                List<Double> hessTimes = new ArrayList<>();
+                List<Double> qrTimes = new ArrayList<>();
+
+                // Hessenberg test (per-iteration timing)
+                for (int i = 0; i < iterations; i++) {
+                    long it0 = System.nanoTime();
+                    Matrix m = Matrix.randomMatrix(n, n);
+                    m.Hessenberg();
+                    long it1 = System.nanoTime();
+                    double itSec = (it1 - it0) / 1e9;
+                    hessTimes.add(itSec);
+                }
+                double secsHess = hessTimes.stream().mapToDouble(Double::doubleValue).sum();
+                double flopsPerHess = (10.0 / 3.0) * Math.pow(n, 3);
+                double gflopsHess = (flopsPerHess * iterations) / secsHess / 1e9;
+
+                // QR test (per-iteration timing)
+                for (int i = 0; i < iterations; i++) {
+                    long it0 = System.nanoTime();
+                    Matrix m = Matrix.randomMatrix(n, n);
+                    m.QR();
+                    long it1 = System.nanoTime();
+                    double itSec = (it1 - it0) / 1e9;
+                    qrTimes.add(itSec);
+                }
+                double secsQR = qrTimes.stream().mapToDouble(Double::doubleValue).sum();
+                double flopsPerQR = (2.0 / 3.0) * Math.pow(n, 3);
+                double gflopsQR = (flopsPerQR * iterations) / secsQR / 1e9;
+
+                double avg = (gflopsHess + gflopsQR) / 2.0;
+
+                // Verbose console output for debugging
+                System.out.println("[CPU BENCHMARK] size=" + n + " iterations=" + iterations);
+                System.out.println("[CPU BENCHMARK] hessenberg times (s): " + hessTimes + " total=" + secsHess + " avgGFLOPS=" + gflopsHess);
+                System.out.println("[CPU BENCHMARK] qr times (s): " + qrTimes + " total=" + secsQR + " avgGFLOPS=" + gflopsQR);
+                System.out.println("[CPU BENCHMARK] averaged GFLOPS=" + avg);
+
+                Map<String, Object> bench = new LinkedHashMap<>();
+                bench.put("n", n);
+                bench.put("iterations", iterations);
+                bench.put("hessenbergTimes", hessTimes);
+                bench.put("qrTimes", qrTimes);
+                bench.put("secsHess", secsHess);
+                bench.put("secsQR", secsQR);
+                bench.put("gflopsHess", gflopsHess);
+                bench.put("gflopsQR", gflopsQR);
+                bench.put("gflopsAvg", avg);
+
+                Map<String, Object> cpu = cpuTemplate("online");
+                cpu.put("gflops", avg);
+                cpu.put("benchmark", bench);
+                maybeNotifyStatus("ONLINE", cpu);
+            } catch (Throwable ex) {
+                // verbose error reporting but avoid crashing startup
+                System.err.println("[CPU BENCHMARK] failed: " + ex.getMessage());
+                ex.printStackTrace();
+                try {
+                    Map<String, Object> cpu = cpuTemplate("offline");
+                    cpu.put("gflops", null);
+                    Map<String, Object> err = new LinkedHashMap<>();
+                    err.put("error", ex.getMessage());
+                    cpu.put("benchmarkError", err);
+                    maybeNotifyStatus("SERVICE_INTERRUPTION", cpu);
+                } catch (Exception ignore) {}
+            }
+        });
+    }
 
     /**
      * Health check endpoint.
@@ -46,6 +182,26 @@ public class ApiController {
     @GetMapping("/api/ping")
     public Map<String, String> ping() {
         return Map.of("message", "pong from Java backend", "version", "1.0");
+    }
+
+    /**
+     * SSE stream that emits status updates only when they change.
+     */
+    @GetMapping("/api/diagnostics/stream")
+    public SseEmitter streamDiagnostics() {
+        SseEmitter emitter = new SseEmitter(0L); // never timeout by default
+        sseEmitters.add(emitter);
+
+        // Send current status immediately
+        try {
+            emitter.send(SseEmitter.event().name("status").data(Map.of("status", currentStatus, "cpu", currentCpu)));
+        } catch (Exception ignored) {
+        }
+
+        emitter.onCompletion(() -> sseEmitters.remove(emitter));
+        emitter.onTimeout(() -> sseEmitters.remove(emitter));
+        emitter.onError((ex) -> sseEmitters.remove(emitter));
+        return emitter;
     }
 
     /**
@@ -95,6 +251,9 @@ public class ApiController {
         double[][] data = objectMapper.convertValue(matrixObj, double[][].class);
         Matrix A = new Matrix(data);
         MatrixDiagnostics diagnostics = DiagnosticMetrics.analyze(A);
+        // Update and notify status: successful diagnostics -> ONLINE / CPU online
+        Map<String, Object> cpu = cpuTemplate("online");
+        maybeNotifyStatus("ONLINE", cpu);
         return ResponseEntity.ok(buildDiagnosticsResponse(diagnostics));
     }
 
@@ -105,7 +264,7 @@ public class ApiController {
      * @return diagnostics response
      */
     @GetMapping("/api/diagnostics")
-    public ResponseEntity<Map<String, Object>> diagnosticsGet(@RequestParam("matrix") String matrixJson) {
+    public ResponseEntity<Map<String, Object>> diagnosticsGet(@RequestParam(value = "matrix", required = false) String matrixJson) {
         if (matrixJson == null || matrixJson.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("error", "matrix query param is required"));
         }
@@ -113,6 +272,8 @@ public class ApiController {
             double[][] data = objectMapper.readValue(matrixJson, double[][].class);
             Matrix A = new Matrix(data);
             MatrixDiagnostics diagnostics = DiagnosticMetrics.analyze(A);
+            Map<String, Object> cpu = cpuTemplate("online");
+            maybeNotifyStatus("ONLINE", cpu);
             return ResponseEntity.ok(buildDiagnosticsResponse(diagnostics));
         } catch (JsonProcessingException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", "invalid matrix JSON", "details", ex.getMessage()));

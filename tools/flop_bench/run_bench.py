@@ -85,7 +85,7 @@ def main():
     parser.add_argument('--iter-list', type=str, default=None, help='Comma-separated list of iteration counts to sweep (overrides other iteration settings)')
     parser.add_argument('--cpu-iterations', type=int, default=1, help='Number of iterations to run for CPU tests (default 1)')
     parser.add_argument('--gpu-iter-start', type=int, default=16, help='Starting iteration count for GPU (power-of-two sequence)')
-    parser.add_argument('--gpu-iter-max', type=int, default=262144, help='Maximum iteration count for GPU (power-of-two sequence)')
+    parser.add_argument('--gpu-iter-max', type=int, default=4096, help='Maximum iteration count for GPU (power-of-two sequence)')
     parser.add_argument('--threads', '-t', nargs='*', type=int)
     parser.add_argument('--no-cuda', action='store_true')
     parser.add_argument('--ccbin', type=str, default=None, help='Path to host compiler for nvcc (cl.exe)')
