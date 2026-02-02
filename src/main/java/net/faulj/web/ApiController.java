@@ -4,7 +4,11 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -29,10 +33,6 @@ import net.faulj.matrix.MatrixAccuracyValidator;
 import net.faulj.scalar.Complex;
 import net.faulj.vector.Vector;
 import net.faulj.visualizer.MatrixLatexExporter;
-import java.util.Objects;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 @RestController
 @CrossOrigin(origins = "http://localhost:5173")
