@@ -109,7 +109,16 @@ public class ApiController {
                 List<Double> hessTimes = new ArrayList<>();
                 List<Double> qrTimes = new ArrayList<>();
 
-                // Hessenberg test (per-iteration timing)
+                // Hessenberg test: one warmup then measured iterations, printing per-iteration
+                // single warmup run
+                {
+                    Matrix mw = Matrix.randomMatrix(n, n);
+                    long w0 = System.nanoTime();
+                    mw.Hessenberg();
+                    long w1 = System.nanoTime();
+                    double wsec = (w1 - w0) / 1e9;
+                    // optionally could log warmup; we skip to stream only per-iteration
+                }
                 for (int i = 0; i < iterations; i++) {
                     long it0 = System.nanoTime();
                     Matrix m = Matrix.randomMatrix(n, n);
@@ -117,12 +126,22 @@ public class ApiController {
                     long it1 = System.nanoTime();
                     double itSec = (it1 - it0) / 1e9;
                     hessTimes.add(itSec);
+                    double flopsPerHess = (10.0 / 3.0) * Math.pow(n, 3);
+                    double gflopsIter = flopsPerHess / itSec / 1e9;
+                    System.out.printf("[ITER] HESS n=%d run=%d elapsed=%.6fs gflops=%.6f\n", n, i+1, itSec, gflopsIter);
                 }
                 double secsHess = hessTimes.stream().mapToDouble(Double::doubleValue).sum();
                 double flopsPerHess = (10.0 / 3.0) * Math.pow(n, 3);
                 double gflopsHess = (flopsPerHess * iterations) / secsHess / 1e9;
 
-                // QR test (per-iteration timing)
+                // QR test: one warmup then measured iterations, printing per-iteration
+                {
+                    Matrix mw = Matrix.randomMatrix(n, n);
+                    long w0 = System.nanoTime();
+                    mw.QR();
+                    long w1 = System.nanoTime();
+                    double wsec = (w1 - w0) / 1e9;
+                }
                 for (int i = 0; i < iterations; i++) {
                     long it0 = System.nanoTime();
                     Matrix m = Matrix.randomMatrix(n, n);
@@ -130,18 +149,15 @@ public class ApiController {
                     long it1 = System.nanoTime();
                     double itSec = (it1 - it0) / 1e9;
                     qrTimes.add(itSec);
+                    double flopsPerQR = (2.0 / 3.0) * Math.pow(n, 3);
+                    double gflopsIter = flopsPerQR / itSec / 1e9;
+                    System.out.printf("[ITER] QR n=%d run=%d elapsed=%.6fs gflops=%.6f\n", n, i+1, itSec, gflopsIter);
                 }
                 double secsQR = qrTimes.stream().mapToDouble(Double::doubleValue).sum();
                 double flopsPerQR = (2.0 / 3.0) * Math.pow(n, 3);
                 double gflopsQR = (flopsPerQR * iterations) / secsQR / 1e9;
 
                 double avg = (gflopsHess + gflopsQR) / 2.0;
-
-                // Verbose console output for debugging
-                System.out.println("[CPU BENCHMARK] size=" + n + " iterations=" + iterations);
-                System.out.println("[CPU BENCHMARK] hessenberg times (s): " + hessTimes + " total=" + secsHess + " avgGFLOPS=" + gflopsHess);
-                System.out.println("[CPU BENCHMARK] qr times (s): " + qrTimes + " total=" + secsQR + " avgGFLOPS=" + gflopsQR);
-                System.out.println("[CPU BENCHMARK] averaged GFLOPS=" + avg);
 
                 Map<String, Object> bench = new LinkedHashMap<>();
                 bench.put("n", n);

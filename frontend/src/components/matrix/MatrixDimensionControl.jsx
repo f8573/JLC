@@ -19,12 +19,14 @@ export default function MatrixDimensionControl({ rows, cols, onDimensionChange }
         <NumberInput
           label="rows"
           value={rows}
+          max={512}
           onChange={(e) => onDimensionChange(e.target.value, cols)}
         />
         <span className="text-sm font-bold">×</span>
         <NumberInput
           label="cols"
           value={cols}
+          max={512}
           onChange={(e) => onDimensionChange(rows, e.target.value)}
         />
       </div>

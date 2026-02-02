@@ -20,6 +20,8 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
   const [computeExpanded, setComputeExpanded] = useState(true)
   const [diagnostics, setDiagnostics] = useState(null)
   const [running, setRunning] = useState(false)
+  const [benchmarkRunning, setBenchmarkRunning] = useState(false)
+  const [benchmarkProgress, setBenchmarkProgress] = useState({ complete: 0, total: 0, mode: 'medium' })
   const [showInfoModal, setShowInfoModal] = useState(false)
 
   useEffect(() => {
@@ -43,7 +45,28 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
   async function fetchDiagnostics() {
     setRunning(true)
     try {
-      // POST a small sample identity matrix so backend returns diagnostics
+      // First, try to read the local benchmark results produced by the
+      // `FlopScalingTest` (Algorithm_FLOP_results at repo root). The file is
+      // expected to contain lines like:
+      // HouseholderQR_max_GFLOPs=1.738292
+      // Hessenberg_max_GFLOPs=5.325109
+      // We use the larger of these values as the reported CPU GFLOPs.
+      const resFile = await fetch('/Algorithm_FLOP_results');
+      if (resFile && resFile.ok) {
+        const txt = await resFile.text();
+        const qrMatch = txt.match(/HouseholderQR_max_GFLOPs=([0-9.+-eE]+)/);
+        const hessMatch = txt.match(/Hessenberg_max_GFLOPs=([0-9.+-eE]+)/);
+        const qr = qrMatch ? parseFloat(qrMatch[1]) : null;
+        const hess = hessMatch ? parseFloat(hessMatch[1]) : null;
+        const gflops = Math.max(qr || 0, hess || 0) || null;
+        setDiagnostics({
+          status: gflops ? 'ONLINE' : 'SERVICE_INTERRUPTION',
+          cpu: { name: 'LocalBenchmark', gflops: gflops, state: gflops ? 'online' : 'offline' }
+        })
+        return
+      }
+
+      // Fallback: POST a small sample identity matrix so backend returns diagnostics
       const sample = { matrix: [[1,0,0],[0,1,0],[0,0,1]] }
       const res = await fetch('/api/diagnostics', {
         method: 'POST',
@@ -89,6 +112,90 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
   const cpuState = diagnostics && diagnostics.cpu && diagnostics.cpu.state ? String(diagnostics.cpu.state).toLowerCase() : null
   const cpuColor = cpuState === 'online' ? 'emerald' : (cpuState === 'offline' ? 'rose' : 'amber')
 
+  const BENCHMARK_SIZES = [64, 128, 256, 512]
+
+  function getBenchmarkMode() {
+    const stored = (localStorage.getItem('benchmarkMode') || 'medium').toLowerCase()
+    if (stored === 'fast' || stored === 'medium' || stored === 'high-precision') return stored
+    return 'medium'
+  }
+
+  function iterationsForSize(size, mode) {
+    if (mode === 'fast') return 5
+    if (mode === 'medium') return 10
+    if (mode === 'high-precision') {
+      if (size <= 128) return 100
+      if (size <= 256) return 60
+      return 30
+    }
+    return 10
+  }
+
+  function seededRandom(seed) {
+    let s = seed % 2147483647
+    if (s <= 0) s += 2147483646
+    return () => {
+      s = (s * 16807) % 2147483647
+      return (s - 1) / 2147483646
+    }
+  }
+
+  function buildRandomMatrix(n, seed) {
+    const rand = seededRandom(seed)
+    const matrix = new Array(n)
+    for (let i = 0; i < n; i++) {
+      const row = new Array(n)
+      for (let j = 0; j < n; j++) row[j] = rand() - 0.5
+      matrix[i] = row
+    }
+    return matrix
+  }
+
+  function quantile(sorted, q) {
+    const pos = (sorted.length - 1) * q
+    const base = Math.floor(pos)
+    const rest = pos - base
+    if (sorted[base + 1] !== undefined) {
+      return sorted[base] + rest * (sorted[base + 1] - sorted[base])
+    }
+    return sorted[base]
+  }
+
+  function removeOutliers(values) {
+    if (!values || values.length < 4) return values ? values.slice() : []
+    const sorted = values.slice().sort((a, b) => a - b)
+    const q1 = quantile(sorted, 0.25)
+    const q3 = quantile(sorted, 0.75)
+    const iqr = q3 - q1
+    const lower = q1 - 1.5 * iqr
+    const upper = q3 + 1.5 * iqr
+    return sorted.filter(v => v >= lower && v <= upper)
+  }
+
+  function average(values) {
+    if (!values || values.length === 0) return null
+    const sum = values.reduce((acc, v) => acc + v, 0)
+    return sum / values.length
+  }
+
+  function estimateFlopsPerIteration(n) {
+    const qr = (2 / 3) * n * n * n
+    const lu = (2 / 3) * n * n * n
+    const svd = 4 * n * n * n
+    const schur = (10 / 3) * n * n * n
+    return qr + lu + svd + schur
+  }
+
+  function validateDecompositions(payload) {
+    const primary = payload?.matrixDecompositions?.primaryDecompositions
+    const similarity = payload?.matrixDecompositions?.similarityAndSpectral
+    const qr = payload?.qr || primary?.qr
+    const lu = payload?.lu || primary?.lu
+    const svd = payload?.svd || primary?.svd
+    const schur = payload?.schurDecomposition || similarity?.schurDecomposition
+    return !!(qr && lu && svd && schur)
+  }
+
   function formatFlopsFromGflops(g) {
     if (g === null || g === undefined) return { value: '—', unit: 'FLOPs' }
     // backend provides GFLOPs (g)
@@ -123,6 +230,130 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
     return `flex items-center gap-3 px-3 py-2 ml-4 rounded-lg transition-colors group ${
       active === id ? 'bg-primary/10 text-primary' : 'hover:bg-primary/5 dark:hover:bg-primary/10 text-slate-600 dark:text-slate-300'
     }`
+  }
+
+  // Trigger the frontend benchmark (SVD/Schur/QR/LU) with warm-up + outlier removal
+  async function runSystemBenchmark() {
+    const mode = getBenchmarkMode()
+    const totalIterations = BENCHMARK_SIZES.reduce((sum, size) => sum + iterationsForSize(size, mode), 0)
+    setBenchmarkProgress({ complete: 0, total: totalIterations, mode })
+    setBenchmarkRunning(true)
+
+    console.groupCollapsed('[Benchmark] runSystemBenchmark')
+    console.info('[Benchmark] mode:', mode)
+    console.info('[Benchmark] sizes:', BENCHMARK_SIZES)
+    console.info('[Benchmark] totalIterations:', totalIterations)
+
+    try {
+      const perSizeResults = []
+      let totalFlops = 0
+      let totalTimeSec = 0
+
+      for (let sIdx = 0; sIdx < BENCHMARK_SIZES.length; sIdx++) {
+        const size = BENCHMARK_SIZES[sIdx]
+        const matrix = buildRandomMatrix(size, 1337 + size)
+
+        console.groupCollapsed(`[Benchmark] size=${size} (${sIdx + 1}/${BENCHMARK_SIZES.length})`)
+        console.info('[Benchmark] warmup: start')
+
+        // Warm-up run (not counted)
+        await fetch('/api/diagnostics', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ matrix })
+        })
+
+        console.info('[Benchmark] warmup: done')
+
+        const iterations = iterationsForSize(size, mode)
+        const durations = []
+        for (let i = 0; i < iterations; i++) {
+          console.debug(`[Benchmark] iter ${i + 1}/${iterations} size=${size}: request start`)
+          const t0 = performance.now()
+          const res = await fetch('/api/diagnostics', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ matrix })
+          })
+          console.debug(`[Benchmark] iter ${i + 1}/${iterations} size=${size}: status=${res.status}`)
+          if (!res.ok) throw new Error('benchmark-failed')
+          const json = await res.json()
+          console.debug(`[Benchmark] iter ${i + 1}/${iterations} size=${size}: payload keys`, Object.keys(json || {}))
+          if (!validateDecompositions(json)) throw new Error('benchmark-missing-decompositions')
+          const t1 = performance.now()
+          const durationMs = t1 - t0
+          durations.push(durationMs)
+          console.debug(`[Benchmark] iter ${i + 1}/${iterations} size=${size}: durationMs=${durationMs.toFixed(2)}`)
+          setBenchmarkProgress((prev) => ({ ...prev, complete: Math.min(prev.complete + 1, prev.total) }))
+        }
+
+        const filtered = removeOutliers(durations)
+        const avgMs = average(filtered)
+        const minMs = filtered.length ? Math.min(...filtered) : null
+        const maxMs = filtered.length ? Math.max(...filtered) : null
+        const flopsPerIter = estimateFlopsPerIteration(size)
+
+        console.info('[Benchmark] size summary', {
+          size,
+          iterations,
+          samples: durations.length,
+          samplesUsed: filtered.length,
+          avgMs,
+          minMs,
+          maxMs,
+          flopsPerIter
+        })
+
+        if (filtered.length > 0) {
+          totalFlops += flopsPerIter * filtered.length
+          totalTimeSec += filtered.reduce((acc, v) => acc + v, 0) / 1000
+        }
+
+        perSizeResults.push({
+          size,
+          iterations,
+          warmup: 1,
+          samples: durations.length,
+          samplesUsed: filtered.length,
+          avgMs,
+          minMs,
+          maxMs
+        })
+
+        console.groupEnd()
+      }
+
+      const gflopsAvg = totalTimeSec > 0 ? (totalFlops / totalTimeSec) / 1e9 : null
+      console.info('[Benchmark] totals', { totalFlops, totalTimeSec, gflopsAvg })
+
+      const cpu = {
+        name: 'FrontendBenchmark',
+        gflops: gflopsAvg,
+        state: 'online',
+        benchmark: {
+          mode,
+          decompositions: ['SVD', 'Schur', 'QR', 'LU'],
+          sizes: BENCHMARK_SIZES,
+          totalIterations,
+          outlierPolicy: 'iqr-1.5',
+          gflopsAvg,
+          results: perSizeResults
+        }
+      }
+
+      setDiagnostics((prev) => ({
+        ...(prev || {}),
+        status: 'ONLINE',
+        cpu
+      }))
+      console.info('[Benchmark] diagnostics updated', cpu)
+    } catch (e) {
+      console.error('[Benchmark] failed', e)
+      setDiagnostics({ status: 'SERVICE_INTERRUPTION', cpu: { name: 'CPU', gflops: null, state: 'offline' } })
+    } finally {
+      console.groupEnd()
+      setBenchmarkRunning(false)
+    }
   }
 
   return (
@@ -376,10 +607,22 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
                 </section>
               </div>
               <div className="p-6 md:px-8 md:pb-8 pt-0 bg-white shrink-0">
-                <button onClick={() => { fetchDiagnostics(); setShowInfoModal(false); }} className="w-full group relative flex items-center justify-center gap-3 bg-primary hover:bg-primary-hover text-white text-base font-bold py-4 rounded-xl shadow-lg shadow-primary/25 transition-all overflow-hidden">
+                <button
+                  onClick={() => { if (!benchmarkRunning) runSystemBenchmark() }}
+                  disabled={benchmarkRunning}
+                  className={`w-full group relative flex items-center justify-center gap-3 text-white text-base font-bold py-4 rounded-xl shadow-lg transition-all overflow-hidden ${benchmarkRunning ? 'bg-emerald-600' : 'bg-primary hover:bg-primary-hover shadow-primary/25'}`}
+                >
                   <span className="absolute inset-0 w-full h-full bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000"></span>
+                  {benchmarkRunning && (
+                    <span className="absolute bottom-0 left-0 h-1 w-full bg-white/20">
+                      <span
+                        className="block h-full bg-emerald-400 transition-all"
+                        style={{ width: `${benchmarkProgress.total ? Math.round((benchmarkProgress.complete / benchmarkProgress.total) * 100) : 0}%` }}
+                      ></span>
+                    </span>
+                  )}
                   <span className="material-symbols-outlined">speed</span>
-                  Run System Benchmark
+                  {benchmarkRunning ? `Benchmarking (${benchmarkProgress.complete}/${benchmarkProgress.total})` : 'Run System Benchmark'}
                 </button>
               </div>
             </div>
