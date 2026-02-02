@@ -26,6 +26,16 @@ public final class HouseholderQR {
     public static QRResult decompose(Matrix A) { return decompose(A, false); }
     public static QRResult decomposeThin(Matrix A) { return decompose(A, true); }
 
+    /**
+     * Factorize A using Householder QR without forming Q or R.
+     * Useful for benchmarking to reduce allocation pressure.
+     *
+     * @param A matrix to factorize
+     */
+    public static void factorize(Matrix A) {
+        factorizeOnly(A);
+    }
+
     private static QRResult decompose(Matrix A, boolean thin) {
         if (A == null) throw new IllegalArgumentException("Matrix must not be null");
         if (!A.isReal()) throw new UnsupportedOperationException("Householder QR requires real matrix");
@@ -52,6 +62,21 @@ public final class HouseholderQR {
         Matrix Q = fromColumnMajor(QT, m, qRows);
 
         return new QRResult(A, Q, R);
+    }
+
+    private static void factorizeOnly(Matrix A) {
+        if (A == null) throw new IllegalArgumentException("Matrix must not be null");
+        if (!A.isReal()) throw new UnsupportedOperationException("Householder QR requires real matrix");
+
+        final int m = A.getRowCount();
+        final int n = A.getColumnCount();
+        final int kMax = Math.min(m, n);
+
+        double[] AT = toColumnMajor(A.getRawData(), m, n);
+        double[] tau = new double[kMax];
+        Workspace ws = new Workspace(m, n);
+
+        factorizeBlocked(AT, tau, m, n, kMax, ws);
     }
 
     /**

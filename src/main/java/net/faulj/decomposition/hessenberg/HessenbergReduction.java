@@ -40,14 +40,47 @@ public class HessenbergReduction {
 
 		return decomposeOptimized(A);
 	}
+
+	/**
+	 * Reduce a matrix to Hessenberg form without forming Q.
+	 * Useful for benchmarking to reduce allocation pressure.
+	 *
+	 * @param A matrix to reduce
+	 * @return Hessenberg matrix H
+	 */
+	public static Matrix reduceToHessenberg(Matrix A) {
+		if (A == null) {
+			throw new IllegalArgumentException("Matrix must not be null");
+		}
+		if (!A.isReal()) {
+			throw new UnsupportedOperationException("Hessenberg reduction requires a real-valued matrix");
+		}
+		if (!A.isSquare()) {
+			throw new ArithmeticException("Matrix must be square to compute Hessenberg form");
+		}
+		int n = A.getRowCount();
+		if (n <= 2) {
+			return A.copy();
+		}
+
+		ReductionState state = computeHessenberg(A, false);
+		return state.H;
+	}
 	
 	private static HessenbergResult decomposeOptimized(Matrix A) {
+		ReductionState state = computeHessenberg(A, true);
+		int n = state.H.getRowCount();
+		double[] Q = accumulateQBlocked(n, state.tau, state.reflectors);
+		return new HessenbergResult(A, state.H, Matrix.wrap(Q, n, n));
+	}
+
+	private static ReductionState computeHessenberg(Matrix A, boolean storeReflectors) {
 		Matrix H = A.copy();
 		int n = H.getRowCount();
 		double[] h = H.getRawData();
 		
-		double[] allTau = new double[n - 2];
-		double[][] allReflectors = new double[n - 2][];
+		double[] allTau = storeReflectors ? new double[n - 2] : null;
+		double[][] allReflectors = storeReflectors ? new double[n - 2][] : null;
 		
 		int vecLen = SPECIES.length();
 		
@@ -66,7 +99,9 @@ public class HessenbergReduction {
 			}
 			
 			if (sigma <= SAFE_MIN && Math.abs(x0) <= SAFE_MIN) {
-				allTau[k] = 0.0;
+				if (storeReflectors) {
+					allTau[k] = 0.0;
+				}
 				continue;
 			}
 			
@@ -75,12 +110,16 @@ public class HessenbergReduction {
 			double v0 = x0 - beta;
 			
 			if (Math.abs(v0) <= SAFE_MIN) {
-				allTau[k] = 0.0;
+				if (storeReflectors) {
+					allTau[k] = 0.0;
+				}
 				continue;
 			}
 			
 			double tau = 2.0 * v0 * v0 / (sigma + v0 * v0);
-			allTau[k] = tau;
+			if (storeReflectors) {
+				allTau[k] = tau;
+			}
 			
 			h[base] = beta;
 			double invV0 = 1.0 / v0;
@@ -91,7 +130,9 @@ public class HessenbergReduction {
 				v[i] = h[(start + i) * n + k] * invV0;
 			}
 			
-			allReflectors[k] = v;
+			if (storeReflectors) {
+				allReflectors[k] = v;
+			}
 			
 			int numCols = n - k - 1;
 			final int fk = k, fstart = start, flen = len;
@@ -189,10 +230,19 @@ public class HessenbergReduction {
 			}
 		}
 		
-		// Accumulate Q using blocked algorithm
-		double[] Q = accumulateQBlocked(n, allTau, allReflectors);
-		
-		return new HessenbergResult(A, H, Matrix.wrap(Q, n, n));
+		return new ReductionState(H, allTau, allReflectors);
+	}
+
+	private static final class ReductionState {
+		final Matrix H;
+		final double[] tau;
+		final double[][] reflectors;
+
+		ReductionState(Matrix H, double[] tau, double[][] reflectors) {
+			this.H = H;
+			this.tau = tau;
+			this.reflectors = reflectors;
+		}
 	}
 	
 	private static double[] accumulateQBlocked(int n, double[] tau, double[][] reflectors) {

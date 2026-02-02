@@ -20,6 +20,7 @@ function makeEmpty(rows, cols, fill = '0') {
  * @param {string[][] | null} [initialValues=null]
  */
 export function useMatrix(initialRows = 2, initialCols = 2, initialValues = null) {
+  const MAX_DIMENSION = 512
   const [rows, setRows] = useState(initialRows)
   const [cols, setCols] = useState(initialCols)
   const [values, setValues] = useState(() => 
@@ -27,8 +28,8 @@ export function useMatrix(initialRows = 2, initialCols = 2, initialValues = null
   )
 
   const updateDimensions = useCallback((newRows, newCols) => {
-    const r = Math.max(1, Math.min(20, Number(newRows) || 1))
-    const c = Math.max(1, Math.min(20, Number(newCols) || 1))
+    const r = Math.max(1, Math.min(MAX_DIMENSION, Number(newRows) || 1))
+    const c = Math.max(1, Math.min(MAX_DIMENSION, Number(newCols) || 1))
     setRows(r)
     setCols(c)
     setValues((prev) => {
