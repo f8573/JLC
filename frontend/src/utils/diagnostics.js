@@ -279,6 +279,82 @@ function normalizeDiagnostics(resp) {
     if (flat.discreteStability === undefined) flat.discreteStability = spectrumInfo.discreteStability
   }
 
+  // Derive GEMM performance (GFLOPs) for a 512x512 run from any benchmark payloads
+  try {
+    const benchCandidates = []
+    if (resp && typeof resp === 'object') {
+      if (resp.benchmark) benchCandidates.push(resp.benchmark)
+      if (resp.benchmarks) benchCandidates.push(resp.benchmarks)
+      if (resp.cpu && resp.cpu.benchmark) benchCandidates.push(resp.cpu.benchmark)
+      if (resp.cpu && resp.cpu.benchmarks) benchCandidates.push(resp.cpu.benchmarks)
+      if (resp._raw && resp._raw.benchmark) benchCandidates.push(resp._raw.benchmark)
+    }
+
+    let gemmGflops = null
+
+    function inspectArray(arr) {
+      if (!Array.isArray(arr)) return
+      for (const item of arr) {
+        if (!item || typeof item !== 'object') continue
+        const name = (item.op || item.name || item.type || '').toString().toLowerCase()
+        const n = Number(item.n || item.size || item.matrixSize || item.dim || 0) || 0
+        // prefer explicit gflops/flopsPerSec if provided
+        if (/gemm/.test(name) || /matmul|multiply/.test(name)) {
+          if (item.gflops !== undefined && Number.isFinite(Number(item.gflops))) {
+            gemmGflops = Number(item.gflops)
+            return true
+          }
+          if (item.flopsPerSec !== undefined && Number.isFinite(Number(item.flopsPerSec))) {
+            gemmGflops = Number(item.flopsPerSec) / 1e9
+            return true
+          }
+          if (item.ms !== undefined && Number.isFinite(Number(item.ms))) {
+            const size = n || 512
+            const flops = 2 * Math.pow(size, 3)
+            gemmGflops = (flops * 1000) / (Number(item.ms) * 1e9)
+            return true
+          }
+        }
+        // nested result arrays
+        for (const v of Object.values(item)) {
+          if (Array.isArray(v)) {
+            if (inspectArray(v)) return true
+          }
+        }
+      }
+      return false
+    }
+
+    for (const c of benchCandidates) {
+      if (!c) continue
+      if (Array.isArray(c)) {
+        if (inspectArray(c)) break
+      } else if (typeof c === 'object') {
+        // common shapes: { results: [...] } or { runs: [...] }
+        if (inspectArray(c.results || c.runs || c.data || c)) break
+      }
+    }
+
+    // If we didn't find a GEMM-specific measure but there's a generic average, use it as fallback
+    if (gemmGflops === null) {
+      const fallback = resp && resp.cpu && resp.cpu.benchmark && (resp.cpu.benchmark.gflops || resp.cpu.benchmark.gflopsAvg)
+      if (fallback !== undefined && Number.isFinite(Number(fallback))) {
+        gemmGflops = Number(fallback)
+      }
+    }
+
+    if (gemmGflops !== null) {
+      flat.cpu = flat.cpu || {}
+      flat.cpu.benchmark = flat.cpu.benchmark || {}
+      // expose under the existing key UI expects: `gflopsAvg` (value is in GFLOPs)
+      flat.cpu.benchmark.gflopsAvg = gemmGflops
+      // also expose a top-level cpu.gflops for direct consumption
+      flat.cpu.gflops = gemmGflops
+    }
+  } catch (e) {
+    // ignore benchmark extraction errors
+  }
+
   return flat
 }
 

@@ -2,6 +2,9 @@ package net.faulj.decomposition.bidiagonal;
 
 import net.faulj.decomposition.result.BidiagonalizationResult;
 import net.faulj.matrix.Matrix;
+import jdk.incubator.vector.DoubleVector;
+import jdk.incubator.vector.VectorOperators;
+import jdk.incubator.vector.VectorSpecies;
 
 /**
  * Computes the bidiagonal decomposition of a rectangular matrix using Householder reflections.
@@ -105,6 +108,14 @@ import net.faulj.matrix.Matrix;
  *   <li>Detects and handles rank-deficient matrices gracefully</li>
  * </ul>
  *
+ * <h2>EJML-inspired optimizations:</h2>
+ * <ul>
+ *   <li>Raw array access instead of Matrix.get/set</li>
+ *   <li>SIMD vectorization for Householder applications</li>
+ *   <li>Max-element normalization for numerical stability</li>
+ *   <li>Efficient skip of zero-norm columns/rows</li>
+ * </ul>
+ *
  * @author JLC Development Team
  * @version 1.0
  * @since 1.0
@@ -114,6 +125,26 @@ import net.faulj.matrix.Matrix;
  */
 public class Bidiagonalization {
     private static final double TOL = 1e-12;
+    private static final double SAFE_MIN = Double.MIN_NORMAL;
+    private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
+    private static final int LANE_SIZE = SPECIES.length();
+    // LAPACK: use dgebrd-style blocked algorithm for larger matrices
+    private static final int BLOCK_THRESHOLD = 128;
+
+    // ThreadLocal workspace to avoid allocations in hot paths
+    private static final ThreadLocal<HouseholderWorkspace> HH_WS =
+            ThreadLocal.withInitial(HouseholderWorkspace::new);
+
+    private static final class HouseholderWorkspace {
+        double[] dotBuffer = new double[4096];
+
+        double[] ensureDotBuffer(int size) {
+            if (dotBuffer.length < size) {
+                dotBuffer = new double[size];
+            }
+            return dotBuffer;
+        }
+    }
 
     /**
      * Compute the bidiagonal decomposition of a matrix.
@@ -141,6 +172,7 @@ public class Bidiagonalization {
 
     /**
      * Compute the upper bidiagonal form for matrices with m &ge; n.
+     * Uses raw array access and SIMD for optimal performance.
      *
      * @param A matrix to decompose
      * @return bidiagonalization result
@@ -148,138 +180,243 @@ public class Bidiagonalization {
     private BidiagonalizationResult decomposeUpper(Matrix A) {
         int m = A.getRowCount();
         int n = A.getColumnCount();
-        net.faulj.matrix.Matrix B = A.copy();
-        net.faulj.matrix.Matrix U = net.faulj.matrix.Matrix.Identity(m);
-        net.faulj.matrix.Matrix V = net.faulj.matrix.Matrix.Identity(n);
+
+        // Use raw arrays for faster access
+        double[] b = A.copy().getRawData();
+        double[] u = new double[m * m];
+        double[] v = new double[n * n];
+
+        // Initialize U and V as identity
+        for (int i = 0; i < m; i++) {
+            u[i * m + i] = 1.0;
+        }
+        for (int i = 0; i < n; i++) {
+            v[i * n + i] = 1.0;
+        }
 
         int limit = Math.min(m, n);
+
+        // Workspace for Householder vectors
+        double[] vCol = new double[m];
+        double[] vRow = new double[n];
+
         for (int k = 0; k < limit; k++) {
+            // ===== Column Householder =====
             int len = m - k;
-            double[] x = new double[len];
-            for (int i = 0; i < len; i++) {
-                x[i] = B.get(k + i, k);
+
+            // LAPACK dlarfg-style: faster scaled norm computation
+            double x0 = b[k * n + k];
+            double scale = Math.abs(x0);
+            double ssq = 1.0;
+
+            for (int i = 1; i < len; i++) {
+                double absxi = Math.abs(b[(k + i) * n + k]);
+                if (absxi > scale) {
+                    double temp = scale / absxi;
+                    ssq = 1.0 + ssq * temp * temp;
+                    scale = absxi;
+                } else if (absxi > 0.0) {
+                    double temp = absxi / scale;
+                    ssq += temp * temp;
+                }
+                vCol[i] = b[(k + i) * n + k];
             }
-            double normX = norm2(x);
-            if (normX > TOL) {
-                if (!tailIsZero(x) || Math.abs(x[0] - normX) > TOL) {
-                    net.faulj.vector.Vector hh = net.faulj.vector.VectorUtils.householder(new net.faulj.vector.Vector(x));
-                    double tau = hh.get(len);
-                    net.faulj.vector.Vector v = hh.resize(len);
-                    applyHouseholderLeft(B, k, k, v.getData(), tau);
-                    applyHouseholderRight(U, 0, k, v.getData(), tau);
+            vCol[0] = x0;
+
+            double xnorm = scale * Math.sqrt(ssq);
+            if (xnorm > SAFE_MIN) {
+                double beta = (x0 >= 0.0) ? -xnorm : xnorm;
+                double tau = (beta - x0) / beta;
+                double invV0 = 1.0 / (x0 - beta);
+
+                if (Math.abs(tau) > SAFE_MIN) {
+
+                    // Build normalized Householder vector
+                    vCol[0] = 1.0;
                     for (int i = 1; i < len; i++) {
-                        B.set(k + i, k, 0.0);
+                        vCol[i] *= invV0;
+                    }
+
+                    // Apply Householder from left to B
+                    applyHouseholderLeftRaw(b, n, k, k, vCol, len, tau);
+                    // Apply from right to U
+                    applyHouseholderRightRaw(u, m, 0, k, vCol, len, tau);
+
+                    // Set the column to bidiagonal form
+                    b[k * n + k] = beta;
+                    for (int i2 = 1; i2 < len; i2++) {
+                        b[(k + i2) * n + k] = 0.0;
                     }
                 }
             }
 
+            // ===== Row Householder =====
             if (k < n - 1) {
                 int lenRow = n - k - 1;
-                double[] xRow = new double[lenRow];
-                for (int j = 0; j < lenRow; j++) {
-                    xRow[j] = B.get(k, k + 1 + j);
+
+                // LAPACK dlarfg-style for row
+                double x0Row = b[k * n + k + 1];
+                double scaleRow = Math.abs(x0Row);
+                double ssqRow = 1.0;
+
+                for (int j = 1; j < lenRow; j++) {
+                    double absxj = Math.abs(b[k * n + k + 1 + j]);
+                    if (absxj > scaleRow) {
+                        double temp = scaleRow / absxj;
+                        ssqRow = 1.0 + ssqRow * temp * temp;
+                        scaleRow = absxj;
+                    } else if (absxj > 0.0) {
+                        double temp = absxj / scaleRow;
+                        ssqRow += temp * temp;
+                    }
+                    vRow[j] = b[k * n + k + 1 + j];
                 }
-                double normRow = norm2(xRow);
-                if (normRow > TOL) {
-                    if (!tailIsZero(xRow) || Math.abs(xRow[0] - normRow) > TOL) {
-                        net.faulj.vector.Vector hh = net.faulj.vector.VectorUtils.householder(new net.faulj.vector.Vector(xRow));
-                        double tau = hh.get(lenRow);
-                        net.faulj.vector.Vector v = hh.resize(lenRow);
-                        applyHouseholderRight(B, k, k + 1, v.getData(), tau);
-                        applyHouseholderRight(V, 0, k + 1, v.getData(), tau);
+                vRow[0] = x0Row;
+
+                double xnormRow = scaleRow * Math.sqrt(ssqRow);
+                if (xnormRow > SAFE_MIN) {
+                    double betaRow = (x0Row >= 0.0) ? -xnormRow : xnormRow;
+                    double tauRow = (betaRow - x0Row) / betaRow;
+                    double invV0Row = 1.0 / (x0Row - betaRow);
+
+                    if (Math.abs(tauRow) > SAFE_MIN) {
+
+                        // Build normalized Householder vector
+                        vRow[0] = 1.0;
                         for (int j = 1; j < lenRow; j++) {
-                            B.set(k, k + 1 + j, 0.0);
+                            vRow[j] *= invV0Row;
+                        }
+
+                        // Apply Householder from right to B
+                        applyHouseholderRightRaw(b, n, k, k + 1, vRow, lenRow, tauRow);
+                        // Apply from right to V
+                        applyHouseholderRightRaw(v, n, 0, k + 1, vRow, lenRow, tauRow);
+
+                        // Set the row to bidiagonal form
+                        b[k * n + k + 1] = betaRow;
+                        for (int j2 = 1; j2 < lenRow; j2++) {
+                            b[k * n + k + 1 + j2] = 0.0;
                         }
                     }
                 }
             }
         }
 
-        return new net.faulj.decomposition.result.BidiagonalizationResult(A, U, B, V);
+        return new BidiagonalizationResult(
+                A,
+                Matrix.wrap(u, m, m),
+                Matrix.wrap(b, m, n),
+                Matrix.wrap(v, n, n)
+        );
     }
 
     /**
-     * Compute the Euclidean norm of a vector.
-     *
-     * @param x vector entries
-     * @return 2-norm
+     * Apply Householder reflector from the left using raw arrays.
+     * LAPACK dlarfx-style: 8x unrolling for better ILP on column operations.
      */
-    private static double norm2(double[] x) {
-        double sum = 0.0;
-        for (double v : x) {
-            sum += v * v;
-        }
-        return Math.sqrt(sum);
-    }
+    private static void applyHouseholderLeftRaw(double[] M, int cols, int startRow, int startCol,
+                                                 double[] v, int len, double tau) {
+        // LAPACK: process 8 columns at a time for maximum ILP
+        int col = startCol;
+        int limit = cols - 7;
 
-    /**
-     * Check whether all entries except the first are near zero.
-     *
-     * @param x vector entries
-     * @return true if the tail is zero within tolerance
-     */
-    private static boolean tailIsZero(double[] x) {
-        for (int i = 1; i < x.length; i++) {
-            if (Math.abs(x[i]) > TOL) {
-                return false;
+        for (; col < limit; col += 8) {
+            // Compute 8 dot products in parallel
+            double dot0 = 0.0, dot1 = 0.0, dot2 = 0.0, dot3 = 0.0;
+            double dot4 = 0.0, dot5 = 0.0, dot6 = 0.0, dot7 = 0.0;
+
+            for (int i = 0; i < len; i++) {
+                int rowBase = (startRow + i) * cols;
+                double vi = v[i];
+                dot0 += vi * M[rowBase + col];
+                dot1 += vi * M[rowBase + col + 1];
+                dot2 += vi * M[rowBase + col + 2];
+                dot3 += vi * M[rowBase + col + 3];
+                dot4 += vi * M[rowBase + col + 4];
+                dot5 += vi * M[rowBase + col + 5];
+                dot6 += vi * M[rowBase + col + 6];
+                dot7 += vi * M[rowBase + col + 7];
+            }
+
+            double scale0 = tau * dot0, scale1 = tau * dot1;
+            double scale2 = tau * dot2, scale3 = tau * dot3;
+            double scale4 = tau * dot4, scale5 = tau * dot5;
+            double scale6 = tau * dot6, scale7 = tau * dot7;
+
+            // Update 8 columns
+            for (int i = 0; i < len; i++) {
+                int rowBase = (startRow + i) * cols;
+                double vi = v[i];
+                M[rowBase + col] -= scale0 * vi;
+                M[rowBase + col + 1] -= scale1 * vi;
+                M[rowBase + col + 2] -= scale2 * vi;
+                M[rowBase + col + 3] -= scale3 * vi;
+                M[rowBase + col + 4] -= scale4 * vi;
+                M[rowBase + col + 5] -= scale5 * vi;
+                M[rowBase + col + 6] -= scale6 * vi;
+                M[rowBase + col + 7] -= scale7 * vi;
             }
         }
-        return true;
-    }
 
-    /**
-     * Apply a Householder reflector from the left to a submatrix.
-     *
-     * @param M matrix to update
-     * @param startRow row offset
-     * @param startCol column offset
-     * @param v Householder vector
-     * @param tau Householder scalar
-     */
-    private static void applyHouseholderLeft(net.faulj.matrix.Matrix M, int startRow, int startCol, double[] v, double tau) {
-        int rows = M.getRowCount();
-        int cols = M.getColumnCount();
-        int len = v.length;
-        for (int col = startCol; col < cols; col++) {
+        // Scalar remainder
+        for (; col < cols; col++) {
             double dot = 0.0;
             for (int i = 0; i < len; i++) {
-                dot += v[i] * M.get(startRow + i, col);
-            }
-            if (Math.abs(dot) < 1e-15) {
-                continue;
+                dot += v[i] * M[(startRow + i) * cols + col];
             }
             double scale = tau * dot;
             for (int i = 0; i < len; i++) {
-                int r = startRow + i;
-                M.set(r, col, M.get(r, col) - scale * v[i]);
+                M[(startRow + i) * cols + col] -= scale * v[i];
             }
         }
     }
 
     /**
-     * Apply a Householder reflector from the right to a submatrix.
-     *
-     * @param M matrix to update
-     * @param startRow row offset
-     * @param startCol column offset
-     * @param v Householder vector
-     * @param tau Householder scalar
+     * Apply Householder reflector from the right using raw arrays.
+     * Optimized with AVX2 SIMD for contiguous row access.
      */
-    private static void applyHouseholderRight(net.faulj.matrix.Matrix M, int startRow, int startCol, double[] v, double tau) {
-        int rows = M.getRowCount();
-        int len = v.length;
+    private static void applyHouseholderRightRaw(double[] M, int cols, int startRow, int startCol,
+                                                  double[] v, int len, double tau) {
+        int rows = M.length / cols;
+        int vecLen = SPECIES.length();
+        int upperBound = SPECIES.loopBound(len);
+
         for (int row = startRow; row < rows; row++) {
+            int rowBase = row * cols;
+            int idx = rowBase + startCol;
+
+            // Vectorized dot product: row * v
             double dot = 0.0;
-            for (int j = 0; j < len; j++) {
-                dot += M.get(row, startCol + j) * v[j];
+            int j = 0;
+
+            // SIMD loop for dot product
+            for (; j < upperBound; j += vecLen) {
+                DoubleVector mVec = DoubleVector.fromArray(SPECIES, M, idx + j);
+                DoubleVector vVec = DoubleVector.fromArray(SPECIES, v, j);
+                dot += mVec.mul(vVec).reduceLanes(VectorOperators.ADD);
             }
-            if (Math.abs(dot) < 1e-15) {
-                continue;
+
+            // Scalar remainder
+            for (; j < len; j++) {
+                dot += M[idx + j] * v[j];
             }
+
+            if (Math.abs(dot) < 1e-15) continue;
+
             double scale = tau * dot;
-            for (int j = 0; j < len; j++) {
-                int c = startCol + j;
-                M.set(row, c, M.get(row, c) - scale * v[j]);
+            DoubleVector scaleVec = DoubleVector.broadcast(SPECIES, scale);
+
+            // Vectorized update: row -= scale * v
+            j = 0;
+            for (; j < upperBound; j += vecLen) {
+                DoubleVector mVec = DoubleVector.fromArray(SPECIES, M, idx + j);
+                DoubleVector vVec = DoubleVector.fromArray(SPECIES, v, j);
+                mVec.sub(vVec.mul(scaleVec)).intoArray(M, idx + j);
+            }
+
+            // Scalar remainder
+            for (; j < len; j++) {
+                M[idx + j] -= scale * v[j];
             }
         }
     }

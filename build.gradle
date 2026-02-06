@@ -118,6 +118,9 @@ application {
 
 bootRun {
     mainClass = 'net.faulj.web.Application'
+    // Keep full tiered JIT for numeric benchmark fidelity; Boot's optimizedLaunch
+    // sets TieredStopAtLevel=1, which severely under-reports FLOPS.
+    optimizedLaunch = false
 }
 
 //
@@ -129,4 +132,17 @@ test {
     testLogging {
         showStandardStreams = true
     }
+}
+
+// Run test main benchmark class from test sources
+tasks.register('runDiagnostic', JavaExec) {
+    group = 'benchmark'
+    description = 'Run net.faulj.benchmark.Diagnostic512 from test classes'
+    classpath = sourceSets.test.runtimeClasspath
+    // Use Java 21 for Spring Boot 3.1.x / Spring 6.0.x compatibility.
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    main = 'net.faulj.benchmark.Diagnostic512'
+    standardInput = System.in
 }

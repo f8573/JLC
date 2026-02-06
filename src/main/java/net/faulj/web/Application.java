@@ -3,7 +3,7 @@ package net.faulj.web;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = "net.faulj")
 /**
  * Spring Boot entry point for the JLAC web service.
  */

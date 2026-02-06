@@ -43,14 +43,26 @@
       }
     </script>
     <style type="text/tailwindcss">
+      :root {
+        --accent-color: #7c3aed;
+        --accent-hover: #6d28d9;
+        --accent-light: #f5f3ff;
+      }
       .math-grid {
         background-image: radial-gradient(#7c3aed15 1px, transparent 1px);
         background-size: 24px 24px;
+      }
+      .dark .math-grid {
+        background-image: radial-gradient(#7c3aed30 1px, transparent 1px);
       }
       .matrix-bracket {
         border-left: 2px solid #cbd5e1;
         border-right: 2px solid #cbd5e1;
         position: relative;
+      }
+      .dark .matrix-bracket {
+        border-left-color: #475569;
+        border-right-color: #475569;
       }
       .matrix-bracket::before,
       .matrix-bracket::after {
@@ -65,10 +77,18 @@
         border-top: 2px solid #cbd5e1;
         border-bottom: 2px solid #cbd5e1;
       }
+      .dark .matrix-bracket::before {
+        border-top-color: #475569;
+        border-bottom-color: #475569;
+      }
       .matrix-bracket::after {
         right: 0;
         border-top: 2px solid #cbd5e1;
         border-bottom: 2px solid #cbd5e1;
+      }
+      .dark .matrix-bracket::after {
+        border-top-color: #475569;
+        border-bottom-color: #475569;
       }
       .matrix-grid {
         display: grid;
@@ -79,7 +99,7 @@
         font-family: "Space Grotesk", monospace;
       }
       .purple-glow {
-        color: #7c3aed;
+        color: var(--accent-color, #7c3aed);
         text-shadow: 0 0 12px rgba(124, 58, 237, 0.2);
       }
       .custom-scrollbar::-webkit-scrollbar {
@@ -89,9 +109,15 @@
       .custom-scrollbar::-webkit-scrollbar-track {
         background: #f1f1f1;
       }
+      .dark .custom-scrollbar::-webkit-scrollbar-track {
+        background: #1e293b;
+      }
       .custom-scrollbar::-webkit-scrollbar-thumb {
         background: #ddd6fe;
         border-radius: 10px;
+      }
+      .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #475569;
       }
       .matrix-bracket-left {
         border-left: 2px solid #94a3b8;
@@ -99,16 +125,30 @@
         border-bottom: 2px solid #94a3b8;
         width: 8px;
       }
+      .dark .matrix-bracket-left {
+        border-left-color: #64748b;
+        border-top-color: #64748b;
+        border-bottom-color: #64748b;
+      }
       .matrix-bracket-right {
         border-right: 2px solid #94a3b8;
         border-top: 2px solid #94a3b8;
         border-bottom: 2px solid #94a3b8;
         width: 8px;
       }
+      .dark .matrix-bracket-right {
+        border-right-color: #64748b;
+        border-top-color: #64748b;
+        border-bottom-color: #64748b;
+      }
       .matrix-preview-bracket {
         border-left: 1.5px solid #cbd5e1;
         border-right: 1.5px solid #cbd5e1;
         position: relative;
+      }
+      .dark .matrix-preview-bracket {
+        border-left-color: #475569;
+        border-right-color: #475569;
       }
       .matrix-preview-bracket::before,
       .matrix-preview-bracket::after {
@@ -123,10 +163,18 @@
         border-top: 1.5px solid #cbd5e1;
         border-bottom: 1.5px solid #cbd5e1;
       }
+      .dark .matrix-preview-bracket::before {
+        border-top-color: #475569;
+        border-bottom-color: #475569;
+      }
       .matrix-preview-bracket::after {
         right: 0;
         border-top: 1.5px solid #cbd5e1;
         border-bottom: 1.5px solid #cbd5e1;
+      }
+      .dark .matrix-preview-bracket::after {
+        border-top-color: #475569;
+        border-bottom-color: #475569;
       }
       .matrix-thumb-grid {
         display: grid;
@@ -136,20 +184,38 @@
       .tab-active {
         @apply border-primary text-primary bg-primary/5;
       }
+      .dark .tab-active {
+        @apply border-primary text-primary bg-primary/20;
+      }
       .tab-inactive {
         @apply border-transparent text-slate-400 hover:text-primary hover:bg-primary/5;
+      }
+      .dark .tab-inactive {
+        @apply text-slate-500 hover:text-primary hover:bg-primary/10;
       }
       .report-section {
         @apply py-12 border-b border-border-elegant scroll-mt-20;
       }
+      .dark .report-section {
+        @apply border-slate-700;
+      }
       .math-text {
         @apply font-math italic text-slate-800;
+      }
+      .dark .math-text {
+        @apply text-slate-200;
       }
       .sticky-toc-link {
         @apply block py-1.5 px-3 text-sm text-slate-500 hover:text-primary hover:bg-primary-light rounded transition-all border-l-2 border-transparent;
       }
+      .dark .sticky-toc-link {
+        @apply text-slate-400 hover:bg-primary/10;
+      }
       .sticky-toc-link.active {
         @apply text-primary border-primary font-semibold bg-primary-light;
+      }
+      .dark .sticky-toc-link.active {
+        @apply bg-primary/20;
       }
       @media print {
         .no-print { display: none !important; }
@@ -166,7 +232,7 @@
         overflow: hidden;
       }
     </style>
-    <script type="module" crossorigin src="/assets/index-DAvGoKC9.js"></script>
+    <script type="module" crossorigin src="/assets/index-UEWkruCx.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-DwK22V0Y.css">
   </head>
   <body>

@@ -9,6 +9,7 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -25,6 +26,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import net.faulj.core.DiagnosticMetrics;
 import net.faulj.core.DiagnosticMetrics.DiagnosticItem;
 import net.faulj.core.DiagnosticMetrics.MatrixDiagnostics;
+import net.faulj.bench.BenchmarkService;
 import net.faulj.eigen.qr.ExplicitQRIteration;
 import net.faulj.eigen.schur.RealSchurDecomposition;
 import net.faulj.eigen.schur.SchurEigenExtractor;
@@ -40,31 +42,61 @@ import net.faulj.visualizer.MatrixLatexExporter;
  * REST controller exposing diagnostic and debug endpoints for matrix analysis.
  */
 public class ApiController {
+    private static final int FULL_DIAGNOSTIC_CELL_LIMIT = 65_536; // e.g. 256x256
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final BenchmarkService benchmarkService;
     // SSE emitters for streaming status updates to connected frontend clients
     private final CopyOnWriteArrayList<SseEmitter> sseEmitters = new CopyOnWriteArrayList<>();
     private volatile String currentStatus = "SERVICE_INTERRUPTION";
     private volatile Map<String, Object> currentCpu = cpuTemplate("offline");
     private final ExecutorService sseExecutor = Executors.newSingleThreadExecutor();
+    private final AtomicInteger queuedJobs = new AtomicInteger(0);
 
     /**
      * Notify connected SSE clients only when the status or CPU state changes.
      */
     private void maybeNotifyStatus(String status, Map<String, Object> cpu) {
-        if (status == null) status = "SERVICE_INTERRUPTION";
-        if (cpu == null) cpu = cpuTemplate("offline");
+        Map<String, Object> nextCpu = new LinkedHashMap<>();
+        if (currentCpu != null) {
+            nextCpu.putAll(currentCpu);
+        } else {
+            nextCpu.putAll(cpuTemplate("offline"));
+        }
+        if (cpu != null) {
+            nextCpu.putAll(cpu);
+        }
+
+        String cpuState = normalizeCpuState(nextCpu.get("state"));
+        nextCpu.put("state", cpuState);
+        int q = queuedJobs.get();
+        Object queuedObj = nextCpu.get("queuedJobs");
+        if (queuedObj instanceof Number n) {
+            q = Math.max(0, n.intValue());
+        }
+        nextCpu.put("queuedJobs", q);
+
+        String derivedStatus = deriveSystemStatus(cpuState, q);
+        // Keep optional caller override only when it is one of our known values.
+        if (status != null && !status.isBlank()) {
+            String normalized = status.trim().toUpperCase();
+            if (normalized.equals("ONLINE") || normalized.equals("BUSY")
+                    || normalized.equals("LARGE_QUEUE") || normalized.equals("SERVICE_INTERRUPTION")) {
+                derivedStatus = normalized;
+            }
+        }
+
         boolean changed = false;
         try {
-            if (!Objects.equals(status, currentStatus)) changed = true;
-            else if (!Objects.equals(cpu.get("state"), currentCpu.get("state"))) changed = true;
+            if (!Objects.equals(derivedStatus, currentStatus)) changed = true;
+            else if (!Objects.equals(nextCpu, currentCpu)) changed = true;
         } catch (Exception ex) {
             changed = true;
         }
         if (!changed) return;
 
-        currentStatus = status;
-        currentCpu = cpu;
+        currentStatus = derivedStatus;
+        currentCpu = nextCpu;
 
         // push update to all emitters asynchronously
         sseExecutor.submit(() -> {
@@ -85,11 +117,35 @@ public class ApiController {
         m.put("name", "CPU");
         m.put("gflops", null);
         m.put("state", state);
+        m.put("queuedJobs", 0);
         return m;
     }
 
-    public ApiController() {
-        // At startup assume service is available; set ONLINE so front-end sees service
+    static String normalizeCpuState(Object stateObj) {
+        if (stateObj == null) return "offline";
+        String s = stateObj.toString().trim().toLowerCase();
+        if (s.equals("online") || s.equals("offline") || s.equals("degraded")) {
+            return s;
+        }
+        return "degraded";
+    }
+
+    static String deriveSystemStatus(String cpuState, int queued) {
+        if (!"online".equals(cpuState)) {
+            return "SERVICE_INTERRUPTION";
+        }
+        if (queued > 10) {
+            return "LARGE_QUEUE";
+        }
+        if (queued > 0) {
+            return "BUSY";
+        }
+        return "ONLINE";
+    }
+
+    public ApiController(BenchmarkService benchmarkService) {
+        this.benchmarkService = benchmarkService;
+        // At startup assume CPU is online and idle.
         maybeNotifyStatus("ONLINE", cpuTemplate("online"));
         // Run a lightweight CPU benchmark in background to estimate GFLOPs
         runCpuBenchmark();
@@ -173,18 +229,18 @@ public class ApiController {
                 Map<String, Object> cpu = cpuTemplate("online");
                 cpu.put("gflops", avg);
                 cpu.put("benchmark", bench);
-                maybeNotifyStatus("ONLINE", cpu);
+                maybeNotifyStatus(null, cpu);
             } catch (Throwable ex) {
                 // verbose error reporting but avoid crashing startup
                 System.err.println("[CPU BENCHMARK] failed: " + ex.getMessage());
                 ex.printStackTrace();
                 try {
-                    Map<String, Object> cpu = cpuTemplate("offline");
+                    Map<String, Object> cpu = cpuTemplate("degraded");
                     cpu.put("gflops", null);
                     Map<String, Object> err = new LinkedHashMap<>();
                     err.put("error", ex.getMessage());
                     cpu.put("benchmarkError", err);
-                    maybeNotifyStatus("SERVICE_INTERRUPTION", cpu);
+                    maybeNotifyStatus(null, cpu);
                 } catch (Exception ignore) {}
             }
         });
@@ -198,6 +254,46 @@ public class ApiController {
     @GetMapping("/api/ping")
     public Map<String, String> ping() {
         return Map.of("message", "pong from Java backend", "version", "1.0");
+    }
+
+    /**
+     * Current system status and CPU state used by the sidebar and status dialog.
+     */
+    @GetMapping("/api/status")
+    public Map<String, Object> status() {
+        maybeNotifyStatus(null, null);
+        LinkedHashMap<String, Object> out = new LinkedHashMap<>();
+        out.put("status", currentStatus);
+        out.put("cpu", currentCpu);
+        return out;
+    }
+
+    /**
+     * Run Diagnostic512 benchmark flow from backend.
+     */
+    @GetMapping("/api/benchmark/diagnostic512")
+    public ResponseEntity<Map<String, Object>> benchmarkDiagnostic512(
+            @RequestParam(value = "iterations", required = false, defaultValue = "5") int iterations) {
+        queuedJobs.incrementAndGet();
+        maybeNotifyStatus(null, Map.of("state", "online"));
+        try {
+            Map<String, Object> result = benchmarkService.runDiagnostic512(iterations);
+            Object cpuObj = result.get("cpu");
+            if (cpuObj instanceof Map<?, ?> cpuMap) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> casted = (Map<String, Object>) cpuMap;
+                maybeNotifyStatus(null, casted);
+            } else {
+                maybeNotifyStatus(null, Map.of("state", "online"));
+            }
+            return ResponseEntity.ok(result);
+        } catch (Exception ex) {
+            maybeNotifyStatus(null, Map.of("state", "degraded"));
+            return ResponseEntity.status(500).body(Map.of("error", "diagnostic512 benchmark failed", "details", ex.getMessage()));
+        } finally {
+            queuedJobs.updateAndGet(v -> Math.max(0, v - 1));
+            maybeNotifyStatus(null, null);
+        }
     }
 
     /**
@@ -264,13 +360,25 @@ public class ApiController {
         if (matrixObj == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "matrix field is required"));
         }
-        double[][] data = objectMapper.convertValue(matrixObj, double[][].class);
-        Matrix A = new Matrix(data);
-        MatrixDiagnostics diagnostics = DiagnosticMetrics.analyze(A);
-        // Update and notify status: successful diagnostics -> ONLINE / CPU online
-        Map<String, Object> cpu = cpuTemplate("online");
-        maybeNotifyStatus("ONLINE", cpu);
-        return ResponseEntity.ok(buildDiagnosticsResponse(diagnostics));
+        queuedJobs.incrementAndGet();
+        maybeNotifyStatus(null, Map.of("state", "online"));
+        try {
+            double[][] data = objectMapper.convertValue(matrixObj, double[][].class);
+            if (tooLargeForFullDiagnostics(data)) {
+                maybeNotifyStatus(null, Map.of("state", "degraded"));
+                return ResponseEntity.unprocessableEntity().body(largeMatrixDiagnosticsHint(data.length, data[0].length));
+            }
+            Matrix A = new Matrix(data);
+            MatrixDiagnostics diagnostics = DiagnosticMetrics.analyze(A);
+            maybeNotifyStatus(null, Map.of("state", "online"));
+            return ResponseEntity.ok(buildDiagnosticsResponse(diagnostics));
+        } catch (Exception ex) {
+            maybeNotifyStatus(null, Map.of("state", "degraded"));
+            return ResponseEntity.status(500).body(Map.of("error", "diagnostics failed", "details", ex.getMessage()));
+        } finally {
+            queuedJobs.updateAndGet(v -> Math.max(0, v - 1));
+            maybeNotifyStatus(null, null);
+        }
     }
 
     /**
@@ -284,15 +392,26 @@ public class ApiController {
         if (matrixJson == null || matrixJson.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("error", "matrix query param is required"));
         }
+        queuedJobs.incrementAndGet();
+        maybeNotifyStatus(null, Map.of("state", "online"));
         try {
             double[][] data = objectMapper.readValue(matrixJson, double[][].class);
+            if (tooLargeForFullDiagnostics(data)) {
+                maybeNotifyStatus(null, Map.of("state", "degraded"));
+                return ResponseEntity.unprocessableEntity().body(largeMatrixDiagnosticsHint(data.length, data[0].length));
+            }
             Matrix A = new Matrix(data);
             MatrixDiagnostics diagnostics = DiagnosticMetrics.analyze(A);
-            Map<String, Object> cpu = cpuTemplate("online");
-            maybeNotifyStatus("ONLINE", cpu);
+            maybeNotifyStatus(null, Map.of("state", "online"));
             return ResponseEntity.ok(buildDiagnosticsResponse(diagnostics));
         } catch (JsonProcessingException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", "invalid matrix JSON", "details", ex.getMessage()));
+        } catch (Exception ex) {
+            maybeNotifyStatus(null, Map.of("state", "degraded"));
+            return ResponseEntity.status(500).body(Map.of("error", "diagnostics failed", "details", ex.getMessage()));
+        } finally {
+            queuedJobs.updateAndGet(v -> Math.max(0, v - 1));
+            maybeNotifyStatus(null, null);
         }
     }
 
@@ -629,6 +748,66 @@ public class ApiController {
         out.put("matrixDecompositions", decomp);
 
         return out;
+    }
+
+    private static boolean tooLargeForFullDiagnostics(double[][] data) {
+        if (data == null || data.length == 0 || data[0] == null) return false;
+        int rows = data.length;
+        int cols = data[0].length;
+        long cells = (long) rows * cols;
+        return cells > FULL_DIAGNOSTIC_CELL_LIMIT;
+    }
+
+    private static Map<String, Object> largeMatrixDiagnosticsHint(int rows, int cols) {
+        LinkedHashMap<String, Object> out = new LinkedHashMap<>();
+        out.put("error", "matrix too large for synchronous full diagnostics");
+        out.put("details", "Requested " + rows + "x" + cols + " exceeds limit of " + FULL_DIAGNOSTIC_CELL_LIMIT + " cells");
+        out.put("recommendedEndpoint", "/api/benchmark/diagnostic?sizex=512&sizey=512&test=GEMM&iterations=5");
+        out.put("reason", "full diagnostics includes many heavy decompositions and large matrix payloads");
+        return out;
+    }
+
+    /**
+     * Generic diagnostic benchmark endpoint supporting sizex/sizey/test parameters.
+     * For now this delegates to the existing Diagnostic512 runner when the requested
+     * size is 512x512 and test is GEMM. Other combinations are not implemented.
+     */
+    @GetMapping("/api/benchmark/diagnostic")
+    public ResponseEntity<Map<String, Object>> benchmarkDiagnostic(
+            @RequestParam(value = "sizex", required = false, defaultValue = "512") int sizex,
+            @RequestParam(value = "sizey", required = false, defaultValue = "512") int sizey,
+            @RequestParam(value = "test", required = false, defaultValue = "GEMM") String test,
+            @RequestParam(value = "iterations", required = false, defaultValue = "5") int iterations) {
+        queuedJobs.incrementAndGet();
+        maybeNotifyStatus(null, Map.of("state", "online"));
+        try {
+            // Only 512x512 GEMM is supported by the existing runner implementation.
+            if (sizex == 512 && sizey == 512 && (test == null || test.equalsIgnoreCase("GEMM"))) {
+                // Run a dedicated GEMM throughput benchmark instead of the full decomposition runner
+                Map<String, Object> result = benchmarkService.runGemm(512, iterations);
+                Object cpuObj = result.get("cpu");
+                if (cpuObj instanceof Map<?, ?> cpuMap) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> casted = (Map<String, Object>) cpuMap;
+                    maybeNotifyStatus(null, casted);
+                } else {
+                    maybeNotifyStatus(null, Map.of("state", "online"));
+                }
+                return ResponseEntity.ok(result);
+            }
+            // unsupported combination - guide caller to the 512x512 GEMM endpoint
+            return ResponseEntity.status(400).body(Map.of(
+                    "error", "unsupported diagnostic benchmark parameters",
+                    "details", "Only sizex=512&sizey=512&test=GEMM is supported currently",
+                    "recommendedEndpoint", "/api/benchmark/diagnostic?sizex=512&sizey=512&test=GEMM&iterations=5"
+            ));
+        } catch (Exception ex) {
+            maybeNotifyStatus(null, Map.of("state", "degraded"));
+            return ResponseEntity.status(500).body(Map.of("error", "diagnostic benchmark failed", "details", ex.getMessage()));
+        } finally {
+            queuedJobs.updateAndGet(v -> Math.max(0, v - 1));
+            maybeNotifyStatus(null, null);
+        }
     }
 
     /**

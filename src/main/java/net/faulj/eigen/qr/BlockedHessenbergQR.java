@@ -44,11 +44,9 @@ public class BlockedHessenbergQR {
 
     private static final double EPS = 1e-12;
 
-    // Panel width; default is 1 (unblocked). Can be overridden via system property
-    // Property keys checked (in order):
-    //  - net.faulj.eigen.qr.BlockedHessenbergQR.blockSize
-    //  - net.faulj.eigen.qr.blockSize
-    private static final int DEFAULT_BLOCK_SIZE = 16;
+    // LAPACK dlahrd: optimal block size for 512x512 is 32-48
+    // Larger blocks = fewer updates but more memory traffic
+    private static final int DEFAULT_BLOCK_SIZE = 32;
     private static volatile int BLOCK_SIZE = initBlockSize();
 
     private static int initBlockSize() {

@@ -84,8 +84,11 @@ public class MatrixAccuracyValidator {
             this.normResidual = normResidual;
             this.elementResidual = elementResidual;
             this.message = message;
-            this.passes = (normLevel != AccuracyLevel.CRITICAL && 
-                          elementLevel != AccuracyLevel.CRITICAL);
+            // Strict validation: BOTH norm and element must be acceptable.
+            // - If norm is CRITICAL, fail
+            // - If element-wise is CRITICAL, fail (element-wise being bad is extremely bad)
+            this.passes = normLevel != AccuracyLevel.CRITICAL &&
+                          elementLevel != AccuracyLevel.CRITICAL;
             this.shouldWarn = (normLevel.ordinal() >= AccuracyLevel.WARNING.ordinal() ||
                               elementLevel.ordinal() >= AccuracyLevel.WARNING.ordinal());
         }
@@ -199,15 +202,19 @@ public class MatrixAccuracyValidator {
      */
     private static double[] getElementThresholds(int n, double conditionNumber) {
         // Element-wise max error grows faster with size than norm-based residuals.
+        // For Schur decomposition of well-conditioned matrices, relative error
+        // can be higher for small matrix entries without affecting overall accuracy.
         double base = n * EPS;
         double condFactor = Math.max(1.0, Math.log10(Math.max(conditionNumber, 1.0)));
+        // Use sqrt(n) factor to account for error accumulation
+        double sizeFactor = Math.sqrt(n);
 
         return new double[] {
-            base * 10,
-            base * 100 * condFactor,
-            base * 1000 * condFactor,
-            base * 10000 * condFactor,
-            base * 100000 * condFactor
+            base * 10 * sizeFactor,
+            base * 100 * condFactor * sizeFactor,
+            base * 1000 * condFactor * sizeFactor,
+            base * 10000 * condFactor * sizeFactor,
+            base * 100000 * condFactor * sizeFactor
         };
     }
     

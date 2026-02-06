@@ -27,6 +27,19 @@ public final class HouseholderQR {
     public static QRResult decomposeThin(Matrix A) { return decompose(A, true); }
 
     /**
+     * Decompose with DecompositionPolicy (for API compatibility).
+     * Currently ignores the policy and uses the default implementation.
+     *
+     * @param A matrix to decompose
+     * @param policy decomposition policy (currently ignored)
+     * @return QR result
+     */
+    public static QRResult decompose(Matrix A, net.faulj.compute.DecompositionPolicy policy) {
+        // TODO: Use policy settings for panel size, blocked threshold, etc.
+        return decompose(A, false);
+    }
+
+    /**
      * Factorize A using Householder QR without forming Q or R.
      * Useful for benchmarking to reduce allocation pressure.
      *
@@ -200,55 +213,73 @@ public final class HouseholderQR {
      */
 
     /**
-     * Compute Householder vector for column k starting at row startRow
+     * Compute Householder vector for column k starting at row startRow.
+     * Uses EJML-style max-element normalization for numerical stability.
      */
     private static double computeHouseholder(double[] AT, double[] tau,
                                              int m, int n, int k, int startRow) {
         int colBase = k * m;
         int len = m - startRow;
-        
+
         if (len <= 1) {
             tau[k] = 0.0;
             return AT[colBase + startRow];
         }
-        
-        // Extract column segment (contiguous in column-major)
-        double x0 = AT[colBase + startRow];
-        
-        // Compute sigma = ||x[1:]||^2 using vector API
+
+        // EJML optimization: find max element for normalization to prevent overflow/underflow
+        double maxVal = Math.abs(AT[colBase + startRow]);
+        for (int i = startRow + 1; i < m; i++) {
+            double absVal = Math.abs(AT[colBase + i]);
+            if (absVal > maxVal) maxVal = absVal;
+        }
+
+        // Handle zero column
+        if (maxVal < Double.MIN_NORMAL) {
+            tau[k] = 0.0;
+            return AT[colBase + startRow];
+        }
+
+        // Normalize by max for numerical stability (EJML approach)
+        double invMax = 1.0 / maxVal;
+        double x0 = AT[colBase + startRow] * invMax;
+
+        // Compute sigma = ||x[1:]||^2 using vector API on normalized values
         double sigma = 0.0;
         int i = startRow + 1;
         int upperBound = SPECIES.loopBound(m);
-        
+
         DoubleVector sumVec = DoubleVector.zero(SPECIES);
+        DoubleVector invMaxVec = DoubleVector.broadcast(SPECIES, invMax);
         for (; i <= upperBound - LANE_SIZE; i += LANE_SIZE) {
-            DoubleVector vec = DoubleVector.fromArray(SPECIES, AT, colBase + i);
+            DoubleVector vec = DoubleVector.fromArray(SPECIES, AT, colBase + i).mul(invMaxVec);
             sumVec = sumVec.add(vec.mul(vec));
         }
         sigma = sumVec.reduceLanes(VectorOperators.ADD);
-        
+
         // Process remainder
         for (; i < m; i++) {
-            double v = AT[colBase + i];
+            double v = AT[colBase + i] * invMax;
             sigma += v * v;
         }
-        
+
         // Compute Householder vector using LAPACK-style stable formula
         double xnorm = Math.sqrt(sigma);
         if (xnorm == 0.0) {
             if (x0 >= 0.0) {
                 tau[k] = 0.0;
-                return x0;
+                return AT[colBase + startRow];
             } else {
                 tau[k] = 2.0;
-                AT[colBase + startRow] = -x0;
-                return -x0;
+                AT[colBase + startRow] = -AT[colBase + startRow];
+                return -AT[colBase + startRow];
             }
         }
 
-        double beta = -Math.copySign(Math.hypot(x0, xnorm), x0);
-        double tauK = (beta - x0) / beta;
-        double v0Inv = 1.0 / (x0 - beta);
+        // Compute beta in normalized space then scale back
+        double normBeta = -Math.copySign(Math.hypot(x0, xnorm), x0);
+        double beta = normBeta * maxVal;
+        double tauK = (normBeta - x0) / normBeta;
+        double v0Inv = 1.0 / ((x0 - normBeta) * maxVal);
 
         for (i = startRow + 1; i < m; i++) {
             AT[colBase + i] *= v0Inv;
