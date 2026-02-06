@@ -102,6 +102,20 @@ public class RealSchurDecomposition {
             throw new IllegalArgumentException("Schur decomposition requires a square matrix.");
         }
 
+        // Use ImplicitQRFrancis with EJML-style implicit double-shift QR
+        // This is O(n³) vs O(n⁴) for explicit QR iteration
         return ImplicitQRFrancis.decompose(A);
+    }
+
+    /**
+     * Computes just the Schur form T without returning the full result.
+     * Useful for benchmarking to reduce allocation overhead.
+     *
+     * @param A The square real matrix to decompose.
+     * @return The quasi-upper triangular Schur form T.
+     */
+    public static Matrix schurT(Matrix A) {
+        SchurResult result = decompose(A);
+        return result.getT();
     }
 }

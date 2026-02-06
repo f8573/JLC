@@ -27,6 +27,14 @@ import net.faulj.matrix.Matrix;
  * <li>Deflate as subdiagonal elements become negligible.</li>
  * </ol>
  *
+ * <h2>EJML-inspired optimizations:</h2>
+ * <ul>
+ * <li>Raw array access for performance</li>
+ * <li>Exceptional shift handling when convergence stalls</li>
+ * <li>Relative tolerance deflation detection</li>
+ * <li>2x2 block scaling for overflow protection</li>
+ * </ul>
+ *
  * @author JLC Development Team
  * @version 1.0
  * @see ExplicitQRIteration
@@ -35,10 +43,14 @@ import net.faulj.matrix.Matrix;
 public class ImplicitQRFrancis {
 
     private static final double EPSILON = 1e-12;
+    private static final double MACHINE_EPS = 2.220446049250313e-16;
     private static final int MAX_ITERATIONS_PER_EIGENVALUE = 30;
-    // Prefer implicit Francis for n >= 10; treat strictly smaller sizes as "small"
     private static final int SMALL_MATRIX_THRESHOLD = 9;
     private static final int MEDIUM_MATRIX_THRESHOLD = 30;
+    private static final int LARGE_MATRIX_THRESHOLD = 60; // Lower threshold for faster AED
+    // LAPACK dlaqr0: exceptional shift every 6 iterations
+    private static final int EXCEPTIONAL_THRESHOLD = 5; // Faster exceptional shifts
+    private static final int AED_FREQUENCY = 6; // More frequent AED for 512x512
 
     /**
      * Computes the Real Schur Decomposition of the given matrix.
@@ -62,80 +74,221 @@ public class ImplicitQRFrancis {
 
         // Step 1: Reduce to Hessenberg
         HessenbergResult hessResult = BlockedHessenbergQR.decompose(A);
+        return decomposeFromHessenbergInternal(hessResult, A, true);
+    }
+
+    /**
+     * Computes the Real Schur Decomposition from a pre-computed Hessenberg form.
+     * This is useful when you want to benchmark just the QR iteration phase,
+     * or when you've already computed the Hessenberg form for other purposes.
+     *
+     * @param hessResult The pre-computed Hessenberg result (H, Q).
+     * @return The SchurResult containing T (Schur form), U (Vectors), and eigenvalues.
+     */
+    public static SchurResult decomposeFromHessenberg(HessenbergResult hessResult) {
+        return decomposeFromHessenbergInternal(hessResult, hessResult.getOriginal(), true);
+    }
+
+    /**
+     * Computes just the Schur form T without accumulating the orthogonal matrix U.
+     * This is faster when only eigenvalues are needed.
+     *
+     * @param hessResult The pre-computed Hessenberg result.
+     * @return The SchurResult with T and eigenvalues (U will be identity).
+     */
+    public static SchurResult decomposeSchurFormOnly(HessenbergResult hessResult) {
+        return decomposeFromHessenbergInternal(hessResult, hessResult.getOriginal(), false);
+    }
+
+    /**
+     * Internal implementation of QR iteration on Hessenberg matrix.
+     *
+     * @param hessResult The Hessenberg decomposition result.
+     * @param originalA The original matrix.
+     * @param accumulateU Whether to accumulate the orthogonal matrix U.
+     */
+    private static SchurResult decomposeFromHessenbergInternal(HessenbergResult hessResult, Matrix originalA, boolean accumulateU) {
         Matrix H = hessResult.getH();
-        Matrix U = hessResult.getQ();
+        Matrix U = accumulateU ? hessResult.getQ() : Matrix.Identity(H.getRowCount());
+        int n = H.getRowCount();
+
+        // Get raw arrays for faster deflation checks
+        double[] h = H.getRawData();
 
         // Step 2: Main iteration loop with adaptive strategy
         int m = n - 1; // Active block end
-        int totalIter = 0;
+        int globalIter = 0;
+        int exceptionalCount = 0;
+        int aedCounter = 0;
+        int maxIter = MAX_ITERATIONS_PER_EIGENVALUE * n;
+        boolean usesAED = (n >= LARGE_MATRIX_THRESHOLD);
+        int totalIterations = 0; // Diagnostic
 
-        while (m > 0 && totalIter < MAX_ITERATIONS_PER_EIGENVALUE * n) {
+        while (m > 0 && globalIter < maxIter) {
+            totalIterations++;
+            // LAPACK strategy: apply AED more aggressively for large matrices
+            if (usesAED && aedCounter >= AED_FREQUENCY && m >= MEDIUM_MATRIX_THRESHOLD) {
+                int ns = MultiShiftQR.computeOptimalShiftCount(m + 1);
+                int winSize = Math.min(Math.max(ns + 1, (m + 1) / 3), m + 1);
+                if (winSize >= 4) {
+                    AggressiveEarlyDeflation.AEDResult aedResult =
+                        AggressiveEarlyDeflation.process(H, accumulateU ? U : null, 0, m, winSize, EPSILON, globalIter);
+                    if (aedResult.deflatedCount > 0) {
+                        m = aedResult.newActiveEnd;
+                        globalIter = 0;
+                        exceptionalCount = 0;
+                    }
+                }
+                aedCounter = 0;
+            }
+
+            // LAPACK-style deflation check: more aggressive threshold
+            while (m > 0) {
+                double subdiag = Math.abs(h[m * n + m - 1]);
+                double diagAbove = Math.abs(h[(m - 1) * n + m - 1]);
+                double diagBelow = Math.abs(h[m * n + m]);
+                // LAPACK: uses ulp * (|H[i-1,i-1]| + |H[i,i]|) where ulp ≈ eps
+                double threshold = MACHINE_EPS * (diagAbove + diagBelow);
+
+                if (subdiag <= Math.max(threshold, EPSILON)) {
+                    h[m * n + m - 1] = 0.0;
+                    m--;
+                    globalIter = 0;
+                    exceptionalCount = 0;
+                } else {
+                    break;
+                }
+            }
+
+            if (m <= 0) break;
+
             // Find active block by checking for deflation
-            int l = findActiveBlockStart(H, m);
+            int l = findActiveBlockStartRaw(h, n, m);
             int blockSize = m - l + 1;
 
             if (blockSize == 1) {
-                // Single eigenvalue converged
                 m--;
-                totalIter = 0;
+                globalIter = 0;
+                exceptionalCount = 0;
                 continue;
             }
 
             if (blockSize == 2) {
-                // Check if 2x2 block is converged (complex conjugate pair)
-                if (is2x2BlockConverged(H, l, m)) {
+                if (is2x2BlockConvergedRaw(h, n, l, m)) {
                     m -= 2;
-                    totalIter = 0;
+                    globalIter = 0;
+                    exceptionalCount = 0;
                     continue;
                 }
             }
 
-            // Perform one QR step on active block
-            if (blockSize < MEDIUM_MATRIX_THRESHOLD) {
-                // Small to medium: use simple double-shift Francis
-                performDoubleShiftStep(H, U, l, m);
+            // Check for exceptional shift need
+            boolean useExceptionalShift = (exceptionalCount >= EXCEPTIONAL_THRESHOLD);
+
+            // Compute shifts
+            int numShifts = (blockSize < MEDIUM_MATRIX_THRESHOLD) ? 2 : MultiShiftQR.computeOptimalShiftCount(blockSize);
+            double[] shifts;
+            if (useExceptionalShift) {
+                shifts = generateExceptionalShiftsRaw(h, n, l, m, numShifts);
+                exceptionalCount = 0;
+            } else if (numShifts == 2) {
+                shifts = computeDoubleShiftRaw(h, n, l, m);
             } else {
-                // Large: use multi-shift strategy with optional deflation
-                int numShifts = MultiShiftQR.computeOptimalShiftCount(blockSize);
-                double[] shifts = MultiShiftQR.generateShifts(H, l, m, numShifts);
-                BulgeChasing.performSweep(H, U, l, m, shifts);
+                shifts = MultiShiftQR.generateShiftsRaw(h, n, l, m, numShifts);
             }
 
-            totalIter++;
+            // Perform bulge chasing sweep using Matrix-based method
+            BulgeChasing.performSweep(H, accumulateU ? U : null, l, m, shifts);
+
+            globalIter++;
+            exceptionalCount++;
+            aedCounter++;
         }
 
-        // Final cleanup: explicitly zero out elements below quasi-upper triangular band
-        for (int i = 2; i < n; i++) {
-            for (int j = 0; j < i - 1; j++) {
-                if (Math.abs(H.get(i, j)) < EPSILON * Math.sqrt(n)) {
-                    H.set(i, j, 0.0);
-                }
-            }
-        }
-        // Also clean up subdiagonal elements that should be zero
-        for (int i = 1; i < n; i++) {
-            double subdiag = Math.abs(H.get(i, i - 1));
-            double diagSum = Math.abs(H.get(i - 1, i - 1)) + Math.abs(H.get(i, i));
-            if (subdiag < EPSILON * (diagSum + EPSILON)) {
-                H.set(i, i - 1, 0.0);
-            }
-        }
+        // Final cleanup
+        cleanupSchurFormRaw(h, n);
+
+        // Removed debug output for speed
 
         // Extract eigenvalues
         SchurEigenExtractor extractor = new SchurEigenExtractor(H, U);
-        return new SchurResult(A, H, U, extractor.getEigenvalues(), extractor.getEigenvectors());
+        return new SchurResult(originalA, H, U, extractor.getEigenvalues(), extractor.getEigenvectors());
     }
 
     /**
-     * Finds the start of the active block by scanning for negligible subdiagonal entries.
+     * Compute double-shift values from bottom 2x2 block using raw arrays.
+     * Uses Wilkinson shift for better convergence (LAPACK approach).
      */
-    private static int findActiveBlockStart(Matrix H, int m) {
+    private static double[] computeDoubleShiftRaw(double[] H, int n, int l, int m) {
+        double a11 = H[(m - 1) * n + m - 1];
+        double a12 = H[(m - 1) * n + m];
+        double a21 = H[m * n + m - 1];
+        double a22 = H[m * n + m];
+
+        // LAPACK: scale for numerical stability
+        double s = Math.abs(a11) + Math.abs(a12) + Math.abs(a21) + Math.abs(a22);
+        if (s == 0.0) {
+            return new double[]{0.0, 0.0};
+        }
+
+        a11 /= s; a12 /= s; a21 /= s; a22 /= s;
+        double tr = a11 + a22;
+        double det = a11 * a22 - a12 * a21;
+        double disc = tr * tr * 0.25 - det;
+
+        double rtdisc = Math.sqrt(Math.abs(disc));
+        double shift1 = s * (tr * 0.5 + rtdisc);
+        double shift2 = s * (tr * 0.5 - rtdisc);
+
+        return new double[]{shift1, shift2};
+    }
+
+    /**
+     * Final cleanup of Schur form - zero small elements.
+     */
+    private static void cleanupSchurFormRaw(double[] h, int n) {
+        double thresh = EPSILON * Math.sqrt(n);
+
+        // Zero elements well below the first subdiagonal
+        for (int i = 2; i < n; i++) {
+            int base = i * n;
+            for (int j = 0; j < i - 1; j++) {
+                if (Math.abs(h[base + j]) < thresh) {
+                    h[base + j] = 0.0;
+                }
+            }
+        }
+
+        // Clean up subdiagonal elements that should be zero
+        for (int i = 1; i < n; i++) {
+            double subdiag = Math.abs(h[i * n + i - 1]);
+            double diagSum = Math.abs(h[(i - 1) * n + i - 1]) + Math.abs(h[i * n + i]);
+            if (subdiag < EPSILON * (diagSum + EPSILON)) {
+                h[i * n + i - 1] = 0.0;
+            }
+        }
+    }
+
+    /**
+     * Finds the start of the active block using raw array access.
+     * LAPACK dlahqr approach: conservative but accurate deflation criterion.
+     */
+    private static int findActiveBlockStartRaw(double[] H, int n, int m) {
         int l = m;
+        // LAPACK: scan from bottom up, look for negligible subdiagonal
         while (l > 0) {
-            double subdiag = Math.abs(H.get(l, l - 1));
-            double diagSum = Math.abs(H.get(l - 1, l - 1)) + Math.abs(H.get(l, l));
-            if (subdiag <= EPSILON * (diagSum + EPSILON)) {
-                H.set(l, l - 1, 0.0);
+            double h_ll1 = H[l * n + l - 1];
+            if (h_ll1 == 0.0) break;
+
+            double tst = Math.abs(H[(l - 1) * n + l - 1]) + Math.abs(H[l * n + l]);
+            if (tst == 0.0) {
+                // Check neighbors if diagonal sum is zero
+                if (l - 2 >= 0) tst += Math.abs(H[(l - 1) * n + l - 2]);
+                if (l + 1 < n) tst += Math.abs(H[(l + 1) * n + l]);
+            }
+            // LAPACK criterion: |H[l,l-1]| <= ulp * tst
+            if (Math.abs(h_ll1) <= MACHINE_EPS * tst) {
+                H[l * n + l - 1] = 0.0;
                 break;
             }
             l--;
@@ -144,50 +297,49 @@ public class ImplicitQRFrancis {
     }
 
     /**
-     * Checks if a 2x2 block represents a converged complex conjugate pair.
+     * Checks if a 2x2 block represents a converged complex conjugate pair using raw array access.
      */
-    private static boolean is2x2BlockConverged(Matrix H, int i, int j) {
-        double subdiag = Math.abs(H.get(j, j - 1));
+    private static boolean is2x2BlockConvergedRaw(double[] H, int n, int i, int j) {
+        double subdiag = Math.abs(H[j * n + j - 1]);
         if (subdiag < EPSILON) {
             return true; // Already split
         }
-        
-        // Check if eigenvalues are complex (then it's a converged 2x2 Schur block)
-        double a = H.get(i, i);
-        double b = H.get(i, i + 1);
-        double c = H.get(i + 1, i);
-        double d = H.get(i + 1, i + 1);
+
+        // EJML: scale 2x2 block for numerical stability
+        double a = H[i * n + i];
+        double b = H[i * n + i + 1];
+        double c = H[(i + 1) * n + i];
+        double d = H[(i + 1) * n + i + 1];
+
+        // Scale by max element for overflow protection
+        double maxElem = Math.max(Math.max(Math.abs(a), Math.abs(b)),
+                                   Math.max(Math.abs(c), Math.abs(d)));
+        if (maxElem > 0) {
+            a /= maxElem;
+            b /= maxElem;
+            c /= maxElem;
+            d /= maxElem;
+        }
+
         double disc = (a + d) * (a + d) - 4 * (a * d - b * c);
-        
+
         return disc < 0; // Complex eigenvalues => converged 2x2 block
     }
 
     /**
-     * Performs a simple double-shift Francis QR step (2 shifts).
+     * Generate exceptional shifts for multi-shift QR using raw array access.
      */
-    private static void performDoubleShiftStep(Matrix H, Matrix U, int l, int m) {
-        // Compute Wilkinson shift from bottom 2x2 block
-        double a = H.get(m - 1, m - 1);
-        double b = H.get(m - 1, m);
-        double c = H.get(m, m - 1);
-        double d = H.get(m, m);
+    private static double[] generateExceptionalShiftsRaw(double[] H, int n, int l, int m, int numShifts) {
+        double[] shifts = new double[numShifts];
+        double cornerVal = Math.abs(H[m * n + m]);
+        double scale = Math.max(cornerVal, 1.0);
 
-        double tr = a + d;
-        double det = a * d - b * c;
-        double disc = tr * tr - 4 * det;
-
-        double shift1, shift2;
-        if (disc >= 0) {
-            double sqrt = Math.sqrt(disc);
-            shift1 = (tr + sqrt) / 2;
-            shift2 = (tr - sqrt) / 2;
-        } else {
-            // Complex conjugate pair: use real and imaginary parts
-            shift1 = tr / 2.0;
-            shift2 = tr / 2.0; // Simplified: just use trace
+        // Use deterministic but varied shifts to break symmetry
+        for (int i = 0; i < numShifts; i++) {
+            // LAPACK-style: use ad-hoc formulas based on matrix elements
+            double perturbation = (i + 1) * 0.9473 + 0.1307;
+            shifts[i] = scale * (((i % 2) == 0) ? perturbation : -perturbation);
         }
-
-        double[] shifts = {shift1, shift2};
-        BulgeChasing.performSweep(H, U, l, m, shifts);
+        return shifts;
     }
 }

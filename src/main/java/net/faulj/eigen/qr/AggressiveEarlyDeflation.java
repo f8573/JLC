@@ -25,6 +25,39 @@ public class AggressiveEarlyDeflation {
     private static final int MIN_SIZE_FOR_AED = 50;
 
     /**
+     * Result of Aggressive Early Deflation.
+     */
+    public static class AEDResult {
+        /** Number of eigenvalues successfully deflated. */
+        public final int deflatedCount;
+        /** New active block end after deflation. */
+        public final int newActiveEnd;
+
+        public AEDResult(int deflatedCount, int newActiveEnd) {
+            this.deflatedCount = deflatedCount;
+            this.newActiveEnd = newActiveEnd;
+        }
+    }
+
+    /**
+     * Attempts to deflate eigenvalues within the specified window.
+     * Returns result with deflation count and new active end.
+     *
+     * @param H The global Hessenberg matrix.
+     * @param Q The global accumulation matrix.
+     * @param l The start index of the active submatrix.
+     * @param m The index of the last row/col of the active submatrix.
+     * @param winSize The size of the deflation window.
+     * @param tol The tolerance for deflation.
+     * @param iteration Current iteration (for diagnostics).
+     * @return AEDResult with deflation count and new end.
+     */
+    public static AEDResult process(Matrix H, Matrix Q, int l, int m, int winSize, double tol, int iteration) {
+        int deflated = process(H, Q, m, winSize, tol);
+        return new AEDResult(deflated, m - deflated);
+    }
+
+    /**
      * Attempts to deflate eigenvalues within the specified window.
      * Returns 0 if matrix is too small or deflation is not beneficial.
      *
@@ -36,10 +69,23 @@ public class AggressiveEarlyDeflation {
      * @return The number of eigenvalues successfully deflated.
      */
     public static int process(Matrix H, Matrix Q, int m, int winSize, double tol) {
-        int n = H.getRowCount();
-        
-        // Only use AED for large matrices
-        if (m + 1 < MIN_SIZE_FOR_AED) {
+        return processRaw(H.getRawData(), H.getRowCount(), m, winSize, tol);
+    }
+
+    /**
+     * Attempts to deflate eigenvalues using raw array access for maximum performance.
+     *
+     * @param h The raw Hessenberg matrix data (row-major).
+     * @param n The matrix dimension.
+     * @param m The index of the last row/col of the active submatrix.
+     * @param winSize The size of the deflation window.
+     * @param tol The tolerance for deflation.
+     * @return The number of eigenvalues successfully deflated.
+     */
+    public static int processRaw(double[] h, int n, int m, int winSize, double tol) {
+        // For very small matrices, just do simple deflation check
+        // (full AED is only worth it for large matrices)
+        if (m <= 0) {
             return 0;
         }
 
@@ -56,30 +102,30 @@ public class AggressiveEarlyDeflation {
 
         // Check last element
         if (m > 0) {
-            double subdiag = Math.abs(H.get(m, m - 1));
-            double diagSum = Math.abs(H.get(m - 1, m - 1)) + Math.abs(H.get(m, m));
+            double subdiag = Math.abs(h[m * n + (m - 1)]);
+            double diagSum = Math.abs(h[(m - 1) * n + (m - 1)]) + Math.abs(h[m * n + m]);
             if (subdiag <= tol * (diagSum + tol)) {
-                H.set(m, m - 1, 0.0);
+                h[m * n + (m - 1)] = 0.0;
                 deflatedCount = 1;
             }
         }
 
         // Check if there's a 2x2 block that's converged
         if (deflatedCount == 0 && m > 1) {
-            double subdiag1 = Math.abs(H.get(m, m - 1));
-            double subdiag2 = Math.abs(H.get(m - 1, m - 2));
-            
+            double subdiag1 = Math.abs(h[m * n + (m - 1)]);
+            double subdiag2 = Math.abs(h[(m - 1) * n + (m - 2)]);
+
             // Check if bottom 2x2 forms a complex conjugate pair (converged block)
             if (subdiag1 > tol && subdiag2 <= tol) {
-                double a = H.get(m - 1, m - 1);
-                double b = H.get(m - 1, m);
-                double c = H.get(m, m - 1);
-                double d = H.get(m, m);
+                double a = h[(m - 1) * n + (m - 1)];
+                double b = h[(m - 1) * n + m];
+                double c = h[m * n + (m - 1)];
+                double d = h[m * n + m];
                 double disc = (a + d) * (a + d) - 4 * (a * d - b * c);
-                
+
                 if (disc < 0) {
                     // Complex eigenvalues => converged 2x2 block
-                    H.set(m - 1, m - 2, 0.0);
+                    h[(m - 1) * n + (m - 2)] = 0.0;
                     deflatedCount = 2;
                 }
             }

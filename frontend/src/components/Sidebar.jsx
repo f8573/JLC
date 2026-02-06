@@ -21,7 +21,7 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
   const [diagnostics, setDiagnostics] = useState(null)
   const [running, setRunning] = useState(false)
   const [benchmarkRunning, setBenchmarkRunning] = useState(false)
-  const [benchmarkProgress, setBenchmarkProgress] = useState({ complete: 0, total: 0, mode: 'medium' })
+  const [benchmarkProgress, setBenchmarkProgress] = useState({ complete: 0, total: 0, phase: '' })
   const [showInfoModal, setShowInfoModal] = useState(false)
 
   useEffect(() => {
@@ -41,43 +41,16 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
     return () => window.removeEventListener('storage', load)
   }, [])
 
-  // Fetch diagnostics from backend. Backend expected to run benchmark on startup.
+  // Fetch current backend status snapshot.
   async function fetchDiagnostics() {
     setRunning(true)
     try {
-      // First, try to read the local benchmark results produced by the
-      // `FlopScalingTest` (Algorithm_FLOP_results at repo root). The file is
-      // expected to contain lines like:
-      // HouseholderQR_max_GFLOPs=1.738292
-      // Hessenberg_max_GFLOPs=5.325109
-      // We use the larger of these values as the reported CPU GFLOPs.
-      const resFile = await fetch('/Algorithm_FLOP_results');
-      if (resFile && resFile.ok) {
-        const txt = await resFile.text();
-        const qrMatch = txt.match(/HouseholderQR_max_GFLOPs=([0-9.+-eE]+)/);
-        const hessMatch = txt.match(/Hessenberg_max_GFLOPs=([0-9.+-eE]+)/);
-        const qr = qrMatch ? parseFloat(qrMatch[1]) : null;
-        const hess = hessMatch ? parseFloat(hessMatch[1]) : null;
-        const gflops = Math.max(qr || 0, hess || 0) || null;
-        setDiagnostics({
-          status: gflops ? 'ONLINE' : 'SERVICE_INTERRUPTION',
-          cpu: { name: 'LocalBenchmark', gflops: gflops, state: gflops ? 'online' : 'offline' }
-        })
-        return
-      }
-
-      // Fallback: POST a small sample identity matrix so backend returns diagnostics
-      const sample = { matrix: [[1,0,0],[0,1,0],[0,0,1]] }
-      const res = await fetch('/api/diagnostics', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(sample)
-      })
-      if (!res.ok) throw new Error('no-diagnostics')
+      const res = await fetch('/api/status')
+      if (!res.ok) throw new Error('no-status')
       const json = await res.json()
       setDiagnostics(json)
     } catch (e) {
-      setDiagnostics({ status: 'SERVICE_INTERRUPTION', cpu: { name: 'CPU', gflops: null, state: 'offline' } })
+      setDiagnostics({ status: 'SERVICE_INTERRUPTION', cpu: { name: 'CPU', gflops: null, state: 'offline', queuedJobs: 0 } })
     } finally {
       setRunning(false)
     }
@@ -91,13 +64,7 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
     es.addEventListener('status', (ev) => {
       try {
         const data = JSON.parse(ev.data)
-        // debug incoming SSE payload
-        console.debug('[SSE] status event received:', data)
-        // only update when payload differs to avoid rerenders
-        const current = diagnostics
-        const a = JSON.stringify(current)
-        const b = JSON.stringify(data)
-        if (a !== b) setDiagnostics(data)
+        setDiagnostics(data)
       } catch (e) {
         // ignore malformed events
       }
@@ -110,26 +77,48 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
   }, [])
 
   const cpuState = diagnostics && diagnostics.cpu && diagnostics.cpu.state ? String(diagnostics.cpu.state).toLowerCase() : null
+  const queuedJobs = diagnostics && diagnostics.cpu && Number.isFinite(Number(diagnostics.cpu.queuedJobs))
+    ? Number(diagnostics.cpu.queuedJobs)
+    : 0
+  const systemStatus = (() => {
+    if (cpuState !== 'online') return 'SERVICE_INTERRUPTION'
+    if (queuedJobs > 10) return 'LARGE_QUEUE'
+    if (queuedJobs > 0) return 'BUSY'
+    return 'ONLINE'
+  })()
   const cpuColor = cpuState === 'online' ? 'emerald' : (cpuState === 'offline' ? 'rose' : 'amber')
+  const cpuPillClass = cpuColor === 'emerald'
+    ? 'inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-700 text-sm font-medium'
+    : (cpuColor === 'rose'
+      ? 'inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-rose-50 border border-rose-100 text-rose-700 text-sm font-medium'
+      : 'inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-50 border border-amber-100 text-amber-700 text-sm font-medium')
+  const cpuPingClass = cpuColor === 'emerald' ? 'animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75'
+    : (cpuColor === 'rose' ? 'animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75'
+      : 'animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75')
+  const cpuDotClass = cpuColor === 'emerald' ? 'relative inline-flex rounded-full h-2 w-2 bg-emerald-500'
+    : (cpuColor === 'rose' ? 'relative inline-flex rounded-full h-2 w-2 bg-rose-500'
+      : 'relative inline-flex rounded-full h-2 w-2 bg-amber-500')
 
-  const BENCHMARK_SIZES = [64, 128, 256, 512]
-
-  function getBenchmarkMode() {
-    const stored = (localStorage.getItem('benchmarkMode') || 'medium').toLowerCase()
-    if (stored === 'fast' || stored === 'medium' || stored === 'high-precision') return stored
-    return 'medium'
-  }
-
-  function iterationsForSize(size, mode) {
-    if (mode === 'fast') return 5
-    if (mode === 'medium') return 10
-    if (mode === 'high-precision') {
-      if (size <= 128) return 100
-      if (size <= 256) return 60
-      return 30
-    }
-    return 10
-  }
+  const BENCHMARK_SIZES = [512]
+  const BENCHMARK_ITERATIONS = 5
+  const BENCHMARK_TEST = 'GEMM'
+  const BENCHMARK_PARTS = [
+    { label: 'determinant', present: (p) => p?.basicProperties?.scalarInvariants?.determinant !== undefined && p?.basicProperties?.scalarInvariants?.determinant !== null },
+    { label: 'inverse', present: (p) => !!p?.matrixDecompositions?.derivedMatrices?.inverse },
+    { label: 'qr', present: (p) => !!p?.matrixDecompositions?.primaryDecompositions?.qr },
+    { label: 'lu', present: (p) => !!p?.matrixDecompositions?.primaryDecompositions?.lu },
+    { label: 'cholesky', present: (p) => !!p?.matrixDecompositions?.primaryDecompositions?.cholesky },
+    { label: 'svd', present: (p) => !!p?.matrixDecompositions?.primaryDecompositions?.svd },
+    { label: 'polar', present: (p) => !!p?.matrixDecompositions?.primaryDecompositions?.polar },
+    { label: 'hessenberg', present: (p) => !!p?.matrixDecompositions?.similarityAndSpectral?.hessenbergDecomposition },
+    { label: 'schur', present: (p) => !!p?.matrixDecompositions?.similarityAndSpectral?.schurDecomposition },
+    { label: 'diagonalization', present: (p) => !!p?.matrixDecompositions?.similarityAndSpectral?.diagonalization },
+    { label: 'symmetric spectral', present: (p) => !!p?.matrixDecompositions?.similarityAndSpectral?.symmetricSpectral },
+    { label: 'bidiagonalization', present: (p) => !!p?.matrixDecompositions?.similarityAndSpectral?.bidiagonalization },
+    { label: 'row space basis', present: (p) => !!p?.matrixDecompositions?.subspaceBases?.rowSpaceBasis },
+    { label: 'column space basis', present: (p) => !!p?.matrixDecompositions?.subspaceBases?.columnSpaceBasis },
+    { label: 'null space basis', present: (p) => !!p?.matrixDecompositions?.subspaceBases?.nullSpaceBasis }
+  ]
 
   function seededRandom(seed) {
     let s = seed % 2147483647
@@ -186,14 +175,32 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
     return qr + lu + svd + schur
   }
 
-  function validateDecompositions(payload) {
+  function validateRequiredDiagnostics(payload) {
+    const scalar = payload?.basicProperties?.scalarInvariants
+    const determinant = scalar?.determinant
     const primary = payload?.matrixDecompositions?.primaryDecompositions
     const similarity = payload?.matrixDecompositions?.similarityAndSpectral
-    const qr = payload?.qr || primary?.qr
-    const lu = payload?.lu || primary?.lu
-    const svd = payload?.svd || primary?.svd
-    const schur = payload?.schurDecomposition || similarity?.schurDecomposition
-    return !!(qr && lu && svd && schur)
+    const derived = payload?.matrixDecompositions?.derivedMatrices
+    const subspaces = payload?.matrixDecompositions?.subspaceBases
+    const hasAllPrimary = !!(primary?.qr && primary?.lu && primary?.cholesky && primary?.svd && primary?.polar)
+    const hasAllSimilarity = !!(
+      similarity?.hessenbergDecomposition
+      && similarity?.schurDecomposition
+      && similarity?.diagonalization
+      && similarity?.symmetricSpectral
+      && similarity?.bidiagonalization
+    )
+    const hasInverse = !!derived?.inverse
+    const hasBasisCalcs = !!(subspaces?.rowSpaceBasis && subspaces?.columnSpaceBasis && subspaces?.nullSpaceBasis)
+    return determinant !== undefined && determinant !== null && hasInverse && hasAllPrimary && hasAllSimilarity && hasBasisCalcs
+  }
+
+  function logBenchmarkParts(payload, size, iteration) {
+    for (const part of BENCHMARK_PARTS) {
+      const ok = part.present(payload)
+      setBenchmarkProgress((prev) => ({ ...prev, phase: `size ${size} iter ${iteration}: ${part.label}` }))
+      console.debug(`[Benchmark] size=${size} iter=${iteration} part=${part.label} status=${ok ? 'ok' : 'missing'}`)
+    }
   }
 
   function formatFlopsFromGflops(g) {
@@ -232,127 +239,48 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
     }`
   }
 
-  // Trigger the frontend benchmark (SVD/Schur/QR/LU) with warm-up + outlier removal
+  // Runs diagnostics for 2^n sizes, n=2..9, 5 iterations each.
+  // Performance metric is taken only from the 512x512 runs.
   async function runSystemBenchmark() {
-    const mode = getBenchmarkMode()
-    const totalIterations = BENCHMARK_SIZES.reduce((sum, size) => sum + iterationsForSize(size, mode), 0)
-    setBenchmarkProgress({ complete: 0, total: totalIterations, mode })
+    const totalIterations = BENCHMARK_ITERATIONS
+    setBenchmarkProgress({ complete: 0, total: totalIterations, phase: `starting Diagnostic benchmark (${BENCHMARK_TEST} ${BENCHMARK_SIZES[0]}x${BENCHMARK_SIZES[0]})` })
     setBenchmarkRunning(true)
 
     console.groupCollapsed('[Benchmark] runSystemBenchmark')
-    console.info('[Benchmark] mode:', mode)
-    console.info('[Benchmark] sizes:', BENCHMARK_SIZES)
+    console.info('[Benchmark] source: Diagnostic backend endpoint')
+    console.info('[Benchmark] size:', BENCHMARK_SIZES[0])
+    console.info('[Benchmark] test:', BENCHMARK_TEST)
+    console.info('[Benchmark] iterations:', BENCHMARK_ITERATIONS)
     console.info('[Benchmark] totalIterations:', totalIterations)
 
     try {
-      const perSizeResults = []
-      let totalFlops = 0
-      let totalTimeSec = 0
+      setBenchmarkProgress((prev) => ({ ...prev, phase: `calling /api/benchmark/diagnostic?sizex=${BENCHMARK_SIZES[0]}&sizey=${BENCHMARK_SIZES[0]}&test=${BENCHMARK_TEST}` }))
+      const res = await fetch(`/api/benchmark/diagnostic?sizex=${BENCHMARK_SIZES[0]}&sizey=${BENCHMARK_SIZES[0]}&test=${encodeURIComponent(BENCHMARK_TEST)}&iterations=${BENCHMARK_ITERATIONS}`)
+      if (!res.ok) throw new Error('diagnostic-benchmark-failed')
+      const json = await res.json()
+      const rows = Array.isArray(json?.iterations) ? json.iterations : []
+      rows.forEach((row, idx) => {
+        const op = row?.operation || 'unknown'
+        const iter = row?.iteration ?? '?'
+        const n = row?.n ?? '?'
+        setBenchmarkProgress((prev) => ({
+          ...prev,
+          complete: Math.min(BENCHMARK_ITERATIONS, Math.max(prev.complete, Number(iter) || 0)),
+          phase: `n=${n} iter=${iter}: ${op.toLowerCase()}`
+        }))
+        console.debug(`[Benchmark] n=${n} iter=${iter} op=${op} ms=${row?.ms} flopsPerSec=${row?.flopsPerSec}`)
+      })
 
-      for (let sIdx = 0; sIdx < BENCHMARK_SIZES.length; sIdx++) {
-        const size = BENCHMARK_SIZES[sIdx]
-        const matrix = buildRandomMatrix(size, 1337 + size)
-
-        console.groupCollapsed(`[Benchmark] size=${size} (${sIdx + 1}/${BENCHMARK_SIZES.length})`)
-        console.info('[Benchmark] warmup: start')
-
-        // Warm-up run (not counted)
-        await fetch('/api/diagnostics', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ matrix })
-        })
-
-        console.info('[Benchmark] warmup: done')
-
-        const iterations = iterationsForSize(size, mode)
-        const durations = []
-        for (let i = 0; i < iterations; i++) {
-          console.debug(`[Benchmark] iter ${i + 1}/${iterations} size=${size}: request start`)
-          const t0 = performance.now()
-          const res = await fetch('/api/diagnostics', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ matrix })
-          })
-          console.debug(`[Benchmark] iter ${i + 1}/${iterations} size=${size}: status=${res.status}`)
-          if (!res.ok) throw new Error('benchmark-failed')
-          const json = await res.json()
-          console.debug(`[Benchmark] iter ${i + 1}/${iterations} size=${size}: payload keys`, Object.keys(json || {}))
-          if (!validateDecompositions(json)) throw new Error('benchmark-missing-decompositions')
-          const t1 = performance.now()
-          const durationMs = t1 - t0
-          durations.push(durationMs)
-          console.debug(`[Benchmark] iter ${i + 1}/${iterations} size=${size}: durationMs=${durationMs.toFixed(2)}`)
-          setBenchmarkProgress((prev) => ({ ...prev, complete: Math.min(prev.complete + 1, prev.total) }))
-        }
-
-        const filtered = removeOutliers(durations)
-        const avgMs = average(filtered)
-        const minMs = filtered.length ? Math.min(...filtered) : null
-        const maxMs = filtered.length ? Math.max(...filtered) : null
-        const flopsPerIter = estimateFlopsPerIteration(size)
-
-        console.info('[Benchmark] size summary', {
-          size,
-          iterations,
-          samples: durations.length,
-          samplesUsed: filtered.length,
-          avgMs,
-          minMs,
-          maxMs,
-          flopsPerIter
-        })
-
-        if (filtered.length > 0) {
-          totalFlops += flopsPerIter * filtered.length
-          totalTimeSec += filtered.reduce((acc, v) => acc + v, 0) / 1000
-        }
-
-        perSizeResults.push({
-          size,
-          iterations,
-          warmup: 1,
-          samples: durations.length,
-          samplesUsed: filtered.length,
-          avgMs,
-          minMs,
-          maxMs
-        })
-
-        console.groupEnd()
-      }
-
-      const gflopsAvg = totalTimeSec > 0 ? (totalFlops / totalTimeSec) / 1e9 : null
-      console.info('[Benchmark] totals', { totalFlops, totalTimeSec, gflopsAvg })
-
-      const cpu = {
-        name: 'FrontendBenchmark',
-        gflops: gflopsAvg,
-        state: 'online',
-        benchmark: {
-          mode,
-          decompositions: ['SVD', 'Schur', 'QR', 'LU'],
-          sizes: BENCHMARK_SIZES,
-          totalIterations,
-          outlierPolicy: 'iqr-1.5',
-          gflopsAvg,
-          results: perSizeResults
-        }
-      }
-
-      setDiagnostics((prev) => ({
-        ...(prev || {}),
-        status: 'ONLINE',
-        cpu
-      }))
-      console.info('[Benchmark] diagnostics updated', cpu)
+      setBenchmarkProgress((prev) => ({ ...prev, complete: BENCHMARK_ITERATIONS, phase: `completed Diagnostic benchmark (${BENCHMARK_TEST} ${BENCHMARK_SIZES[0]}x${BENCHMARK_SIZES[0]})` }))
+      setDiagnostics((prev) => ({ ...(prev || {}), ...(json || {}) }))
+      console.info('[Benchmark] diagnostics updated from backend benchmark', json?.cpu)
     } catch (e) {
       console.error('[Benchmark] failed', e)
-      setDiagnostics({ status: 'SERVICE_INTERRUPTION', cpu: { name: 'CPU', gflops: null, state: 'offline' } })
+      setDiagnostics({ status: 'SERVICE_INTERRUPTION', cpu: { name: 'CPU', gflops: null, state: 'offline', queuedJobs: 0 } })
     } finally {
       console.groupEnd()
       setBenchmarkRunning(false)
+      setBenchmarkProgress((prev) => ({ ...prev, phase: '' }))
     }
   }
 
@@ -441,13 +369,13 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
             <span className="text-[11px] font-bold text-slate-700 dark:text-slate-200 uppercase">System Status</span>
           </div>
           <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed mb-4">
-            CPU is <span className={`font-bold ${diagnostics && diagnostics.cpu ? (diagnostics.cpu.state === 'online' ? 'text-emerald-600' : (diagnostics.cpu.state === 'offline' ? 'text-rose-600' : 'text-amber-500')) : 'text-rose-600'}`}>{diagnostics && diagnostics.cpu ? diagnostics.cpu.state : 'offline'}</span>.
+            CPU is <span className={`font-bold ${cpuState === 'online' ? 'text-emerald-600' : (cpuState === 'offline' ? 'text-rose-600' : 'text-amber-500')}`}>{cpuState || 'offline'}</span> with queue position <span className="font-bold">{queuedJobs}</span>.
           </p>
             <div className="space-y-2">
             {/* ONLINE */}
-            <div className={`flex items-center gap-2 ${diagnostics && diagnostics.status !== 'ONLINE' ? 'opacity-30 grayscale' : ''}`}>
+            <div className={`flex items-center gap-2 ${systemStatus !== 'ONLINE' ? 'opacity-30 grayscale' : ''}`}>
               <div className="relative flex size-2">
-                {diagnostics && diagnostics.status === 'ONLINE' ? (
+                {systemStatus === 'ONLINE' ? (
                   <>
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full size-2 bg-emerald-500"></span>
@@ -460,20 +388,20 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
             </div>
 
               {/* BUSY (moderate queue) */}
-              <div className={`flex items-center gap-2 ${diagnostics && diagnostics.status !== 'BUSY' ? 'opacity-30 grayscale' : ''}`}>
-                <div className={`size-2 rounded-full ${diagnostics && diagnostics.status === 'BUSY' ? 'bg-sky-500' : 'bg-sky-400'}`}></div>
+              <div className={`flex items-center gap-2 ${systemStatus !== 'BUSY' ? 'opacity-30 grayscale' : ''}`}>
+                <div className={`size-2 rounded-full ${systemStatus === 'BUSY' ? 'bg-sky-500' : 'bg-sky-400'}`}></div>
                 <span className="text-[10px] font-bold text-slate-800 dark:text-slate-200">BUSY</span>
               </div>
 
             {/* LARGE QUEUE */}
-            <div className={`flex items-center gap-2 ${diagnostics && diagnostics.status !== 'LARGE_QUEUE' ? 'opacity-30 grayscale' : ''}`}>
-              <div className={`size-2 rounded-full ${diagnostics && diagnostics.status === 'LARGE_QUEUE' ? 'bg-yellow-400' : 'bg-yellow-300'}`}></div>
+            <div className={`flex items-center gap-2 ${systemStatus !== 'LARGE_QUEUE' ? 'opacity-30 grayscale' : ''}`}>
+              <div className={`size-2 rounded-full ${systemStatus === 'LARGE_QUEUE' ? 'bg-yellow-400' : 'bg-yellow-300'}`}></div>
               <span className="text-[10px] font-bold text-slate-800 dark:text-slate-200">LARGE QUEUE</span>
             </div>
 
             {/* SERVICE INTERRUPTION */}
-            <div className={`flex items-center gap-2 ${diagnostics && diagnostics.status !== 'SERVICE_INTERRUPTION' ? 'opacity-30 grayscale' : ''}`}>
-              <div className={`size-2 rounded-full ${diagnostics && diagnostics.status === 'SERVICE_INTERRUPTION' ? 'bg-red-500' : 'bg-red-400'}`}></div>
+            <div className={`flex items-center gap-2 ${systemStatus !== 'SERVICE_INTERRUPTION' ? 'opacity-30 grayscale' : ''}`}>
+              <div className={`size-2 rounded-full ${systemStatus === 'SERVICE_INTERRUPTION' ? 'bg-red-500' : 'bg-red-400'}`}></div>
               <span className="text-[10px] font-bold text-slate-800 dark:text-slate-200">SERVICE INTERRUPTION</span>
             </div>
           </div>
@@ -506,39 +434,39 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
                 <section>
                   <div className="flex flex-col items-center justify-center">
                     <div className="flex items-start justify-center gap-8 md:gap-12 mb-6 w-full">
-                      <div className={`flex flex-col items-center gap-3 ${diagnostics && diagnostics.status !== 'ONLINE' ? 'opacity-30 grayscale' : ''}`}>
+                      <div className={`flex flex-col items-center gap-3 ${systemStatus !== 'ONLINE' ? 'opacity-30 grayscale' : ''}`}>
                         <div className="relative flex items-center justify-center size-14 rounded-full bg-emerald-50 border-2 border-emerald-100 shadow-[0_0_20px_rgba(16,185,129,0.3)]">
                           <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-20 animate-ping"></span>
                           <span className="material-symbols-outlined text-3xl text-emerald-500">check_circle</span>
                         </div>
                         <span className="text-[11px] font-bold text-emerald-600 tracking-wider">ONLINE</span>
                       </div>
-                        <div className={`flex flex-col items-center gap-3 ${diagnostics && diagnostics.status !== 'BUSY' ? 'opacity-30 grayscale' : ''}`}>
+                        <div className={`flex flex-col items-center gap-3 ${systemStatus !== 'BUSY' ? 'opacity-30 grayscale' : ''}`}>
                           <div className="flex items-center justify-center size-14 rounded-full bg-slate-50 border-2 border-slate-100">
                             <span className="material-symbols-outlined text-3xl text-sky-500">autorenew</span>
                           </div>
                           <span className="text-[11px] font-bold text-slate-600 tracking-wider">BUSY</span>
                         </div>
-                      <div className={`flex flex-col items-center gap-3 ${diagnostics && diagnostics.status !== 'LARGE_QUEUE' ? 'opacity-30 grayscale' : ''}`}>
+                      <div className={`flex flex-col items-center gap-3 ${systemStatus !== 'LARGE_QUEUE' ? 'opacity-30 grayscale' : ''}`}>
                         <div className="flex items-center justify-center size-14 rounded-full bg-slate-50 border-2 border-slate-100">
                           <span className="material-symbols-outlined text-3xl text-yellow-500">hourglass_top</span>
                         </div>
                         <span className="text-[11px] font-bold text-slate-600 tracking-wider">LARGE QUEUE</span>
                       </div>
-                      <div className={`flex flex-col items-center gap-3 ${diagnostics && diagnostics.status !== 'SERVICE_INTERRUPTION' ? 'opacity-30 grayscale' : ''}`}>
+                      <div className={`flex flex-col items-center gap-3 ${systemStatus !== 'SERVICE_INTERRUPTION' ? 'opacity-30 grayscale' : ''}`}>
                         <div className="flex items-center justify-center size-14 rounded-full bg-slate-50 border-2 border-slate-100">
                           <span className="material-symbols-outlined text-3xl text-red-500">warning</span>
                         </div>
                         <span className="text-[11px] font-bold text-slate-600 tracking-wider">SERVICE INTERRUPTION</span>
                       </div>
                     </div>
-                      <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-${cpuColor}-50 border border-${cpuColor}-100 text-${cpuColor}-700 text-sm font-medium`}>
+                      <div className={cpuPillClass}>
                         <span className="relative flex h-2 w-2">
-                          <span className={`animate-ping absolute inline-flex h-full w-full rounded-full bg-${cpuColor}-400 opacity-75`}></span>
-                          <span className={`relative inline-flex rounded-full h-2 w-2 bg-${cpuColor}-500`}></span>
+                          <span className={cpuPingClass}></span>
+                          <span className={cpuDotClass}></span>
                         </span>
                         {cpuState ? (
-                          cpuState === 'online' ? 'CPU Kernel is operational' : `CPU Kernel: ${diagnostics.cpu.state.replace(/_/g, ' ')}`
+                          cpuState === 'online' ? `CPU Kernel is operational (queue=${queuedJobs})` : `CPU Kernel: ${cpuState}`
                         ) : 'CPU Kernel status'}
                       </div>
                   </div>
@@ -622,7 +550,9 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
                     </span>
                   )}
                   <span className="material-symbols-outlined">speed</span>
-                  {benchmarkRunning ? `Benchmarking (${benchmarkProgress.complete}/${benchmarkProgress.total})` : 'Run System Benchmark'}
+                  {benchmarkRunning
+                    ? `Benchmarking (${benchmarkProgress.complete}/${benchmarkProgress.total}) ${benchmarkProgress.phase ? `- ${benchmarkProgress.phase}` : ''}`
+                    : 'Run System Benchmark'}
                 </button>
               </div>
             </div>

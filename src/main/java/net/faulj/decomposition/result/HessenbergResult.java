@@ -151,6 +151,13 @@ public class HessenbergResult {
     }
 
     /**
+     * @return the original matrix A that was decomposed
+     */
+    public Matrix getOriginal() {
+        return A;
+    }
+
+    /**
      * Reconstructs A via A = Q H Q^T
      */
     /**
