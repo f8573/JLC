@@ -133,6 +133,7 @@ public class DiagnosticMetrics {
         private double[][] matrixImagData;
         private Double trace;
         private Double determinant;
+        private Double pseudoDeterminant;
         private Double conditionNumber;
         private Double reciprocalConditionNumber;
         private Integer rank;
@@ -197,6 +198,7 @@ public class DiagnosticMetrics {
 
         private DiagnosticItem<Matrix> rref;
         private DiagnosticItem<Matrix> inverse;
+        private DiagnosticItem<Matrix> pseudoInverse;
         private DiagnosticItem<Set<Vector>> rowSpaceBasis;
         private DiagnosticItem<Set<Vector>> columnSpaceBasis;
         private DiagnosticItem<Set<Vector>> nullSpaceBasis;
@@ -331,6 +333,13 @@ public class DiagnosticMetrics {
          */
         public Double getDeterminant() {
             return determinant;
+        }
+
+        /**
+         * @return pseudo-determinant (product of singular values above SVD cutoff)
+         */
+        public Double getPseudoDeterminant() {
+            return pseudoDeterminant;
         }
 
         /**
@@ -765,6 +774,13 @@ public class DiagnosticMetrics {
         }
 
         /**
+         * @return pseudo-inverse diagnostic item
+         */
+        public DiagnosticItem<Matrix> getPseudoInverse() {
+            return pseudoInverse;
+        }
+
+        /**
          * @return row space basis diagnostic item
          */
         public DiagnosticItem<Set<Vector>> getRowSpaceBasis() {
@@ -983,6 +999,25 @@ public class DiagnosticMetrics {
                 diag.rank = RankEstimation.effectiveRank(svdResult.getSingularValues(), diag.rows, diag.cols);
                 diag.nullity = diag.cols - diag.rank;
                 diag.conditionNumber = cond;
+
+                double svdCutoff = RankEstimation.defaultTolerance(diag.singularValues, diag.rows, diag.cols);
+                diag.pseudoDeterminant = computePseudoDeterminant(diag.singularValues, svdCutoff);
+
+                int minDimSvd = Math.min(diag.rows, diag.cols);
+                boolean rankDeficientSvd = diag.rank != null && diag.rank < minDimSvd;
+                boolean nearlySingularByCond = Double.isFinite(cond) && cond >= 1e12;
+                boolean shouldComputePseudoInverse = !diag.square || rankDeficientSvd || nearlySingularByCond;
+                if (shouldComputePseudoInverse) {
+                    Matrix pseudoInv = computePseudoInverseFromSvd(svdResult, svdCutoff);
+                    Matrix reconstructed = A.multiply(pseudoInv).multiply(A);
+                    MatrixAccuracyValidator.ValidationResult pinvValidation =
+                            MatrixAccuracyValidator.validate(
+                                    A,
+                                    reconstructed,
+                                    "Pseudo-inverse A*A+*A",
+                                    safeConditionEstimate(cond));
+                    diag.pseudoInverse = itemFromValidation("pseudoInverse", pseudoInv, pinvValidation, null);
+                }
             } catch (RuntimeException ex) {
                 diag.svd = errorItem("svd", "SVD failed", ex);
             }
@@ -2208,6 +2243,47 @@ public class DiagnosticMetrics {
         Matrix rref = A.copy();
         MatrixUtils.toReducedRowEchelonForm(rref);
         return rankFromRref(rref, tol);
+    }
+
+    private static double computePseudoDeterminant(double[] singularValues, double cutoff) {
+        if (singularValues == null || singularValues.length == 0) {
+            return 0.0;
+        }
+        double product = 1.0;
+        int nonZeroCount = 0;
+        for (double s : singularValues) {
+            double a = Math.abs(s);
+            if (a > cutoff) {
+                product *= a;
+                nonZeroCount++;
+            }
+        }
+        return nonZeroCount == 0 ? 0.0 : product;
+    }
+
+    private static Matrix computePseudoInverseFromSvd(SVDResult svd, double cutoff) {
+        Matrix U = svd.getU();
+        Matrix V = svd.getV();
+        double[] singularValues = svd.getSingularValues();
+
+        int m = U.getRowCount();
+        int n = V.getRowCount();
+        int r = Math.min(Math.min(U.getColumnCount(), V.getColumnCount()), singularValues.length);
+        if (r == 0) {
+            return Matrix.zero(n, m);
+        }
+
+        Matrix uThin = U.getColumnCount() == r ? U : U.crop(0, m - 1, 0, r - 1);
+        Matrix vThin = V.getColumnCount() == r ? V : V.crop(0, n - 1, 0, r - 1);
+
+        Matrix sigmaPlus = new Matrix(r, r);
+        for (int i = 0; i < r; i++) {
+            double s = singularValues[i];
+            if (Math.abs(s) > cutoff) {
+                sigmaPlus.set(i, i, 1.0 / s);
+            }
+        }
+        return vThin.multiply(sigmaPlus).multiply(uThin.transpose());
     }
 
     private static double max(double[] values) {

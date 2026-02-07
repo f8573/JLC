@@ -143,7 +143,7 @@ export default function MatrixReportPage({ matrixString }) {
   }
 
   return (
-    <div className="bg-slate-50 font-display text-slate-900 min-h-screen">
+    <div className="bg-slate-50 font-display text-slate-900 h-screen overflow-hidden flex flex-col">
       <header className="flex items-center justify-between border-b border-solid border-slate-200 bg-white px-6 py-3 sticky top-0 z-50 no-print">
         <div className="flex items-center gap-8">
           <button 
@@ -169,8 +169,9 @@ export default function MatrixReportPage({ matrixString }) {
           </button>
         </div>
       </header>
-      <div className="max-w-[1200px] mx-auto flex gap-8 p-8">
-        <main className="flex-1 bg-white border border-border-elegant shadow-sm rounded-xl p-12 report-container min-h-[1500px]">
+      <div className="flex-1 overflow-y-auto custom-scrollbar">
+        <div className="max-w-[1200px] mx-auto flex gap-8 p-8">
+          <main className="flex-1 bg-white border border-border-elegant shadow-sm rounded-xl p-12 report-container min-h-[1500px]">
           <header className="mb-12">
             <div className="flex justify-between items-start mb-6">
               <div>
@@ -508,8 +509,8 @@ export default function MatrixReportPage({ matrixString }) {
             <span>Page 1 of 1</span>
             <span>Confidential Analysis Report</span>
           </footer>
-        </main>
-        <aside className="w-64 no-print h-fit sticky top-24">
+          </main>
+          <aside className="w-64 no-print h-fit sticky top-24">
           <div className="bg-white rounded-xl border border-slate-200 p-6">
             <h4 className="text-xs font-bold text-slate-900 mb-4 flex items-center gap-2">
               <span className="material-symbols-outlined text-primary text-[18px]">list_alt</span>
@@ -537,7 +538,8 @@ export default function MatrixReportPage({ matrixString }) {
             <p className="text-[10px] font-bold text-primary mb-1">Analysis Mode</p>
             <p className="text-xs text-slate-600">High-precision double float (64-bit) JLA backend.</p>
           </div>
-        </aside>
+          </aside>
+        </div>
       </div>
       <JsonModal 
         open={jsonModalOpen} 
@@ -548,4 +550,3 @@ export default function MatrixReportPage({ matrixString }) {
     </div>
   )
 }
-

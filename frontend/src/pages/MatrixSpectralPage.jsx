@@ -181,6 +181,14 @@ export default function MatrixSpectralPage({ matrixString }) {
     return result
   }
 
+  const countBasisVectors = (vecs) => {
+    if (!vecs) return 0
+    if (Array.isArray(vecs)) return vecs.length
+    if (vecs.cols !== undefined) return Number(vecs.cols) || 0
+    if (vecs.data && Array.isArray(vecs.data) && vecs.data[0]) return vecs.data[0].length || 0
+    return 0
+  }
+
   const matrixToDisplay = (matrix) => {
     if (!matrix) return null
     const data = matrix.data || matrix
@@ -585,7 +593,11 @@ export default function MatrixSpectralPage({ matrixString }) {
                   // Prefer explicit eigenbasis (list of basis vectors). Fall back to eigenspace if no eigenbasis provided.
                   const eigenbasisVectors = info?.eigenbasis?.vectors || null
                   const eigenspaceVectors = info?.eigenspace?.vectors || null
-                  const eigenbasisDim = info?.dimension ?? info?.geometricMultiplicity ?? (eigenbasisVectors ? eigenbasisVectors.length : (eigenspaceVectors ? eigenspaceVectors.length : 0))
+                  const rawDim = Number(info?.dimension)
+                  const fromInfoDim = Number.isFinite(rawDim) && rawDim > 0 ? rawDim : null
+                  const fromGeom = (info?.geometricMultiplicity ?? geoVal)
+                  const inferredDim = Math.max(countBasisVectors(eigenbasisVectors), countBasisVectors(eigenspaceVectors))
+                  const eigenbasisDim = fromInfoDim ?? fromGeom ?? inferredDim
                   // Convert eigenspace vectors into a row-major matrix for display when needed
                   const eigenbasisAsColumns = eigenspaceVectorsToMatrix(eigenspaceVectors)
                   // In ALL_WITH_REPS mode, idx maps directly to eigenvalues[idx]; in UNIQUE_NO_REPS mode, find first occurrence
@@ -856,6 +868,5 @@ export default function MatrixSpectralPage({ matrixString }) {
     </MatrixAnalysisLayout>
   )
 }
-
 
 

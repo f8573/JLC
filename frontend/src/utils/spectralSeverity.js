@@ -325,7 +325,11 @@ export function computePerEigenvalueSeverity(eigenvalue, index, diagnostics, opt
 
   // Extract algebraic/geometric multiplicity values
   const algVal = (perEntry && (perEntry.algebraicMultiplicity !== undefined && perEntry.algebraicMultiplicity !== null)) ? perEntry.algebraicMultiplicity : (alg[index] !== undefined ? alg[index] : null)
-  const dimVal = (perEntry && (perEntry.dimension !== undefined || perEntry.geometricMultiplicity !== undefined)) ? (perEntry.dimension ?? perEntry.geometricMultiplicity) : (geom[index] !== undefined ? geom[index] : null)
+  const rawDim = perEntry?.dimension
+  const dimFromEntry = Number.isFinite(Number(rawDim)) && Number(rawDim) > 0 ? Number(rawDim) : null
+  const dimVal = (perEntry && (dimFromEntry !== null || perEntry.geometricMultiplicity !== undefined))
+    ? (dimFromEntry ?? perEntry.geometricMultiplicity)
+    : (geom[index] !== undefined ? geom[index] : null)
 
   // Check if eigenvalue is repeated AND has algebraic != geometric multiplicity
   const hasDefect = algVal && dimVal && algVal > 1 && algVal !== dimVal
@@ -815,4 +819,3 @@ export function computeNonOrthogonalEigenvectors(diagnostics, threshold = 0.1) {
   
   return nonOrthogonalIndices
 }
-

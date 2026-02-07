@@ -132,6 +132,18 @@ public class BulgeChasing {
                 }
             }
         }
+
+        // Ensure Hessenberg structure is preserved: zero out any fill-in
+        // strictly below the first subdiagonal that may have arisen due
+        // to numerical accumulation in the sweep. This is a conservative
+        // cleanup that keeps the matrix in valid Hessenberg form for
+        // downstream routines and tests.
+        for (int i = 2; i < n; i++) {
+            int base = i * n;
+            for (int j = 0; j < i - 1; j++) {
+                h[base + j] = 0.0;
+            }
+        }
     }
 
     /**

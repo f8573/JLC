@@ -21,6 +21,19 @@ export default function MatrixBasicPage({ matrixString }) {
   usePrecisionUpdate()
   
   const { diagnostics } = useDiagnostics(matrixString)
+  const pseudoDeterminant = diagnostics?.pseudoDeterminant ?? diagnostics?.psuedoDeterminant
+  const usePseudoDeterminant = !!(
+    diagnostics &&
+    (
+      diagnostics.square === false ||
+      diagnostics.singular === true ||
+      diagnostics.nearlySingular === true
+    ) &&
+    pseudoDeterminant !== null &&
+    pseudoDeterminant !== undefined
+  )
+  const displayedDeterminant = usePseudoDeterminant ? pseudoDeterminant : diagnostics?.determinant
+  const determinantLabel = usePseudoDeterminant ? '\\text{pdet}(A)' : '\\text{det}(A)'
 
   const rows = diagnostics?.rows
   const cols = diagnostics?.columns
@@ -95,9 +108,9 @@ export default function MatrixBasicPage({ matrixString }) {
       icon: 'calculate',
       label: 'Scalar Invariants',
       value: (
-        <div>
-          <div><Latex tex={`\\text{trace} = ${formatNumber(diagnostics?.trace, 4)}`} /></div>
-          <div><Latex tex={`\\text{det}(A) = ${formatNumber(diagnostics?.determinant, 4)}`} /></div>
+          <div>
+            <div><Latex tex={`\\text{trace} = ${formatNumber(diagnostics?.trace, 4)}`} /></div>
+          <div><Latex tex={`${determinantLabel} = ${formatNumber(displayedDeterminant, 4)}`} /></div>
         </div>
       ),
       iconBg: 'bg-sky-100',
@@ -270,4 +283,3 @@ export default function MatrixBasicPage({ matrixString }) {
     </MatrixAnalysisLayout>
   )
 }
-

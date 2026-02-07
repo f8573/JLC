@@ -38,9 +38,20 @@ export default function SpectrumMap({ eigenvalues = [], spectralRadius = 0, widt
   const mapY = (i, h = height) => h - ((i - view.minI) / (view.maxI - view.minI)) * h
 
   // simple trajectories: deterministic pseudo-random direction per eigenvalue
+  // avoid rendering extremely large numbers of SVG elements: sample eigenvalues for trajectories
+  const MAX_TRAJ = 200
+  const sampledIndices = useMemo(() => {
+    if (!eigenvalues || eigenvalues.length <= MAX_TRAJ) return eigenvalues.map((_, i) => i)
+    const step = Math.ceil(eigenvalues.length / MAX_TRAJ)
+    const idxs = []
+    for (let i = 0; i < eigenvalues.length; i += step) idxs.push(i)
+    return idxs
+  }, [eigenvalues])
+
   const trajectories = useMemo(() => {
     const rnd = makeSeededRandom(42)
-    return eigenvalues.map((ev, idx) => {
+    return sampledIndices.map((idx) => {
+      const ev = eigenvalues[idx]
       const angle = rnd() * Math.PI * 2
       const mag = (Math.abs((ev?.real ?? 0)) + Math.abs((ev?.imag ?? 0)) + 1) * 0.04
       const dx = Math.cos(angle) * mag
@@ -54,11 +65,13 @@ export default function SpectrumMap({ eigenvalues = [], spectralRadius = 0, widt
       }
       return points
     })
-  }, [eigenvalues])
+  }, [eigenvalues, sampledIndices])
 
   // pseudospectrum approximation: color by min distance to eigenvalues
   const grid = useMemo(() => {
-    const cols = 100, rows = 100
+    // lower resolution grid when many eigenvalues to reduce SVG load
+    const cols = eigenvalues && eigenvalues.length > 300 ? 60 : 100
+    const rows = cols
     const cells = []
     for (let cy = 0; cy < rows; cy++) {
       for (let cx = 0; cx < cols; cx++) {
@@ -108,8 +121,10 @@ export default function SpectrumMap({ eigenvalues = [], spectralRadius = 0, widt
           />
           {/* marker at t */}
           {(() => {
-            const k = Math.floor(t * (pts.length - 1))
-            const p = pts[k]
+            // map t in [-100,100] to normalized [-1,1] then to index [0, pts.length-1]
+            const norm = Math.max(-1, Math.min(1, (t || 0) / 100))
+            const k = Math.max(0, Math.min(pts.length - 1, Math.floor((norm + 1) / 2 * (pts.length - 1))))
+            const p = pts[k] || pts[0]
             return <circle cx={mapX(p.real, w)} cy={mapY(p.imag, h)} r={3.5} fill={idx % 2 === 0 ? '#7c3aed' : '#0ea5a6'} />
           })()}
         </g>
@@ -131,7 +146,7 @@ export default function SpectrumMap({ eigenvalues = [], spectralRadius = 0, widt
             <button className={`px-2 py-1 text-xs rounded ${tab === 'traj' ? 'bg-primary text-white' : 'bg-slate-50'}`} onClick={() => setTab('traj')}>Trajectories</button>
             <button className={`px-2 py-1 text-xs rounded ${tab === 'pseudo' ? 'bg-primary text-white' : 'bg-slate-50'}`} onClick={() => setTab('pseudo')}>Pseudospectrum</button>
           </div>
-          {tab === 'traj' && (<div className="text-xs">Perturbation t: <input type="range" min={-1} max={1} step={0.01} value={t} onChange={(e) => setT(Number(e.target.value))} /></div>)}
+          {/* slider removed; `t` ranges -100..100 and is controlled externally or programmatically */}
         </div>
       )}
       <div style={{ width, height }} className="rounded border border-slate-100 bg-white overflow-hidden cursor-pointer" onClick={() => setFullscreen(true)}>
@@ -158,7 +173,7 @@ export default function SpectrumMap({ eigenvalues = [], spectralRadius = 0, widt
                     <button className={`px-2 py-1 text-xs rounded ${tab === 'pseudo' ? 'bg-primary text-white' : 'bg-slate-50'}`} onClick={() => setTab('pseudo')}>Pseudospectrum</button>
                   </div>
                   <div className="flex items-center gap-2">
-                    {tab === 'traj' && (<div className="text-xs">Perturbation t: <input type="range" min={-2} max={2} step={0.01} value={t} onChange={(e) => setT(Number(e.target.value))} /></div>)}
+                    {/* slider removed in fullscreen modal as well */}
                     <button className="px-2 py-1 text-sm bg-slate-50 rounded" onClick={() => setFullscreen(false)}>Close</button>
                   </div>
                 </div>

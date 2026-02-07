@@ -56,7 +56,7 @@ function BasisSetSection({ title, vectors }) {
         <h2 className="text-lg font-bold text-slate-800">{title}</h2>
         {available && (
           <span className="text-xs font-bold px-3 py-1 rounded-full text-primary bg-primary/5 border border-primary/10">
-            dim = {numVectors}
+            <Latex tex={`\\text{dim}=${numVectors}`} />
           </span>
         )}
       </div>
@@ -79,7 +79,7 @@ function BasisSetSection({ title, vectors }) {
  * @param {Object} props
  * @param {string} props.title
  * @param {React.ReactNode} [props.formula]
- * @param {string} [props.formulaTex] - LaTeX formula for the modal
+ * @param {string} [props.formulaTex] - LaTeX formula for header and modal
  * @param {Array<{label: React.ReactNode, data?: number[][], w?: number, g?: number, s?: string, precision?: number}>} [props.data]
  * @param {string} [props.label]
  * @param {boolean} [props.available=true]
@@ -103,7 +103,11 @@ function DecompSection({ title, formula, formulaTex, data, label, available = tr
             />
           )}
         </div>
-        {formula && <span className={`text-xs font-bold px-3 py-1 rounded-full ${available ? 'text-primary bg-primary/5 border border-primary/10' : 'text-slate-400 bg-slate-100'}`}>{formula}</span>}
+        {(formulaTex || formula) && (
+          <span className={`text-xs font-bold px-3 py-1 rounded-full ${available ? 'text-primary bg-primary/5 border border-primary/10' : 'text-slate-400 bg-slate-100'}`}>
+            {formulaTex ? <Latex tex={formulaTex} /> : formula}
+          </span>
+        )}
       </div>
       <div className="bg-slate-50/50 p-6 rounded-xl border border-slate-100">
         {available && data && data.length > 0 ? (
@@ -244,6 +248,10 @@ export default function MatrixDecomposePage({ matrixString }) {
   const inverseRecon = originalMatrix && inverseMatrix
     ? multiplyMatrices(originalMatrix, inverseMatrix)
     : null
+  const pseudoInverseMatrix = diagnostics?.pseudoInverseMatrix?.data || diagnostics?.svd?.pseudoInverse?.data || null
+  const pseudoInverseRecon = originalMatrix && pseudoInverseMatrix
+    ? multiplyMatrices(multiplyMatrices(originalMatrix, pseudoInverseMatrix), originalMatrix)
+    : null
   // The "expected" matrix for inverse validation is the identity
   const n = originalMatrix?.length || 0
   const identityMatrix = n > 0 ? createIdentityMatrix(n) : null
@@ -306,7 +314,7 @@ export default function MatrixDecomposePage({ matrixString }) {
         <DecompSection 
           title="SVD" 
           formula="A = UΣV*"
-          formulaTex="A = U\\Sigma V^*"
+          formulaTex="A = U\Sigma V^T"
           available={!!(diagnostics?.svd?.u?.data && diagnostics?.svd?.sigma?.data && diagnostics?.svd?.v?.data)} 
           validation={diagnostics?.svd?.validation}
           originalMatrix={originalMatrix}
@@ -373,7 +381,7 @@ export default function MatrixDecomposePage({ matrixString }) {
         <DecompSection 
           title="Spectral (Symmetric)" 
           formula="A = QΛQ^T"
-          formulaTex="A = Q\\Lambda Q^T"
+          formulaTex="A = Q\Lambda Q^T"
           available={!!(diagnostics?.symmetricSpectral?.q?.data && diagnostics?.symmetricSpectral?.lambda?.data)} 
           validation={diagnostics?.symmetricSpectral?.validation}
           originalMatrix={originalMatrix}
@@ -399,8 +407,8 @@ export default function MatrixDecomposePage({ matrixString }) {
         />
         <DecompSection 
           title="Inverse" 
-          formula={<Latex tex="A \\cdot A^{-1} = I" />}
-          formulaTex="A \\cdot A^{-1} = I"
+          formula={<Latex tex="A \cdot A^{-1} = I" />}
+          formulaTex="A \cdot A^{-1} = I"
           available={!!(diagnostics?.inverseMatrix?.data)} 
           validation={diagnostics?.inverse?.validation}
           originalMatrix={identityMatrix}
@@ -409,10 +417,22 @@ export default function MatrixDecomposePage({ matrixString }) {
             { label: <Latex tex="A^{-1}" />, data: diagnostics?.inverseMatrix?.data }
           ]} 
         />
+        <DecompSection
+          title="Pseudo-inverse"
+          formula={<Latex tex="A^+=U\Sigma^+ V^T" />}
+          formulaTex="A^+=U\Sigma^+ V^T"
+          available={!!pseudoInverseMatrix}
+          validation={diagnostics?.pseudoInverse?.validation}
+          originalMatrix={originalMatrix}
+          reconstructedMatrix={pseudoInverseRecon}
+          data={[
+            { label: <Latex tex="A^{+}" />, data: pseudoInverseMatrix }
+          ]}
+        />
         <DecompSection 
           title="Reduced Row Echelon Form" 
           formula="RREF(A)"
-          formulaTex="\\text{RREF}(A)"
+          formulaTex="\text{RREF(A)}"
           available={!!(diagnostics?.rrefMatrix?.data)} 
           validation={diagnostics?.rref?.validation}
           originalMatrix={originalMatrix}
@@ -429,4 +449,3 @@ export default function MatrixDecomposePage({ matrixString }) {
     </MatrixAnalysisLayout>
   )
 }
-

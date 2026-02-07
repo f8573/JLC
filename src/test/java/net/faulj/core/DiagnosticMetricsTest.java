@@ -7,6 +7,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -54,6 +55,10 @@ public class DiagnosticMetricsTest {
         assertEquals(DiagnosticMetrics.Status.WARNING, diag.getLu().getStatus());
         assertEquals(Integer.valueOf(1), diag.getRank());
         assertEquals(Integer.valueOf(1), diag.getNullity());
+        assertNotNull(diag.getPseudoInverse());
+        assertNotEquals(DiagnosticMetrics.Status.ERROR, diag.getPseudoInverse().getStatus());
+        assertNotNull(diag.getPseudoDeterminant());
+        assertEquals(5.0, diag.getPseudoDeterminant(), 1e-9);
     }
 
     /**
@@ -74,5 +79,25 @@ public class DiagnosticMetricsTest {
         assertNotEquals(DiagnosticMetrics.Status.ERROR, diag.getSvd().getStatus());
         assertEquals(Integer.valueOf(2), diag.getRank());
         assertEquals(Integer.valueOf(1), diag.getNullity());
+        assertNotNull(diag.getPseudoInverse());
+        assertNotEquals(DiagnosticMetrics.Status.ERROR, diag.getPseudoInverse().getStatus());
+        assertNotNull(diag.getPseudoDeterminant());
+        assertTrue(diag.getPseudoDeterminant() > 0.0);
+    }
+
+    /**
+     * Validate pseudo-inverse/pseudo-determinant are not forced for well-conditioned square full-rank matrices.
+     */
+    @Test
+    public void testPseudoInverseNotForcedForWellConditionedSquareMatrix() {
+        Matrix A = new Matrix(new double[][]{
+            {4, 1},
+            {1, 3}
+        });
+
+        DiagnosticMetrics.MatrixDiagnostics diag = DiagnosticMetrics.analyze(A);
+        assertNull(diag.getPseudoInverse());
+        assertNotNull(diag.getPseudoDeterminant());
+        assertTrue(diag.getPseudoDeterminant() > 0.0);
     }
 }

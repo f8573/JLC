@@ -1,5 +1,5 @@
 .gradle
 .idea
 build
-frontend/node_modules
-.vscode
+frontend/node*
+.env
