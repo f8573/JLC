@@ -12,7 +12,7 @@ export function useMatrixCompute() {
     const normalized = matrixToString(parsed)
     try {
       await analyzeAndCache(parsed, normalized)
-    } catch (err) {
+    } catch {
       // allow navigation on failure
     }
     window.location.href = `/matrix=${encodeURIComponent(normalized)}/basic`

@@ -19,7 +19,7 @@ export const ACCURACY_COLORS = {
   safe: '#388E3C'         // healthy/ideal
 }
 
-export const ACCURACY_LABELS = {
+const ACCURACY_LABELS = {
   critical: 'Critical 🚨',
   severe: 'Poor ✴️',
   moderate: 'Warning ⚠️',
@@ -27,7 +27,7 @@ export const ACCURACY_LABELS = {
   safe: 'Good ✅'
 }
 
-export const ACCURACY_SHORT_LABELS = {
+const ACCURACY_SHORT_LABELS = {
   critical: '🚨',
   severe: '✴️',
   moderate: '⚠️',
@@ -41,7 +41,7 @@ export const ACCURACY_SHORT_LABELS = {
  * @param {string} level - AccuracyLevel name (EXCELLENT, GOOD, ACCEPTABLE, WARNING, POOR, CRITICAL)
  * @returns {string} Frontend severity level (safe, mild, moderate, severe, critical)
  */
-export function mapAccuracyLevel(level) {
+function mapAccuracyLevel(level) {
   if (!level) return 'safe'
   
   const normalized = level.toUpperCase()
@@ -69,7 +69,7 @@ export function mapAccuracyLevel(level) {
  * @param {string} elementLevel - Element-based AccuracyLevel
  * @returns {string} Worst severity level
  */
-export function getWorstLevel(normLevel, elementLevel) {
+function getWorstLevel(normLevel, elementLevel) {
   const severityOrder = ['safe', 'mild', 'moderate', 'severe', 'critical']
   const normSeverity = mapAccuracyLevel(normLevel)
   const elemSeverity = mapAccuracyLevel(elementLevel)
@@ -128,7 +128,7 @@ export function computeAccuracySeverity(validation) {
  * @param {number} [conditionNumber=1] - Estimated condition number
  * @returns {string} Severity level for this element
  */
-export function computeElementSeverity(elementError, n, conditionNumber = 1) {
+function computeElementSeverity(elementError, n, conditionNumber = 1) {
   const EPS = 2.220446049250313e-16
   const base = n * EPS
   const condFactor = Math.max(1.0, Math.log10(Math.max(conditionNumber, 1.0)))

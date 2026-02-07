@@ -11,7 +11,7 @@ export const SEVERITY_COLORS = {
   safe: '#388E3C'         // healthy/ideal
 }
 
-export const SEVERITY_LABELS = {
+const SEVERITY_LABELS = {
   critical: 'Critical 🚨',
   severe: 'Severe ✴️',
   moderate: 'Moderate ⚠️',
@@ -25,14 +25,8 @@ export const EIGEN_DISPLAY_MODES = {
   UNIQUE_NO_REPS: 'unique_no_reps'      // show unique eigenvalues and ignore representative eigenvectors
 }
 
-// Default mode (can be changed at runtime via `setEigenDisplayMode`).
-// Default to hiding representative eigenvectors in the UI
-export let eigenDisplayMode = EIGEN_DISPLAY_MODES.UNIQUE_NO_REPS
-export function setEigenDisplayMode(mode) {
-  if (mode === EIGEN_DISPLAY_MODES.ALL_WITH_REPS || mode === EIGEN_DISPLAY_MODES.UNIQUE_NO_REPS) {
-    eigenDisplayMode = mode
-  }
-}
+// Default to hiding representative eigenvectors in the UI.
+const DEFAULT_EIGEN_DISPLAY_MODE = EIGEN_DISPLAY_MODES.UNIQUE_NO_REPS
 
 /**
  * Compute overall spectral severity based on diagnostics.
@@ -42,7 +36,7 @@ export function setEigenDisplayMode(mode) {
  */
 export function computeSpectralSeverity(diagnostics, options = {}) {
   if (!diagnostics) return { level: 'safe', color: SEVERITY_COLORS.safe, issues: [] }
-  const mode = options.displayMode || eigenDisplayMode
+  const mode = options.displayMode || DEFAULT_EIGEN_DISPLAY_MODE
 
   const issues = []
   let severity = 'safe'
@@ -56,7 +50,6 @@ export function computeSpectralSeverity(diagnostics, options = {}) {
   const diagonalizable = diagnostics.diagonalizable
   const normal = diagnostics.normal
   const orthogonal = diagnostics.orthogonal
-  const conditionNumber = diagnostics.conditionNumber
 
   // CRITICAL checks
   // 1. No eigenbasis (matrix is defective)
@@ -104,7 +97,7 @@ export function computeSpectralSeverity(diagnostics, options = {}) {
         }
       }
     }
-  } catch (e) {
+  } catch {
     // ignore numeric failures
   }
 
@@ -227,7 +220,7 @@ export function computeSpectralSeverity(diagnostics, options = {}) {
  */
 export function computePerEigenvalueSeverity(eigenvalue, index, diagnostics, options = {}) {
   if (!diagnostics) return { level: 'safe', color: SEVERITY_COLORS.safe, issues: [] }
-  const mode = options.displayMode || eigenDisplayMode
+  const mode = options.displayMode || DEFAULT_EIGEN_DISPLAY_MODE
 
   const issues = []
   let severity = 'safe'
@@ -261,7 +254,7 @@ export function computePerEigenvalueSeverity(eigenvalue, index, diagnostics, opt
         }
       }
     }
-  } catch (e) {
+  } catch {
     // ignore
   }
 
@@ -274,7 +267,7 @@ export function computePerEigenvalueSeverity(eigenvalue, index, diagnostics, opt
       reps = perEigen.map(p => p.representativeEigenvector).filter(Boolean)
       myRep = perEntry?.representativeEigenvector || null
     }
-  } catch (e) { reps = null; myRep = null }
+  } catch { reps = null; myRep = null }
 
   // 1) SEVERE: Representative eigenvector is linearly dependent on others
   if (myRep && reps && reps.length > 1) {
@@ -288,7 +281,7 @@ export function computePerEigenvalueSeverity(eigenvalue, index, diagnostics, opt
         issues.push('Representative eigenvector is linearly dependent on others')
         return { level: severity, color: SEVERITY_COLORS[severity], label: SEVERITY_LABELS[severity], issues }
       }
-    } catch (e) {
+    } catch {
       // ignore numeric failures
     }
   }
@@ -325,7 +318,7 @@ export function computePerEigenvalueSeverity(eigenvalue, index, diagnostics, opt
         return { level: severity, color: SEVERITY_COLORS[severity], label: SEVERITY_LABELS[severity], issues }
       }
       // Note: If maxDot <= 0.1, orthogonality is acceptable - continue to check multiplicities
-    } catch (e) {
+    } catch {
       // ignore numeric failures - continue to multiplicity checks
     }
   }

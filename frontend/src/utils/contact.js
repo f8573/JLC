@@ -12,7 +12,7 @@ export async function sendContact(payload) {
 
   try {
     return await res.json()
-  } catch (e) {
+  } catch {
     return { status: 'ok' }
   }
 }

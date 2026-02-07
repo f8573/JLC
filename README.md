@@ -1,61 +1,97 @@
-# JLAC — Java Linear Algebra Calculator
+# LambdaCompute (JLAC)
 
-JLAC is a Java-first linear algebra library with a modern web interface for matrix exploration, diagnostics, and decomposition workflows. It provides a rich set of computational routines (LU/QR/SVD/eigen, condition numbers, norms, inverses, and more) while pairing those algorithms with a responsive frontend for interactive matrix analysis.
+LambdaCompute is a Java linear algebra library and web application for matrix diagnostics, decomposition, and spectral analysis.
 
-This repository contains:
-- A Java computation core in [src/main/java/net/faulj](src/main/java/net/faulj)
-- A Vite/React frontend in [frontend](frontend)
-- A thin web layer for API exposure in [src/main/java/net/faulj/web](src/main/java/net/faulj/web)
+Live site: https://lambdacompute.org/
 
-## Progress report
+## What this project includes
 
-**Core:** broad algorithm coverage for decomposition, solver, and matrix utilities; additional test coverage and benchmarking are in progress.
+- `src/main/java/net/faulj`: Java core library (matrix/vector types, decompositions, solvers, eigen/spectral routines, condition/accuracy metrics, benchmarking helpers)
+- `src/main/java/net/faulj/web`: Spring Boot API layer (`/api/diagnostics`, `/api/status`, `/api/contact`, benchmark/status streams)
+- `frontend`: React + Vite client for matrix input, analysis views, decompositions, spectral reports, favorites/history, and settings
 
-**Frontend:** matrix explorer UI with tabs for structure, decomposition, spectral views, and reporting; ongoing polish and UX refinement.
+## Primary use cases
 
-**Web API:** Spring-based application skeleton and CORS configuration present; endpoints continue to expand with additional diagnostics.
+- Run matrix diagnostics from raw matrix input
+- Inspect decomposition results (QR, LU, SVD, Schur, Hessenberg, spectral, etc.)
+- Evaluate numerical stability and accuracy metadata
+- Benchmark selected compute paths via API endpoints
 
-## Usage
+## Requirements
 
-### Java library (core)
-Use JLAC as a standard Java dependency and call algorithms directly on `Matrix` and `Vector` objects. The API follows conventional linear algebra naming (e.g., `LUDecomposition`, `SVDecomposition`, `MatrixNorms`) and returns strongly typed results for factorization outputs.
+- Java 21 (project toolchain target)
+- Node.js 18+
+- npm 9+
 
-### Web UI
-The frontend is a Vite/React app that consumes the web API. It offers matrix input, diagnostics, and visualization for decomposition, spectral properties, and reporting.
+## Run locally
 
-## Installation
+### 1) Start backend (Spring Boot)
 
-### Prerequisites
-- Java 17+ (recommended)
-- Node.js 18+ (for frontend)
+From repository root:
 
-### Backend (Gradle)
-1. Build the core library:
-  - `./gradlew build`
-2. Run tests (if configured):
-  - `./gradlew test`
+```powershell
+.\gradlew.bat bootRun
+```
 
-### Frontend (Vite)
-1. Install dependencies in [frontend](frontend):
-  - `npm install`
-2. Start the dev server:
-  - `npm run dev`
+Backend default: `http://localhost:8080`
 
-## Examples
+### 2) Start frontend (Vite)
 
-### Compute a QR decomposition
-Create a `Matrix`, call a decomposition, and inspect the result objects for $Q$ and $R$ factors.
+In a second terminal:
 
-### Estimate a condition number
-Use `ConditionNumber` and `MatrixNorms` to obtain condition estimates for diagnostics.
+```powershell
+cd frontend
+npm install
+npm run dev
+```
 
-### Run SVD
-Use `SVDecomposition` or `RandomizedSVD` for full or approximate SVD depending on size.
+Frontend default: `http://localhost:5173`
+
+The Vite dev server proxies `/api` to `http://localhost:8080` via `frontend/vite.config.js`.
+
+## Build
+
+### Backend
+
+```powershell
+.\gradlew.bat build
+```
+
+### Frontend
+
+```powershell
+cd frontend
+npm run build
+```
+
+## Test
+
+```powershell
+.\gradlew.bat test
+```
+
+If you only want a targeted API smoke test:
+
+```powershell
+.\gradlew.bat test --tests net.faulj.web.ApiControllerStatusTest
+```
+
+## API at a glance
+
+- `GET /api/ping`
+- `GET /api/status`
+- `POST /api/diagnostics`
+- `GET /api/diagnostics?matrix=...`
+- `GET /api/diagnostics/stream` (SSE)
+- `GET /api/benchmark/diagnostic`
+- `GET /api/benchmark/diagnostic512`
+- `POST /api/contact`
+
+## Notes
+
+- Contact form delivery uses `DISCORD_WEBHOOK_URL` from environment variables.
+- Large matrices are intentionally limited for synchronous full diagnostics in the API.
 
 ## License
 
-**MIT License with Attribution Requirement.**
-
-You may use, modify, and distribute this project, including in commercial work, provided that attribution to the original author (James Faul) is preserved in documentation, credits, or an about page.
-
-See [LICENSE](LICENSE) for the full text.
+See `LICENSE`.

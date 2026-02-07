@@ -58,23 +58,3 @@ export default function AccuracyBadge({ validation, compact = false, onInfoClick
   )
 }
 
-/**
- * Compact accuracy indicator (just the emoji).
- *
- * @param {Object} props
- * @param {Object} props.validation - Validation object from API
- * @param {string} [props.className=''] - Additional CSS classes
- */
-export function AccuracyIndicator({ validation, className = '' }) {
-  const severity = computeAccuracySeverity(validation)
-  
-  return (
-    <span
-      className={`cursor-help ${className}`}
-      title={validation?.message || 'Validation status'}
-      style={{ color: severity.color }}
-    >
-      {severity.shortLabel}
-    </span>
-  )
-}
