@@ -10,7 +10,7 @@ export function parseMatrixString(matrixString) {
     const parsed = JSON.parse(matrixString)
     if (!Array.isArray(parsed)) return null
     return parsed
-  } catch (err) {
+  } catch {
     return null
   }
 }
@@ -63,7 +63,7 @@ export function loadCachedDiagnostics(matrixString) {
     if (!raw) return null
     const parsed = JSON.parse(raw)
     return parsed?.data ?? null
-  } catch (err) {
+  } catch {
     return null
   }
 }
@@ -74,7 +74,7 @@ export function loadCachedDiagnostics(matrixString) {
  * @param {string} matrixString
  * @param {any} diagnostics
  */
-export function cacheDiagnostics(matrixString, diagnostics) {
+function cacheDiagnostics(matrixString, diagnostics) {
   if (!matrixString || !diagnostics) return
   try {
     sessionStorage.setItem(
@@ -84,7 +84,7 @@ export function cacheDiagnostics(matrixString, diagnostics) {
         data: diagnostics
       })
     )
-  } catch (err) {
+  } catch {
     // ignore cache failures
   }
 }
@@ -95,7 +95,7 @@ export function cacheDiagnostics(matrixString, diagnostics) {
  * @param {number[][]} matrixData
  * @returns {Promise<any>}
  */
-export async function fetchDiagnostics(matrixData) {
+async function fetchDiagnostics(matrixData) {
   const response = await fetch('/api/diagnostics', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -227,7 +227,7 @@ function normalizeDiagnostics(resp) {
                   if (Math.sqrt(dist) <= 1e-8) { matchedIndex = j; break }
                 }
               }
-            } catch (e) {
+            } catch {
               // ignore matching errors
             }
 
@@ -261,7 +261,7 @@ function normalizeDiagnostics(resp) {
           flat.eigenInformationPerValue = per
         }
     }
-  } catch (e) {
+  } catch {
     // ignore fallback construction errors
   }
   // Backwards-compatible aliases for older frontend keys
@@ -351,7 +351,7 @@ function normalizeDiagnostics(resp) {
       // also expose a top-level cpu.gflops for direct consumption
       flat.cpu.gflops = gemmGflops
     }
-  } catch (e) {
+  } catch {
     // ignore benchmark extraction errors
   }
 

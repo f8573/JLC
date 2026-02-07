@@ -2,7 +2,7 @@
  * Get the current precision settings from localStorage.
  * Returns { digits: number }
  */
-export function getGlobalPrecision() {
+function getGlobalPrecision() {
   const precision = localStorage.getItem('precision') || '6'
   const num = parseInt(precision, 10)
   return { digits: isNaN(num) ? 6 : num }
@@ -91,19 +91,6 @@ export function formatComplex(value, digits) {
 }
 
 /**
- * Build a simple summary string for a matrix size.
- *
- * @param {number[][]} matrix
- * @returns {string}
- */
-export function formatMatrixSummary(matrix) {
-  if (!Array.isArray(matrix)) return '—'
-  const rows = matrix.length
-  const cols = matrix[0]?.length || 0
-  return `${rows}x${cols}`
-}
-
-/**
  * Convert backend definiteness enum to a human-friendly label.
  *
  * @param {string|null|undefined} val
@@ -128,7 +115,7 @@ export function formatDefiniteness(val) {
       // Fallback: prettify enum-like strings
       try {
         return String(val).replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
-      } catch (e) {
+      } catch {
         return String(val)
       }
   }

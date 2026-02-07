@@ -19,7 +19,7 @@ export function useFavorites(matrixString, diagnostics) {
       const arr = raw ? JSON.parse(raw) : []
       const found = arr.find(f => f.matrixString === matrixString)
       setIsFavorited(!!found)
-    } catch (e) {
+    } catch {
       setIsFavorited(false)
     }
   }, [matrixString])
@@ -59,7 +59,7 @@ export function useFavorites(matrixString, diagnostics) {
       setSavedMessage('Saved to favorites')
       setTimeout(() => setSavedMessage(''), 2500)
       setIsFavorited(true)
-    } catch (e) {
+    } catch {
       // ignore
     }
     setFavoriteModalOpen(false)
@@ -76,7 +76,7 @@ export function useFavorites(matrixString, diagnostics) {
         arr.splice(idx, 1)
         localStorage.setItem(key, JSON.stringify(arr))
       }
-    } catch (e) {
+    } catch {
       // ignore
     }
     setIsFavorited(false)
