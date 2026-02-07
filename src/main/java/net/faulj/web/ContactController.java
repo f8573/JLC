@@ -17,13 +17,39 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import jakarta.servlet.http.HttpServletRequest;
 
 @RestController
-@CrossOrigin(origins = "http://localhost:5173")
+@CrossOrigin(originPatterns = {
+        "http://localhost",
+        "http://localhost:*",
+        "http://127.0.0.1",
+        "http://127.0.0.1:*",
+        "http://0.0.0.0",
+        "http://0.0.0.0:*",
+        "https://localhost",
+        "https://localhost:*",
+        "https://127.0.0.1",
+        "https://127.0.0.1:*",
+        "https://0.0.0.0",
+        "https://0.0.0.0:*",
+        "http://lambdacompute.org",
+        "http://lambdacompute.org:*",
+        "https://lambdacompute.org",
+        "https://lambdacompute.org:*",
+        "http://www.lambdacompute.org",
+        "https://www.lambdacompute.org"
+})
 public class ContactController {
+    private static final Logger LOG = LoggerFactory.getLogger(ContactController.class);
 
+    static {
+        String webhookEnv = System.getenv("DISCORD_WEBHOOK_URL");
+        LOG.info("DISCORD_WEBHOOK_URL present: {}", webhookEnv != null && !webhookEnv.isEmpty());
+    }
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final HttpClient CLIENT = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 
 /**
  * Unified navigation sidebar across all pages.
@@ -22,7 +22,13 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
   const [running, setRunning] = useState(false)
   const [benchmarkRunning, setBenchmarkRunning] = useState(false)
   const [benchmarkProgress, setBenchmarkProgress] = useState({ complete: 0, total: 0, phase: '' })
+  const [maxGflops, setMaxGflops] = useState(null)
+  const [recentGflops, setRecentGflops] = useState(null)
+  const [barWidthPercent, setBarWidthPercent] = useState(45)
+  const [barColorClass, setBarColorClass] = useState('bg-primary')
   const [showInfoModal, setShowInfoModal] = useState(false)
+  const initialBenchmarkDone = useRef(false)
+  const benchmarkIntervalRef = useRef(null)
 
   useEffect(() => {
     function load() {
@@ -49,6 +55,13 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
       if (!res.ok) throw new Error('no-status')
       const json = await res.json()
       setDiagnostics(json)
+      // If CPU is online and we haven't run initial benchmark, run it
+      const cpuOnline = json && json.cpu && String(json.cpu.state).toLowerCase() === 'online'
+      if (cpuOnline && !initialBenchmarkDone.current) {
+        initialBenchmarkDone.current = true
+        // run initial benchmark but account it as queued job
+        runSystemBenchmark()
+      }
     } catch (e) {
       setDiagnostics({ status: 'SERVICE_INTERRUPTION', cpu: { name: 'CPU', gflops: null, state: 'offline', queuedJobs: 0 } })
     } finally {
@@ -65,6 +78,12 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
       try {
         const data = JSON.parse(ev.data)
         setDiagnostics(data)
+        // start initial benchmark if CPU becomes online via SSE
+        const cpuOnline = data && data.cpu && String(data.cpu.state).toLowerCase() === 'online'
+        if (cpuOnline && !initialBenchmarkDone.current) {
+          initialBenchmarkDone.current = true
+          runSystemBenchmark()
+        }
       } catch (e) {
         // ignore malformed events
       }
@@ -76,14 +95,43 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
     return () => { try { es.close() } catch (e) {} }
   }, [])
 
+  // schedule periodic benchmarks every 5 minutes
+  useEffect(() => {
+    // runSystemBenchmark is stable within this component scope
+    // schedule interval
+    benchmarkIntervalRef.current = setInterval(() => {
+      // don't start a new one if one is running
+      if (!benchmarkRunning) runSystemBenchmark()
+    }, 5 * 60 * 1000)
+    return () => {
+      if (benchmarkIntervalRef.current) clearInterval(benchmarkIntervalRef.current)
+    }
+  }, [benchmarkRunning])
+
   const cpuState = diagnostics && diagnostics.cpu && diagnostics.cpu.state ? String(diagnostics.cpu.state).toLowerCase() : null
   const queuedJobs = diagnostics && diagnostics.cpu && Number.isFinite(Number(diagnostics.cpu.queuedJobs))
     ? Number(diagnostics.cpu.queuedJobs)
     : 0
+
+  // Determine if the current user has a pending submitted job and its queued position.
+  let userPendingJobPos = null
+  try {
+    if (window && window.__myPendingJob && Number.isFinite(Number(window.__myPendingJob.position))) {
+      userPendingJobPos = Number(window.__myPendingJob.position)
+    }
+  } catch {}
+
   const systemStatus = (() => {
     if (cpuState !== 'online') return 'SERVICE_INTERRUPTION'
-    if (queuedJobs > 10) return 'LARGE_QUEUE'
-    if (queuedJobs > 0) return 'BUSY'
+    // If user has submitted a job, use position-specific thresholds
+    if (userPendingJobPos !== null) {
+      if (userPendingJobPos >= 101) return 'LARGE_QUEUE'
+      if (userPendingJobPos >= 11) return 'BUSY'
+      return 'ONLINE'
+    }
+    // No user-submitted job: use global queue thresholds
+    if (queuedJobs >= 100) return 'LARGE_QUEUE'
+    if (queuedJobs >= 10) return 'BUSY'
     return 'ONLINE'
   })()
   const cpuColor = cpuState === 'online' ? 'emerald' : (cpuState === 'offline' ? 'rose' : 'amber')
@@ -195,6 +243,17 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
     return determinant !== undefined && determinant !== null && hasInverse && hasAllPrimary && hasAllSimilarity && hasBasisCalcs
   }
 
+  // initialize max from existing diagnostics (e.g., backend reported gflops on load)
+  useEffect(() => {
+    const g = diagnostics?.cpu?.gflops != null ? Number(diagnostics.cpu.gflops) : null
+    if (!maxGflops && g && g > 0) {
+      setMaxGflops(g)
+      setRecentGflops(g)
+      setBarWidthPercent(100)
+      setBarColorClass('bg-primary')
+    }
+  }, [diagnostics, maxGflops])
+
   function logBenchmarkParts(payload, size, iteration) {
     for (const part of BENCHMARK_PARTS) {
       const ok = part.present(payload)
@@ -254,6 +313,8 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
     console.info('[Benchmark] totalIterations:', totalIterations)
 
     try {
+      // mark as queued locally so diagnostics reflect queue impact
+      setDiagnostics((prev) => ({ ...(prev || {}), cpu: { ...(prev?.cpu || {}), queuedJobs: (Number(prev?.cpu?.queuedJobs) || 0) + 1 } }))
       setBenchmarkProgress((prev) => ({ ...prev, phase: `calling /api/benchmark/diagnostic?sizex=${BENCHMARK_SIZES[0]}&sizey=${BENCHMARK_SIZES[0]}&test=${BENCHMARK_TEST}` }))
       const res = await fetch(`/api/benchmark/diagnostic?sizex=${BENCHMARK_SIZES[0]}&sizey=${BENCHMARK_SIZES[0]}&test=${encodeURIComponent(BENCHMARK_TEST)}&iterations=${BENCHMARK_ITERATIONS}`)
       if (!res.ok) throw new Error('diagnostic-benchmark-failed')
@@ -272,12 +333,43 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
       })
 
       setBenchmarkProgress((prev) => ({ ...prev, complete: BENCHMARK_ITERATIONS, phase: `completed Diagnostic benchmark (${BENCHMARK_TEST} ${BENCHMARK_SIZES[0]}x${BENCHMARK_SIZES[0]})` }))
+      // update diagnostics from backend benchmark
       setDiagnostics((prev) => ({ ...(prev || {}), ...(json || {}) }))
+      // determine new measured GFLOPs if present
+      const measuredG = Number(json?.cpu?.gflops ?? json?.cpu?.benchmark?.gflopsAvg)
+      if (!Number.isNaN(measuredG) && measuredG > 0) {
+        setRecentGflops(measuredG)
+        setDiagnostics((prev) => ({ ...(prev || {}), cpu: { ...(prev?.cpu || {}), gflops: measuredG } }))
+        // Update max / bar behavior
+        setMaxGflops((prevMax) => {
+          if (!prevMax || measuredG > prevMax) {
+            // new record: set max and show full bar and supercharged color
+            setBarWidthPercent(100)
+            setBarColorClass('bg-violet-600')
+            return measuredG
+          }
+          // not a new max, set width proportional
+          const width = Math.round((measuredG / prevMax) * 100)
+          setBarWidthPercent(width)
+          // if width dropped below 50% -> degraded state and sickly lavender bar
+          if (width < 50) {
+            setBarColorClass('bg-violet-200')
+            setDiagnostics((prev) => ({ ...(prev || {}), cpu: { ...(prev?.cpu || {}), state: 'degraded' } }))
+          } else {
+            setBarColorClass('bg-primary')
+            // if previously degraded but now above 50%, restore to online if backend says online
+            setDiagnostics((prev) => ({ ...(prev || {}), cpu: { ...(prev?.cpu || {}), state: prev?.cpu?.state === 'degraded' ? 'online' : prev?.cpu?.state } }))
+          }
+          return prevMax
+        })
+      }
       console.info('[Benchmark] diagnostics updated from backend benchmark', json?.cpu)
     } catch (e) {
       console.error('[Benchmark] failed', e)
       setDiagnostics({ status: 'SERVICE_INTERRUPTION', cpu: { name: 'CPU', gflops: null, state: 'offline', queuedJobs: 0 } })
     } finally {
+      // decrement queued jobs and finalize
+      setDiagnostics((prev) => ({ ...(prev || {}), cpu: { ...(prev?.cpu || {}), queuedJobs: Math.max(0, (Number(prev?.cpu?.queuedJobs) || 1) - 1) } }))
       console.groupEnd()
       setBenchmarkRunning(false)
       setBenchmarkProgress((prev) => ({ ...prev, phase: '' }))
@@ -503,7 +595,7 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
                             })()}
                           </div>
                           <div className="w-full bg-slate-100 h-1.5 rounded-full mt-2 overflow-hidden">
-                            <div className="bg-primary h-full w-[45%] rounded-full"></div>
+                            <div className={`h-full ${barColorClass} rounded-full`} style={{ width: `${barWidthPercent}%` }}></div>
                           </div>
                         </div>
                       </label>
@@ -551,7 +643,7 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
                   )}
                   <span className="material-symbols-outlined">speed</span>
                   {benchmarkRunning
-                    ? `Benchmarking (${benchmarkProgress.complete}/${benchmarkProgress.total}) ${benchmarkProgress.phase ? `- ${benchmarkProgress.phase}` : ''}`
+                    ? `Benchmarking...`
                     : 'Run System Benchmark'}
                 </button>
               </div>

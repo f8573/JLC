@@ -21,7 +21,28 @@ public class CorsConfig {
         return new WebMvcConfigurer() {
             @Override
             public void addCorsMappings(CorsRegistry registry) {
-                registry.addMapping("/api/**").allowedOrigins("http://localhost:5173");
+                registry.addMapping("/api/**")
+                        .allowedOriginPatterns(
+                                "http://localhost",
+                                "http://localhost:*",
+                                "http://127.0.0.1",
+                                "http://127.0.0.1:*",
+                                "http://0.0.0.0",
+                                "http://0.0.0.0:*",
+                                "https://localhost",
+                                "https://localhost:*",
+                                "https://127.0.0.1",
+                                "https://127.0.0.1:*",
+                                "https://0.0.0.0",
+                                "https://0.0.0.0:*",
+                                "http://lambdacompute.org",
+                                "http://lambdacompute.org:*",
+                                "https://lambdacompute.org",
+                                "https://lambdacompute.org:*",
+                                "http://www.lambdacompute.org",
+                                "https://www.lambdacompute.org")
+                        .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
+                        .allowedHeaders("*");
             }
         };
     }

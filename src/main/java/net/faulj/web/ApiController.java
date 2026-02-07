@@ -37,7 +37,26 @@ import net.faulj.vector.Vector;
 import net.faulj.visualizer.MatrixLatexExporter;
 
 @RestController
-@CrossOrigin(origins = "http://localhost:5173")
+@CrossOrigin(originPatterns = {
+        "http://localhost",
+        "http://localhost:*",
+        "http://127.0.0.1",
+        "http://127.0.0.1:*",
+        "http://0.0.0.0",
+        "http://0.0.0.0:*",
+        "https://localhost",
+        "https://localhost:*",
+        "https://127.0.0.1",
+        "https://127.0.0.1:*",
+        "https://0.0.0.0",
+        "https://0.0.0.0:*",
+        "http://lambdacompute.org",
+        "http://lambdacompute.org:*",
+        "https://lambdacompute.org",
+        "https://lambdacompute.org:*",
+        "http://www.lambdacompute.org",
+        "https://www.lambdacompute.org"
+})
 /**
  * REST controller exposing diagnostic and debug endpoints for matrix analysis.
  */
@@ -253,7 +272,16 @@ public class ApiController {
      */
     @GetMapping("/api/ping")
     public Map<String, String> ping() {
-        return Map.of("message", "pong from Java backend", "version", "1.0");
+        return Map.of("message", "pong from Java backend", "version", getServerVersion());
+    }
+
+    private String getServerVersion() {
+        try {
+            String ver = ApiController.class.getPackage().getImplementationVersion();
+            if (ver != null && !ver.isBlank()) return ver;
+        } catch (Exception ignored) {
+        }
+        return "development";
     }
 
     /**
@@ -301,7 +329,9 @@ public class ApiController {
      */
     @GetMapping("/api/diagnostics/stream")
     public SseEmitter streamDiagnostics() {
-        SseEmitter emitter = new SseEmitter(0L); // never timeout by default
+        // Use a finite timeout to avoid long-running servlet async edge-cases
+        // (0L = never timeout) — set a large timeout but not infinite.
+        SseEmitter emitter = new SseEmitter(300_000L); // 5 minutes
         sseEmitters.add(emitter);
 
         // Send current status immediately
@@ -312,7 +342,9 @@ public class ApiController {
 
         emitter.onCompletion(() -> sseEmitters.remove(emitter));
         emitter.onTimeout(() -> sseEmitters.remove(emitter));
-        emitter.onError((ex) -> sseEmitters.remove(emitter));
+        emitter.onError((ex) -> {
+            sseEmitters.remove(emitter);
+        });
         return emitter;
     }
 
@@ -538,6 +570,8 @@ public class ApiController {
         LinkedHashMap<String, Object> scalar = new LinkedHashMap<>();
         scalar.put("trace", diagnostics.getTrace());
         scalar.put("determinant", diagnostics.getDeterminant());
+        scalar.put("pseudoDeterminant", diagnostics.getPseudoDeterminant());
+        scalar.put("psuedoDeterminant", diagnostics.getPseudoDeterminant());
         basic.put("scalarInvariants", scalar);
 
         LinkedHashMap<String, Object> rowred = new LinkedHashMap<>();
@@ -647,6 +681,8 @@ public class ApiController {
         LinkedHashMap<String, Object> spectralVals = new LinkedHashMap<>();
         spectralVals.put("singularValues", diagnostics.getSingularValues());
         spectralVals.put("spectralRadius", diagnostics.getSpectralRadius());
+        spectralVals.put("pseudoDeterminant", diagnostics.getPseudoDeterminant());
+        spectralVals.put("psuedoDeterminant", diagnostics.getPseudoDeterminant());
         spectral.put("spectralRadiiAndValues", spectralVals);
 
         LinkedHashMap<String, Object> diagInfo = new LinkedHashMap<>();
@@ -716,7 +752,7 @@ public class ApiController {
         primary.put("qr", qrToMap(diagnostics.getQr()));
         primary.put("lu", luToMap(diagnostics.getLu()));
         primary.put("cholesky", choleskyToMap(diagnostics.getCholesky()));
-        primary.put("svd", svdToMap(diagnostics.getSvd()));
+        primary.put("svd", svdToMap(diagnostics.getSvd(), diagnostics));
         primary.put("polar", polarToMap(diagnostics.getPolar()));
         decomp.put("primaryDecompositions", primary);
 
@@ -733,6 +769,12 @@ public class ApiController {
         if (diagnostics.getInverse() != null && diagnostics.getInverse().getValue() != null) {
             derived.put("inverseMatrix", matrixToMap((Matrix) diagnostics.getInverse().getValue()));
         }
+        derived.put("pseudoInverse", diagnosticItemToMap(diagnostics.getPseudoInverse()));
+        if (diagnostics.getPseudoInverse() != null && diagnostics.getPseudoInverse().getValue() != null) {
+            derived.put("pseudoInverseMatrix", matrixToMap((Matrix) diagnostics.getPseudoInverse().getValue()));
+        }
+        derived.put("pseudoDeterminant", diagnostics.getPseudoDeterminant());
+        derived.put("psuedoDeterminant", diagnostics.getPseudoDeterminant());
         derived.put("rref", diagnosticItemToMap(diagnostics.getRref()));
         if (diagnostics.getRref() != null && diagnostics.getRref().getValue() != null) {
             derived.put("rrefMatrix", matrixToMap((Matrix) diagnostics.getRref().getValue()));
@@ -954,7 +996,7 @@ public class ApiController {
      * @param item diagnostic item
      * @return mapped response or null
      */
-    private Map<String, Object> svdToMap(DiagnosticItem<?> item) {
+    private Map<String, Object> svdToMap(DiagnosticItem<?> item, MatrixDiagnostics diagnostics) {
         if (item == null) {
             return null;
         }
@@ -967,6 +1009,13 @@ public class ApiController {
             out.put("singularValues", svd.getSingularValues());
             out.put("rank", svd.getRank(1e-12));
             out.put("conditionNumber", svd.getConditionNumber());
+            if (diagnostics != null) {
+                out.put("pseudoDeterminant", diagnostics.getPseudoDeterminant());
+                out.put("psuedoDeterminant", diagnostics.getPseudoDeterminant());
+                if (diagnostics.getPseudoInverse() != null && diagnostics.getPseudoInverse().getValue() != null) {
+                    out.put("pseudoInverse", matrixToMap(diagnostics.getPseudoInverse().getValue()));
+                }
+            }
         }
         return out;
     }

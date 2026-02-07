@@ -18,14 +18,20 @@ export default function Latex({ tex = '', displayMode = false, className = '', s
       setHtml('')
       return
     }
+    // KaTeX warns for some Unicode punctuation in strict mode.
+    // Normalize common dash/minus variants to ASCII-safe TeX text.
+    const normalizedTex = String(tex)
+      .replace(/\u2014/g, '--') // em dash
+      .replace(/\u2013/g, '--') // en dash
+      .replace(/\u2212/g, '-')  // unicode minus
     try {
       const engine = (typeof katex.renderToString === 'function') ? katex : (katex.default || katex)
-      const rendered = engine.renderToString(tex, { throwOnError: false, displayMode })
+      const rendered = engine.renderToString(normalizedTex, { throwOnError: false, displayMode })
       setHtml(rendered)
     } catch (err) {
       // If rendering fails, keep plain text fallback and log error for debugging
       // eslint-disable-next-line no-console
-      console.error('KaTeX render failed for tex:', tex, err)
+      console.error('KaTeX render failed for tex:', normalizedTex, err)
       setHtml(null)
     }
   }, [tex, displayMode])

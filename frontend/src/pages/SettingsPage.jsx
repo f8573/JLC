@@ -4,6 +4,7 @@ import Sidebar from '../components/Sidebar'
 import { useMatrixCompute } from '../hooks/useMatrixCompute'
 import { useTheme } from '../context/ThemeContext'
 import { useSettings } from '../context/SettingsContext'
+import pkg from '../../package.json'
 
 /**
  * User settings and preferences view.
@@ -60,6 +61,23 @@ export default function SettingsPage() {
       alert(`Failed to export matrices: ${result.error}`)
     }
   }
+
+  const [serverVersion, setServerVersion] = useState('unknown')
+  const frontendVersion = pkg?.version || 'unknown'
+
+  useEffect(() => {
+    let mounted = true
+    fetch('/api/ping')
+      .then(res => res.json())
+      .then(data => {
+        if (!mounted) return
+        if (data && data.version) setServerVersion(String(data.version))
+      })
+      .catch(() => {
+        if (mounted) setServerVersion('unavailable')
+      })
+    return () => { mounted = false }
+  }, [])
   
   return (
     <div className="bg-background-light dark:bg-slate-900 font-display text-slate-900 dark:text-slate-100 h-screen overflow-hidden transition-colors duration-300">
@@ -153,6 +171,10 @@ export default function SettingsPage() {
                 <span className="material-symbols-outlined text-[18px]">restart_alt</span>
                 Reset to Defaults
               </button>
+              <div className="text-xs text-slate-500 dark:text-slate-400 flex flex-col items-start">
+                <div>Frontend: {frontendVersion}</div>
+                <div>Server: {serverVersion}</div>
+              </div>
               <div className="flex gap-4">
                 <button 
                   onClick={() => window.history.back()}

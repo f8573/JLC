@@ -1,4 +1,6 @@
 $pidFile = "dev-pids.txt"
+$repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$frontendRoot = Join-Path $repoRoot "frontend"
 
 # Clear old PID file if it exists
 if (Test-Path $pidFile) {
@@ -7,13 +9,13 @@ if (Test-Path $pidFile) {
 
 # Start backend (Spring Boot)
 $backend = Start-Process powershell `
-    -ArgumentList "-Command", "cd 'C:\Users\James\IdeaProjects\JLC'; .\gradlew.bat bootRun" `
+    -ArgumentList "-Command", "cd '$repoRoot'; .\gradlew.bat bootRun" `
     -PassThru `
     -WindowStyle Hidden
 
 # Start frontend (npm)
 $frontend = Start-Process powershell `
-    -ArgumentList "-Command", "cd 'C:\Users\James\IdeaProjects\JLC\frontend'; npm run dev" `
+    -ArgumentList "-Command", "cd '$frontendRoot'; npm run dev" `
     -PassThru `
     -WindowStyle Hidden
 

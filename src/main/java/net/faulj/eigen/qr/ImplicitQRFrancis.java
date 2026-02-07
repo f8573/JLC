@@ -65,14 +65,11 @@ public class ImplicitQRFrancis {
 
         int n = A.getRowCount();
 
-        // For very small matrices, use explicit QR (no fancy shifts, no recursion)
-        if (n <= SMALL_MATRIX_THRESHOLD) {
-            Matrix[] result = ExplicitQRIteration.decompose(A);
-            SchurEigenExtractor extractor = new SchurEigenExtractor(result[0], result[1]);
-            return new SchurResult(A, result[0], result[1], extractor.getEigenvalues(), extractor.getEigenvectors());
-        }
-
-        // Step 1: Reduce to Hessenberg
+        // Use the robust Hessenberg -> implicit Francis QR path for all sizes.
+        // Falling back to the explicit QR iteration for small matrices produced
+        // less accurate results (notably for ill-conditioned or nearly singular
+        // matrices). Always reduce to Hessenberg and run the implicit algorithm
+        // which includes more careful deflation and shift strategies.
         HessenbergResult hessResult = BlockedHessenbergQR.decompose(A);
         return decomposeFromHessenbergInternal(hessResult, A, true);
     }

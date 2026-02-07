@@ -96,6 +96,23 @@ function cacheDiagnostics(matrixString, diagnostics) {
  * @returns {Promise<any>}
  */
 async function fetchDiagnostics(matrixData) {
+  // Determine current queue position and record a local pending-job marker so
+  // UI components can reason about whether the user's job is within thresholds.
+  try {
+    const statusRes = await fetch('/api/status')
+    if (statusRes.ok) {
+      const statusJson = await statusRes.json()
+      const q = statusJson?.cpu?.queuedJobs
+      const queued = Number.isFinite(Number(q)) ? Number(q) : 0
+      // store predicted position (queued + 1) on window until this job completes
+      try {
+        window.__myPendingJob = { position: queued + 1, ts: Date.now() }
+      } catch {}
+    }
+  } catch {
+    // ignore status fetch failures and continue to post diagnostics
+  }
+
   const response = await fetch('/api/diagnostics', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -108,6 +125,8 @@ async function fetchDiagnostics(matrixData) {
   }
 
   const data = await response.json()
+  // job finished - clear pending marker
+  try { if (window.__myPendingJob) window.__myPendingJob = null } catch {}
   return normalizeDiagnostics(data)
 }
 
@@ -187,6 +206,40 @@ function normalizeDiagnostics(resp) {
 
   // Also keep the original grouped response under a key for advanced uses
   flat._raw = resp
+
+  function matrixToVectorList(matrixLike) {
+    if (!matrixLike) return null
+    const data = Array.isArray(matrixLike) ? matrixLike : matrixLike.data
+    if (!Array.isArray(data) || data.length === 0 || !Array.isArray(data[0])) return null
+    const rows = data.length
+    const cols = data[0].length
+    const vectors = []
+    for (let c = 0; c < cols; c++) {
+      const vec = []
+      for (let r = 0; r < rows; r++) {
+        vec.push(data[r]?.[c] ?? 0)
+      }
+      vectors.push(vec)
+    }
+    return vectors
+  }
+
+  function extractVectors(entry) {
+    if (!entry) return null
+    if (Array.isArray(entry)) return entry
+    if (entry.vectors && Array.isArray(entry.vectors)) return entry.vectors
+    if (entry.value) return extractVectors(entry.value)
+    return matrixToVectorList(entry)
+  }
+
+  function vectorCount(vectors) {
+    if (!vectors) return 0
+    if (Array.isArray(vectors)) return vectors.length
+    if (vectors.cols !== undefined) return Number(vectors.cols) || 0
+    if (vectors.data && Array.isArray(vectors.data) && vectors.data[0]) return vectors.data[0].length || 0
+    return 0
+  }
+
   // Build a backward-compatible per-eigenvalue aggregated object if the backend returned
   // separate per-eigen lists (or an older nested structure). This constructs
   // `eigenInformationPerValue` so the frontend can consume a single canonical shape.
@@ -208,9 +261,9 @@ function normalizeDiagnostics(resp) {
             // index mapping when lengths match.
             let eigen = null
             if (ev && Array.isArray(ev) && ev.length === esList.length && ev[i]) eigen = ev[i]
-            const vectors = es && es.vectors ? es.vectors : null
-            const basisVectors = eb && eb.vectors ? eb.vectors : (vectors && vectors.length ? vectors : null)
-            const rep = basisVectors && basisVectors.length ? basisVectors[0] : (vectors && vectors.length ? vectors[0] : null)
+            const vectors = extractVectors(es)
+            const basisVectors = extractVectors(eb) || (vectorCount(vectors) > 0 ? vectors : null)
+            const rep = basisVectors && vectorCount(basisVectors) > 0 ? basisVectors[0] : (vectors && vectorCount(vectors) > 0 ? vectors[0] : null)
 
             // Determine original eigenvalue index for multiplicities.
             let matchedIndex = null
@@ -252,9 +305,9 @@ function normalizeDiagnostics(resp) {
               algebraicMultiplicity: (alg && matchedIndex !== null && alg[matchedIndex] !== undefined) ? alg[matchedIndex] : null,
               geometricMultiplicity: (geom && matchedIndex !== null && geom[matchedIndex] !== undefined) ? geom[matchedIndex] : null,
               // canonical field: `dimension` refers to eigenspace dimension (geometric multiplicity)
-              dimension: (geom && matchedIndex !== null && geom[matchedIndex] !== undefined) ? geom[matchedIndex] : (esList && esList[i] && esList[i].vectors ? esList[i].vectors.length : 0),
-              eigenspace: { vectors: vectors, dimension: vectors ? vectors.length : 0 },
-              eigenbasis: basisVectors ? { vectors: basisVectors, dimension: basisVectors.length } : null,
+              dimension: (geom && matchedIndex !== null && geom[matchedIndex] !== undefined) ? geom[matchedIndex] : vectorCount(vectors),
+              eigenspace: { vectors: vectors, dimension: vectorCount(vectors) },
+              eigenbasis: basisVectors ? { vectors: basisVectors, dimension: vectorCount(basisVectors) } : null,
               representativeEigenvector: rep
             })
           }
@@ -449,4 +502,3 @@ function classifySpectrum(eigenvalues, tol = 1e-8) {
 
   return { location, odeStability, discreteStability }
 }
-

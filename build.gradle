@@ -8,6 +8,8 @@ plugins {
 group = 'net.faulj'
 version = '1.0-SNAPSHOT'
 
+ext['tomcat.version'] = '10.1.14'
+
 repositories {
     mavenCentral()
 }

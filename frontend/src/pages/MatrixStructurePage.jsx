@@ -4,7 +4,7 @@ import Breadcrumb from '../components/results/Breadcrumb'
 import MatrixActionBar, { MatrixFooterBar } from '../components/matrix/MatrixActionBar'
 import { useDiagnostics } from '../hooks/useDiagnostics'
 import { usePrecisionUpdate } from '../hooks/usePrecisionUpdate'
-import { formatPercent } from '../utils/format'
+import { formatNumber, formatPercent } from '../utils/format'
 
 /**
  * Status row describing a structural property of a matrix.
@@ -41,6 +41,23 @@ export default function MatrixStructurePage({ matrixString }) {
   usePrecisionUpdate()
   
   const { diagnostics } = useDiagnostics(matrixString)
+  const symmetryErrorValue = Number(diagnostics?.symmetryError)
+  const symmetryErrorDetail = Number.isFinite(symmetryErrorValue)
+    ? `error: ${symmetryErrorValue.toExponential(2)}`
+    : null
+  const pseudoDeterminant = diagnostics?.pseudoDeterminant ?? diagnostics?.psuedoDeterminant
+  const usePseudoDeterminant = !!(
+    diagnostics &&
+    (
+      diagnostics.square === false ||
+      diagnostics.singular === true ||
+      diagnostics.nearlySingular === true
+    ) &&
+    pseudoDeterminant !== null &&
+    pseudoDeterminant !== undefined
+  )
+  const displayedDeterminant = usePseudoDeterminant ? pseudoDeterminant : diagnostics?.determinant
+  const determinantLabel = usePseudoDeterminant ? 'pdet(A)' : 'det(A)'
 
   const basicStructure = [
     { label: 'Zero Matrix', active: diagnostics?.zero },
@@ -66,7 +83,7 @@ export default function MatrixStructurePage({ matrixString }) {
   ]
 
   const symmetryStructure = [
-    { label: 'Symmetric', active: diagnostics?.symmetric, detail: diagnostics?.symmetryError ? `error: ${diagnostics.symmetryError.toExponential(2)}` : null },
+    { label: 'Symmetric', active: diagnostics?.symmetric, detail: symmetryErrorDetail },
     { label: 'Skew-Symmetric', active: diagnostics?.skewSymmetric },
     { label: 'Hermitian', active: diagnostics?.hermitian },
     { label: 'Persymmetric', active: diagnostics?.persymmetric },
@@ -100,7 +117,8 @@ export default function MatrixStructurePage({ matrixString }) {
       value: diagnostics?.density === null || diagnostics?.density === undefined
         ? '—'
         : formatPercent(diagnostics.density, 1)
-    }
+    },
+    { label: determinantLabel, value: formatNumber(displayedDeterminant, 4) }
   ]
 
   return (
@@ -187,4 +205,3 @@ export default function MatrixStructurePage({ matrixString }) {
     </MatrixAnalysisLayout>
   )
 }
-

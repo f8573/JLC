@@ -107,6 +107,13 @@ public class ExplicitQRIteration {
 
     /**
      * Check convergence by inspecting subdiagonal entries.
+     * <p>
+     * A matrix is in valid (real) Schur form when all entries below the first
+     * subdiagonal are zero AND every first-subdiagonal entry is either zero
+     * (a 1×1 block) or part of a 2×2 block whose eigenvalues are a complex
+     * conjugate pair (negative discriminant).  A 2×2 block with real
+     * eigenvalues means the QR iteration has not yet split those eigenvalues.
+     * </p>
      *
      * @param T working matrix
      * @param tol tolerance for deflation
@@ -115,6 +122,8 @@ public class ExplicitQRIteration {
      */
     private static boolean isConverged(Matrix T, double tol, boolean symmetric) {
         int n = T.getRowCount();
+
+        // All entries strictly below the first subdiagonal must be zero.
         for (int i = 2; i < n; i++) {
             for (int j = 0; j < i - 1; j++) {
                 if (Math.abs(T.get(i, j)) > tol) {
@@ -122,11 +131,30 @@ public class ExplicitQRIteration {
                 }
             }
         }
-        if (symmetric) {
-            for (int i = 1; i < n; i++) {
-                if (Math.abs(T.get(i, i - 1)) > tol) {
-                    return false;
+
+        // Check first subdiagonal: each entry must be zero (1×1 block) or
+        // part of a 2×2 block with complex eigenvalues.
+        int i = 0;
+        while (i < n - 1) {
+            double sub = Math.abs(T.get(i + 1, i));
+            if (sub <= tol) {
+                // 1×1 block – converged.
+                i++;
+            } else {
+                // Non-zero subdiagonal: treat as a 2×2 block.
+                // disc = (a - d)^2 + 4*b*c  where the block is [[a,b],[c,d]].
+                // disc < 0 ⟹ complex conjugate pair (valid Schur block).
+                // disc ≥ 0 ⟹ real eigenvalues that have not yet split.
+                double a = T.get(i, i);
+                double b = T.get(i, i + 1);
+                double c = T.get(i + 1, i);
+                double d = T.get(i + 1, i + 1);
+                double disc = (a - d) * (a - d) + 4 * b * c;
+                if (disc >= 0) {
+                    return false; // real eigenvalues – not yet converged
                 }
+                // Complex pair – valid 2×2 Schur block; skip both rows.
+                i += 2;
             }
         }
         return true;
