@@ -1,4 +1,4 @@
-# LambdaCompute (JLAC)
+# LambdaCompute
 
 LambdaCompute is a Java linear algebra library and web application for matrix diagnostics, decomposition, and spectral analysis.
 
