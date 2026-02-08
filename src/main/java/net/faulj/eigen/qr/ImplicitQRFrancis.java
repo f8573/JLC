@@ -177,6 +177,16 @@ public class ImplicitQRFrancis {
                     exceptionalCount = 0;
                     continue;
                 }
+                // 2x2 block with real eigenvalues: explicitly split via Schur rotation.
+                // The implicit QR step becomes a no-op when shifts equal the eigenvalues
+                // (Cayley-Hamilton), so we must directly diagonalize the 2x2 block.
+                if (split2x2BlockIfReal(h, n, l, m, accumulateU ? U.getRawData() : null,
+                        accumulateU ? U.getRowCount() : 0)) {
+                    m -= 2;
+                    globalIter = 0;
+                    exceptionalCount = 0;
+                    continue;
+                }
             }
 
             // Check for exceptional shift need
@@ -242,25 +252,32 @@ public class ImplicitQRFrancis {
 
     /**
      * Final cleanup of Schur form - zero small elements.
+     * Uses LAPACK-style threshold based on matrix norm.
      */
     private static void cleanupSchurFormRaw(double[] h, int n) {
-        double thresh = EPSILON * Math.sqrt(n);
+        // Compute Frobenius norm of H for a robust threshold
+        double normH = 0.0;
+        for (int i = 0; i < n * n; i++) {
+            normH += h[i] * h[i];
+        }
+        normH = Math.sqrt(normH);
+        double thresh = MACHINE_EPS * normH;
 
         // Zero elements well below the first subdiagonal
         for (int i = 2; i < n; i++) {
             int base = i * n;
             for (int j = 0; j < i - 1; j++) {
-                if (Math.abs(h[base + j]) < thresh) {
-                    h[base + j] = 0.0;
-                }
+                h[base + j] = 0.0;
             }
         }
 
         // Clean up subdiagonal elements that should be zero
+        // Use both local (LAPACK) and global (norm-based) thresholds
         for (int i = 1; i < n; i++) {
             double subdiag = Math.abs(h[i * n + i - 1]);
             double diagSum = Math.abs(h[(i - 1) * n + i - 1]) + Math.abs(h[i * n + i]);
-            if (subdiag < EPSILON * (diagSum + EPSILON)) {
+            double localThresh = MACHINE_EPS * (diagSum + EPSILON);
+            if (subdiag <= Math.max(localThresh, thresh)) {
                 h[i * n + i - 1] = 0.0;
             }
         }
@@ -321,6 +338,77 @@ public class ImplicitQRFrancis {
         double disc = (a + d) * (a + d) - 4 * (a * d - b * c);
 
         return disc < 0; // Complex eigenvalues => converged 2x2 block
+    }
+
+    /**
+     * Explicitly split a 2x2 block with real eigenvalues via a Schur rotation.
+     * Computes a Givens rotation G such that G^T * H[l:m,l:m] * G is upper triangular,
+     * then applies it as a similarity transformation to the full matrix.
+     *
+     * @return true if the block was successfully split (real eigenvalues), false if complex
+     */
+    private static boolean split2x2BlockIfReal(double[] h, int n, int l, int m,
+                                                double[] q, int qn) {
+        double a = h[l * n + l];
+        double b = h[l * n + m];
+        double c = h[m * n + l];
+        double d = h[m * n + m];
+
+        double tr = a + d;
+        double det = a * d - b * c;
+        double disc = tr * tr - 4 * det;
+
+        if (disc < 0) return false; // Complex eigenvalues, don't split
+
+        // Real eigenvalues: compute them
+        double sqrtDisc = Math.sqrt(disc);
+        double lambda1 = (tr + sqrtDisc) / 2.0;
+        double lambda2 = (tr - sqrtDisc) / 2.0;
+
+        // Compute Givens rotation to zero out c (subdiagonal)
+        // We want G^T * [a-lambda; c] = [*; 0], choosing the eigenvalue closest to d
+        // for better numerical behavior (Wilkinson shift strategy)
+        double target = (Math.abs(d - lambda1) < Math.abs(d - lambda2)) ? lambda1 : lambda2;
+        double x = a - target;
+        double y = c;
+        double r = Math.hypot(x, y);
+        if (r < EPSILON) {
+            // Subdiagonal is already negligible
+            h[m * n + l] = 0.0;
+            return true;
+        }
+
+        double cs = x / r;
+        double sn = -y / r;
+
+        // Apply Givens rotation: G^T * H * G (similarity transformation)
+        // Left: G^T * H (affects rows l and m)
+        for (int j = 0; j < n; j++) {
+            double h1 = h[l * n + j];
+            double h2 = h[m * n + j];
+            h[l * n + j] = cs * h1 - sn * h2;
+            h[m * n + j] = sn * h1 + cs * h2;
+        }
+        // Right: H * G (affects columns l and m)
+        for (int i = 0; i < n; i++) {
+            double h1 = h[i * n + l];
+            double h2 = h[i * n + m];
+            h[i * n + l] = cs * h1 - sn * h2;
+            h[i * n + m] = sn * h1 + cs * h2;
+        }
+        // Accumulate Q
+        if (q != null) {
+            for (int i = 0; i < qn; i++) {
+                double q1 = q[i * qn + l];
+                double q2 = q[i * qn + m];
+                q[i * qn + l] = cs * q1 - sn * q2;
+                q[i * qn + m] = sn * q1 + cs * q2;
+            }
+        }
+
+        // Ensure exact zero on subdiagonal
+        h[m * n + l] = 0.0;
+        return true;
     }
 
     /**

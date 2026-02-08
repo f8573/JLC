@@ -23,7 +23,11 @@ export default function MatrixDisplay({
 }) {
   // Subscribe to precision changes to trigger re-render
   usePrecisionUpdate()
-  if (!Array.isArray(data) || data.length === 0) {
+  const source = data
+  const baseData = source?.data || source
+  const imag = source?.imag || null
+
+  if (!Array.isArray(baseData) || baseData.length === 0) {
     return (
       <div className={`text-xs text-slate-400 ${className}`}>
         No matrix data
@@ -31,14 +35,19 @@ export default function MatrixDisplay({
     )
   }
 
-  const cols = data[0]?.length || 0
+  const cols = baseData[0]?.length || 0
   const gridStyle = {
     display: 'grid',
     gridTemplateColumns: `repeat(${cols}, minmax(${minCellWidth}px, 1fr))`,
     gap: `${gap}px`
   }
 
-  const renderValue = (value) => {
+  const renderValue = (value, rIdx, cIdx) => {
+    if (imag && Array.isArray(imag) && Array.isArray(imag[rIdx])) {
+      const real = Number(value ?? 0)
+      const imagVal = Number(imag?.[rIdx]?.[cIdx] ?? 0)
+      return formatComplex({ real, imag: imagVal })
+    }
     if (value === null || value === undefined) return '—'
     if (typeof value === 'string') return value
     if (Array.isArray(value) && value.length === 2) {
@@ -56,17 +65,16 @@ export default function MatrixDisplay({
 
   return (
     <div className={className} style={gridStyle}>
-      {data.flatMap((row, rIdx) =>
+      {baseData.flatMap((row, rIdx) =>
         row.map((value, cIdx) => (
           <div
             key={`m-${rIdx}-${cIdx}`}
             className={`${cellClassName} ${highlightDiagonal && rIdx === cIdx ? 'purple-glow' : ''}`.trim()}
           >
-            {renderValue(value)}
+            {renderValue(value, rIdx, cIdx)}
           </div>
         ))
       )}
     </div>
   )
 }
-

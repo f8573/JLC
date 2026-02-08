@@ -113,9 +113,15 @@ export function computeSpectralSeverity(diagnostics, options = {}) {
   // 3. V matrix nearly singular (if we have eigenvectors)
   if (eigenvectors && eigenvectors.length > 0) {
     const det = computeDeterminant(eigenvectors)
-    if (Math.abs(det) < 1e-10) {
+    const detMagnitude = complexAbs(det)
+    const hasComplex = matrixHasComplexValues(eigenvectors)
+    if (detMagnitude < 1e-10) {
       severity = severity === 'safe' ? 'critical' : severity
-      issues.push(`Eigenvector matrix is nearly singular (det ≈ ${det.toExponential(2)})`)
+      if (hasComplex) {
+        issues.push(`Eigenvector matrix is nearly singular (|det(V)| ~ ${detMagnitude.toExponential(2)})`)
+      } else {
+        issues.push(`Eigenvector matrix is nearly singular (det ~ ${detMagnitude.toExponential(2)})`)
+      }
     }
     
     // High condition number of V
@@ -427,47 +433,56 @@ export function computePerEigenvalueSeverity(eigenvalue, index, diagnostics, opt
 // Helper functions
 
 /**
- * Compute a simple determinant (exact for up to 3x3) as a stability heuristic.
+ * Compute determinant in complex arithmetic using Gaussian elimination.
  *
- * @param {number[][]} matrix
- * @returns {number}
+ * @param {any[][]} matrix
+ * @returns {{r:number, i:number}}
  */
 function computeDeterminant(matrix) {
-  // Simple determinant for small matrices (up to 3x3)
   const n = matrix.length
-  if (n === 0) return 0
-  if (n === 1) return complexAbs(toComplex(matrix[0][0] || 0))
-  if (n === 2) {
-    const a = toComplex(matrix[0][0] || 0)
-    const b = toComplex(matrix[0][1] || 0)
-    const c = toComplex(matrix[1][0] || 0)
-    const d = toComplex(matrix[1][1] || 0)
-    return complexAbs(complexSub(complexMul(a, d), complexMul(b, c)))
+  if (n === 0) return { r: 0, i: 0 }
+  const m = matrix[0]?.length || 0
+  if (m !== n) return { r: 0, i: 0 }
+  const a = matrix.map(row => {
+    const source = Array.isArray(row) ? row : []
+    return Array.from({ length: n }, (_, c) => toComplex(source[c] ?? 0))
+  })
+  let rowSwaps = 0
+  const pivotTol = 1e-14
+  for (let col = 0; col < n; col++) {
+    let pivotRow = col
+    let pivotAbs = complexAbs(a[col][col])
+    for (let r = col + 1; r < n; r++) {
+      const mag = complexAbs(a[r][col])
+      if (mag > pivotAbs) {
+        pivotAbs = mag
+        pivotRow = r
+      }
+    }
+    if (pivotAbs <= pivotTol) {
+      return { r: 0, i: 0 }
+    }
+    if (pivotRow !== col) {
+      const tmp = a[col]
+      a[col] = a[pivotRow]
+      a[pivotRow] = tmp
+      rowSwaps++
+    }
+    const pivot = a[col][col]
+    for (let r = col + 1; r < n; r++) {
+      const factor = complexDiv(a[r][col], pivot)
+      a[r][col] = { r: 0, i: 0 }
+      for (let c = col + 1; c < n; c++) {
+        a[r][c] = complexSub(a[r][c], complexMul(factor, a[col][c]))
+      }
+    }
   }
-  if (n === 3) {
-    const a = toComplex(matrix[0][0] || 0)
-    const b = toComplex(matrix[0][1] || 0)
-    const c = toComplex(matrix[0][2] || 0)
-    const d = toComplex(matrix[1][0] || 0)
-    const e = toComplex(matrix[1][1] || 0)
-    const f = toComplex(matrix[1][2] || 0)
-    const g = toComplex(matrix[2][0] || 0)
-    const h = toComplex(matrix[2][1] || 0)
-    const i = toComplex(matrix[2][2] || 0)
-    const term1 = complexMul(a, complexSub(complexMul(e, i), complexMul(f, h)))
-    const term2 = complexMul(b, complexSub(complexMul(d, i), complexMul(f, g)))
-    const term3 = complexMul(c, complexSub(complexMul(d, h), complexMul(e, g)))
-    return complexAbs(complexAdd(complexSub(term1, term2), term3))
+  let det = rowSwaps % 2 === 0 ? { r: 1, i: 0 } : { r: -1, i: 0 }
+  for (let i = 0; i < n; i++) {
+    det = complexMul(det, a[i][i])
   }
-  
-  // For larger matrices, estimate via product of diagonal (rough estimate)
-  let prod = 1
-  for (let i = 0; i < Math.min(n, matrix[0]?.length || 0); i++) {
-    prod *= complexAbs(toComplex(matrix[i][i] || 0))
-  }
-  return prod
+  return det
 }
-
 /**
  * Estimate condition number using row-sum ratios.
  *
@@ -742,6 +757,18 @@ function complexAbs(a) {
   return Math.sqrt(complexAbs2(a))
 }
 
+function matrixHasComplexValues(matrix) {
+  if (!Array.isArray(matrix)) return false
+  for (const row of matrix) {
+    if (!Array.isArray(row)) continue
+    for (const entry of row) {
+      const z = toComplex(entry)
+      if (Math.abs(z.i) > 0) return true
+    }
+  }
+  return false
+}
+
 /**
  * Compute which eigenvector indices are non-orthogonal to all other eigenvectors.
  * An eigenvector is considered non-orthogonal if it has |cos θ| > threshold with ANY other eigenvector.
@@ -819,3 +846,4 @@ export function computeNonOrthogonalEigenvectors(diagnostics, threshold = 0.1) {
   
   return nonOrthogonalIndices
 }
+

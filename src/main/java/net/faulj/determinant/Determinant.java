@@ -1,6 +1,7 @@
 package net.faulj.determinant;
 
 import net.faulj.matrix.Matrix;
+import net.faulj.scalar.Complex;
 
 /**
  * Strategy facade for computing matrix determinants.
@@ -64,6 +65,9 @@ public class Determinant {
         if (!A.isSquare()) {
             throw new IllegalArgumentException("Determinant is only defined for square matrices.");
         }
+        if (!A.isReal()) {
+            throw new IllegalArgumentException("Complex matrix detected. Use computeComplex(Matrix) for complex determinants.");
+        }
 
         int n = A.getRowCount();
 
@@ -77,5 +81,19 @@ public class Determinant {
         } else {
             return LUDeterminant.compute(A);
         }
+    }
+
+    /**
+     * Computes the determinant of a real or complex square matrix.
+     *
+     * @param A the matrix to analyze
+     * @return complex determinant (imaginary part is 0 for real matrices)
+     * @throws IllegalArgumentException if the matrix is not square
+     */
+    public static Complex computeComplex(Matrix A) {
+        if (!A.isSquare()) {
+            throw new IllegalArgumentException("Determinant is only defined for square matrices.");
+        }
+        return A.determinantComplex();
     }
 }

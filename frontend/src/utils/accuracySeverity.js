@@ -16,7 +16,7 @@ export const ACCURACY_COLORS = {
   severe: '#F57C00',      // severe/unstable
   moderate: '#FBC02D',    // moderate/caution
   mild: '#1976D2',        // mild/informational
-  safe: '#388E3C'         // healthy/ideal
+  safe: '#2F6B3C'         // healthy/ideal (muted)
 }
 
 const ACCURACY_LABELS = {

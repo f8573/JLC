@@ -23,8 +23,14 @@ public final class HouseholderQR {
 
     private HouseholderQR() {}
 
-    public static QRResult decompose(Matrix A) { return decompose(A, false); }
-    public static QRResult decomposeThin(Matrix A) { return decompose(A, true); }
+    public static QRResult decompose(Matrix A) { return QRFactory.decompose(A, false); }
+    public static QRResult decomposeThin(Matrix A) { return QRFactory.decompose(A, true); }
+
+    // Delegate entry points to QRFactory to allow runtime strategy selection.
+    public static QRResult decompose(Matrix A, boolean thin, boolean _delegate) {
+        // keep backward-compatible implementation in decomposeHouseholder
+        return decomposeHouseholder(A, thin);
+    }
 
     /**
      * Decompose with DecompositionPolicy (for API compatibility).
@@ -36,7 +42,8 @@ public final class HouseholderQR {
      */
     public static QRResult decompose(Matrix A, net.faulj.compute.DecompositionPolicy policy) {
         // TODO: Use policy settings for panel size, blocked threshold, etc.
-        return decompose(A, false);
+        // Delegate explicitly to the factory to avoid overload ambiguity
+        return QRFactory.decompose(A, false);
     }
 
     /**
@@ -49,7 +56,7 @@ public final class HouseholderQR {
         factorizeOnly(A);
     }
 
-    private static QRResult decompose(Matrix A, boolean thin) {
+    public static QRResult decomposeHouseholder(Matrix A, boolean thin) {
         if (A == null) throw new IllegalArgumentException("Matrix must not be null");
         if (!A.isReal()) throw new UnsupportedOperationException("Householder QR requires real matrix");
 

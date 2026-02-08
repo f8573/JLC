@@ -18,7 +18,7 @@ const tabs = [
 export default function MatrixTabs({ matrixString, activeTab = 'basic' }) {
   const encoded = encodeURIComponent(matrixString || '')
   return (
-    <div className="flex border-b border-slate-200 bg-slate-50/50">
+    <div className="flex border-b border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/80">
       {tabs.map((tab) => {
         const href = `/matrix=${encoded}/${tab.id}`
         const active = tab.id === activeTab
@@ -38,4 +38,3 @@ export default function MatrixTabs({ matrixString, activeTab = 'basic' }) {
     </div>
   )
 }
-

@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import MatrixAnalysisLayout from '../components/layout/MatrixAnalysisLayout'
 import Breadcrumb from '../components/results/Breadcrumb'
 import MatrixLatex from '../components/matrix/MatrixLatex'
@@ -128,7 +128,7 @@ export default function MatrixSpectralPage({ matrixString }) {
       }
       // nested arrays (already row arrays)
       if (Array.isArray(first)) return vec
-      // simple numeric entries → column vector
+      // simple numeric entries -> column vector
       return vec.map(v => [ v !== undefined && v !== null ? v : 0 ])
     }
     // unsupported shape
@@ -429,6 +429,42 @@ export default function MatrixSpectralPage({ matrixString }) {
     return multiplyComplexMatrices(pd, pinv)
   })()
   const diagProductDisplay = matrixToDisplay(diagProduct)
+  const eigendecompGridRef = useRef(null)
+  const [eigendecompCols, setEigendecompCols] = useState(1)
+  const estimateMatrixMinWidth = (matrixLike) => {
+    const source = matrixLike?.data || matrixLike
+    if (!Array.isArray(source) || source.length === 0 || !Array.isArray(source[0])) return 280
+    const cols = source[0].length || 1
+    return Math.min(920, Math.max(260, 130 + cols * 56))
+  }
+  const eigendecompMinCardWidth = useMemo(() => {
+    const widths = [
+      estimateMatrixMinWidth(diagP || inferredDiagP),
+      estimateMatrixMinWidth(diagD || inferredDiagD),
+      estimateMatrixMinWidth(diagPInverse || inferredDiagPInverse),
+      estimateMatrixMinWidth(diagProductDisplay)
+    ]
+    return Math.max(...widths)
+  }, [diagP, inferredDiagP, diagD, inferredDiagD, diagPInverse, inferredDiagPInverse, diagProductDisplay])
+  useEffect(() => {
+    if (diagOrDefective.ok === false) {
+      setEigendecompCols(1)
+      return
+    }
+    const el = eigendecompGridRef.current
+    if (!el) return
+    const gapPx = 24
+    const computeColumns = () => {
+      const width = el.clientWidth || 0
+      const fit = Math.floor((width + gapPx) / (eigendecompMinCardWidth + gapPx))
+      const next = Math.max(1, Math.min(4, fit))
+      setEigendecompCols(next)
+    }
+    computeColumns()
+    const observer = new ResizeObserver(computeColumns)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [diagOrDefective.ok, eigendecompMinCardWidth])
 
   // Compute spectral severity
   const overallSeverity = computeSpectralSeverity(diagnostics)
@@ -513,8 +549,12 @@ export default function MatrixSpectralPage({ matrixString }) {
                   <span className="text-[10px] px-2 py-0.5 rounded font-bold text-white" style={{ backgroundColor: overallSeverity.color }} title={overallSeverity.issues?.join('; ')}>{overallSeverity.label}</span>
                   <span className="text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded font-bold"><Latex tex={'\\sigma(A)'} /></span>
                   <div className="flex items-center gap-2 ml-3">
-                    <label className="text-[11px] text-slate-500">Show representatives</label>
-                    <select value={mode} onChange={e => setMode(e.target.value)} className="text-sm border rounded px-2 py-1">
+                    <label className="text-[11px] text-slate-500 dark:text-slate-300">Show representatives</label>
+                    <select
+                      value={mode}
+                      onChange={e => setMode(e.target.value)}
+                      className="text-sm border border-slate-200 dark:border-slate-600 rounded px-2 py-1 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-primary/40"
+                    >
                       <option value={EIGEN_DISPLAY_MODES.UNIQUE_NO_REPS}>Unique (no reps)</option>
                       <option value={EIGEN_DISPLAY_MODES.ALL_WITH_REPS}>All (with reps)</option>
                     </select>
@@ -525,7 +565,7 @@ export default function MatrixSpectralPage({ matrixString }) {
                 {eigenvalues.length === 0 && <div className="text-xs" style={{ color: SEVERITY_COLORS.critical }}>Eigenvalues unavailable.</div>}
 
                 {eigenvalues.length > 0 && (
-                  <div className="flex flex-wrap gap-2">{eigenvalues.map((lambda, i) => (<span key={`all-${i}`} className="text-[11px] text-slate-600 bg-slate-100 px-2 py-0.5 rounded"><Latex tex={`\\lambda_{${i + 1}} = ${formatComplex(lambda,3)}`} /></span>))}</div>
+                  <div className="flex flex-wrap gap-2">{eigenvalues.map((lambda, i) => (<span key={`all-${i}`} className="text-[11px] text-slate-600 dark:text-slate-200 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded"><Latex tex={`\\lambda_{${i + 1}} = ${formatComplex(lambda,3)}`} /></span>))}</div>
                 )}
 
                 {/* unique eigenvalues */}
@@ -642,7 +682,7 @@ export default function MatrixSpectralPage({ matrixString }) {
                   }
                   return (
                     <div key={`basis-${idx}`} className="mt-2 p-3 border-l-4 rounded-r" style={{ borderColor: evSeverity.color, backgroundColor: `${evSeverity.color}08` }}>
-                      <div className="flex items-center justify-between mb-2"><div className="text-xs text-slate-500">Eigenspace for {lambda ? <Latex tex={`\\lambda = ${formatComplex(lambda,3)}`} /> : <span>λ</span>}</div><span className="text-[9px] px-1.5 py-0.5 rounded font-bold text-white" style={{ backgroundColor: evSeverity.color }} title={evSeverity.issues?.join('; ')}>{evSeverity.label}</span></div>
+                      <div className="flex items-center justify-between mb-2"><div className="text-xs text-slate-500">Eigenspace for {lambda ? <Latex tex={`\\lambda = ${formatComplex(lambda,3)}`} /> : <span>&lambda;</span>}</div><span className="text-[9px] px-1.5 py-0.5 rounded font-bold text-white" style={{ backgroundColor: evSeverity.color }} title={evSeverity.issues?.join('; ')}>{evSeverity.label}</span></div>
                       <div className="flex gap-4 items-start">
                         <div className="flex-1">
                           {eigenbasisVectors ? (
@@ -718,7 +758,7 @@ export default function MatrixSpectralPage({ matrixString }) {
             <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm"><div className="bg-slate-50 px-5 py-3 border-b border-slate-200"><h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Characteristic Polynomial</h4></div><div className="p-8 text-center"><p className="math-font text-xl text-slate-800"><Latex tex={characteristic} /></p></div></div>
 
             {/* Singular Values */}
-            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm"><div className="bg-slate-50 px-5 py-3 border-b border-slate-200"><h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Singular Values</h4></div><div className="p-4">{(!singularValues || singularValues.length === 0) ? (<div className="text-xs" style={{ color: SEVERITY_COLORS.critical }}>Singular values unavailable.</div>) : (<div className="flex gap-2 flex-wrap">{singularValues.map((s, i) => (<span key={i} className="text-xs text-slate-700 bg-slate-100 px-2 py-1 rounded">{formatNumber(s, 4)}</span>))}</div>)}</div></div>
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm"><div className="bg-slate-50 px-5 py-3 border-b border-slate-200"><h4 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Singular Values</h4></div><div className="p-4">{(!singularValues || singularValues.length === 0) ? (<div className="text-xs" style={{ color: SEVERITY_COLORS.critical }}>Singular values unavailable.</div>) : (<div className="flex gap-2 flex-wrap">{singularValues.map((s, i) => (<span key={i} className="text-xs text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded">{formatNumber(s, 4)}</span>))}</div>)}</div></div>
           </div>
 
           {/* Right column */}
@@ -779,9 +819,13 @@ export default function MatrixSpectralPage({ matrixString }) {
               {diagStatus ?? (diagonalizable ? 'Diagonalizable (data loading...)' : 'Unavailable')}
             </div>
           </div>
-          <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-start">
+          <div
+            ref={eigendecompGridRef}
+            className="p-6 grid gap-6 items-start"
+            style={{ gridTemplateColumns: `repeat(${Math.max(1, eigendecompCols)}, minmax(0, 1fr))` }}
+          >
             {diagOrDefective.ok === false ? (
-              <div className="col-span-full text-xs text-center" style={{ color: SEVERITY_COLORS.critical }}>
+              <div className="text-xs text-center" style={{ color: SEVERITY_COLORS.critical, gridColumn: '1 / -1' }}>
                 Eigendecomposition not available for defective matrices.
               </div>
             ) : (
@@ -789,7 +833,7 @@ export default function MatrixSpectralPage({ matrixString }) {
             <div>
               <div className="text-[10px] text-slate-400 mb-2">P (eigenvector matrix)</div>
               {(diagP || inferredDiagP) ? (
-                <div style={criticalArtifacts.eigendecomposition ? { boxShadow: '0 0 0 2px rgba(220,38,38,0.08)', borderRadius: 6 } : {}}>
+                <div className="overflow-x-auto custom-scrollbar" style={criticalArtifacts.eigendecomposition ? { boxShadow: '0 0 0 2px rgba(220,38,38,0.08)', borderRadius: 6 } : {}}>
                   <MatrixLatex data={matrixToDisplay(diagP || inferredDiagP)} className="math-font text-sm" precision={3} />
                 </div>
               ) : (
@@ -799,7 +843,7 @@ export default function MatrixSpectralPage({ matrixString }) {
             <div>
               <div className="text-[10px] text-slate-400 mb-2">D (diagonal eigenvalue matrix)</div>
               {(diagD || inferredDiagD) ? (
-                <div style={criticalArtifacts.eigendecomposition ? { boxShadow: '0 0 0 2px rgba(220,38,38,0.08)', borderRadius: 6 } : {}}>
+                <div className="overflow-x-auto custom-scrollbar" style={criticalArtifacts.eigendecomposition ? { boxShadow: '0 0 0 2px rgba(220,38,38,0.08)', borderRadius: 6 } : {}}>
                   <MatrixLatex data={matrixToDisplay(diagD || inferredDiagD)} className="math-font text-sm" precision={3} />
                 </div>
               ) : (
@@ -809,7 +853,7 @@ export default function MatrixSpectralPage({ matrixString }) {
             <div>
               <div className="text-[10px] text-slate-400 mb-2"><Latex tex={'P^{-1}'} /> (inverse eigenvector matrix)</div>
               {(diagPInverse || inferredDiagPInverse) ? (
-                <div style={criticalArtifacts.eigendecomposition ? { boxShadow: '0 0 0 2px rgba(220,38,38,0.08)', borderRadius: 6 } : {}}>
+                <div className="overflow-x-auto custom-scrollbar" style={criticalArtifacts.eigendecomposition ? { boxShadow: '0 0 0 2px rgba(220,38,38,0.08)', borderRadius: 6 } : {}}>
                   <MatrixLatex data={matrixToDisplay(diagPInverse || inferredDiagPInverse)} className="math-font text-sm" precision={3} />
                 </div>
               ) : (
@@ -819,7 +863,9 @@ export default function MatrixSpectralPage({ matrixString }) {
             <div>
               <div className="text-[10px] text-slate-400 mb-2">Reconstruction <Latex tex={'PDP^{-1}'} /></div>
               {diagProductDisplay ? (
-                <MatrixLatex data={diagProductDisplay} className="math-font text-sm" precision={2} />
+                <div className="overflow-x-auto custom-scrollbar">
+                  <MatrixLatex data={diagProductDisplay} className="math-font text-sm" precision={2} />
+                </div>
               ) : (
                 <div className="text-xs" style={{ color: SEVERITY_COLORS.critical }}>Reconstruction unavailable.</div>
               )}
@@ -868,5 +914,7 @@ export default function MatrixSpectralPage({ matrixString }) {
     </MatrixAnalysisLayout>
   )
 }
+
+
 
 

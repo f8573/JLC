@@ -1,9 +1,23 @@
 <!doctype html>
-<html class="light" lang="en">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta content="width=device-width, initial-scale=1.0" name="viewport" />
     <title>Matrix Workspace</title>
+    <script>
+      (function () {
+        try {
+          const savedTheme = localStorage.getItem('theme')
+          const theme = savedTheme === 'dark' || savedTheme === 'light' ? savedTheme : 'light'
+          document.documentElement.classList.add(theme)
+          if (theme === 'dark') {
+            document.documentElement.classList.add('no-theme-fade')
+          }
+        } catch (e) {
+          document.documentElement.classList.add('light')
+        }
+      })()
+    </script>
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Lora:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet" />
@@ -231,8 +245,14 @@
         height: 100%;
         overflow: hidden;
       }
+      html.no-theme-fade *,
+      html.no-theme-fade *::before,
+      html.no-theme-fade *::after {
+        transition: none !important;
+        animation: none !important;
+      }
     </style>
-    <script type="module" crossorigin src="/assets/index-v_AwiBwP.js"></script>
+    <script type="module" crossorigin src="/assets/index-B_F_LjkZ.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index-DwK22V0Y.css">
   </head>
   <body>

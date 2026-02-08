@@ -1,0 +1,95 @@
+﻿=== assemble ===
+
+> Task :compileJava
+warning: using incubating module(s): jdk.incubator.vector
+C:\Users\James\Downloads\linux-transfer\la-server\JLC\src\main\java\net\faulj\decomposition\qr\caqr\CommunicationAvoidingQR.java:25: error: cannot find symbol
+        DoubleBuffer db = workspace.doubleBuffer();
+        ^
+  symbol:   class DoubleBuffer
+  location: class CommunicationAvoidingQR
+1 error
+1 warning
+
+> Task :compileJava FAILED
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':compileJava'.
+> Compilation failed; see the compiler error output for details.
+
+* Try:
+> Run with --info option to get more log output.
+> Run with --scan to get full insights.
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.10/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 3s
+1 actionable task: 1 executed
+
+=== assemble ===
+
+Command:
+.\gradlew.bat --% assemble
+
+Output:
+> Task :compileJava
+warning: using incubating module(s): jdk.incubator.vector
+
+Deprecated Gradle features were used in this build, making it incompatible with 
+Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and
+ determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.10/userguide/command
+_line_interface.html#sec:command_line_warnings in the Gradle documentation.     
+
+BUILD SUCCESSFUL in 5s
+11 actionable tasks: 10 executed, 1 up-to-date
+
+
+=== test (CAQR microbench) ===
+
+Command:
+.\gradlew.bat --% test --tests "net.faulj.benchmark.CAQRMicrobenchTest" -Dla.qr.strategy=CAQR -Djava.util.concurrent.ForkJoinPool.common.parallelism=8 --no-daemon --stacktrace
+
+Output:
+To honour the JVM settings for this build a single-use Daemon process will be fo
+rked. For more on this, please refer to https://docs.gradle.org/8.10/userguide/g
+radle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Task :test
+WARNING: Using incubator modules: jdk.incubator.vector
+
+CAQRMicrobenchTest > runMicrobench STANDARD_OUT
+  Wrote microbench CSV to build\\reports\\caqr_bench.csv
+
+Deprecated Gradle features were used in this build, making it incompatible with 
+Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and
+ determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.10/userguide/command
+_line_interface.html#sec:command_line_warnings in the Gradle documentation.     
+
+BUILD SUCCESSFUL in 15s
+4 actionable tasks: 1 executed, 3 up-to-date
+
+
+=== CSV copy ===
+
+Source: build\\reports\\caqr_bench.csv
+Destination: build\\reports\\caqr_bench_CAQR_wy.csv
+Action: Copied the produced CSV to the destination path.
+
+=== Notes ===
+- Stopped on failure? No — both assemble and test completed successfully.
+- If you want the CSV to contain only CAQR strategy rows, run the microbench with a CAQR-specific configuration or post-process the CSV accordingly.
+

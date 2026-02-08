@@ -17,11 +17,11 @@ import { formatNumber, formatPercent } from '../utils/format'
 function StatusRow({ label, active, detail }) {
   return (
     <div className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
-      active ? 'border-primary/20 bg-primary/5' : 'border-slate-100 hover:bg-slate-50'
+      active ? 'border-primary/20 bg-primary/5 dark:bg-primary/10' : 'border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/40'
     }`}>
       <div className="flex flex-col">
-        <span className={`text-sm ${active ? 'font-bold text-primary' : 'font-medium'}`}>{label}</span>
-        {detail && <span className="text-xs text-slate-400">{detail}</span>}
+        <span className={`text-sm ${active ? 'font-bold text-primary' : 'font-medium text-slate-800 dark:text-slate-200'}`}>{label}</span>
+        {detail && <span className="text-xs text-slate-400 dark:text-slate-500">{detail}</span>}
       </div>
       <span className={`material-symbols-outlined ${active ? 'text-primary text-[20px] font-bold' : 'text-slate-300'}`}>
         {active ? 'check_circle' : 'close'}
@@ -184,15 +184,15 @@ export default function MatrixStructurePage({ matrixString }) {
                 ))}
               </div>
             </div>
-            <div className="bg-slate-50 rounded-xl p-6 border border-slate-100 h-fit">
-              <h4 className="text-xs font-bold text-slate-400 uppercase mb-4 tracking-tighter">Quick Summary</h4>
+            <div className="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-6 border border-slate-100 dark:border-slate-700 h-fit">
+              <h4 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase mb-4 tracking-tighter">Quick Summary</h4>
               <ul className="space-y-4">
                 {quickSummary.map((item) => (
                   <li key={item.label} className="flex items-start gap-3">
                     <span className="material-symbols-outlined text-primary text-sm mt-1">check_circle</span>
                     <div>
-                      <p className="text-sm font-bold">{item.label}</p>
-                      <p className="text-xs text-slate-500">{item.value}</p>
+                      <p className="text-sm font-bold text-slate-900 dark:text-slate-100">{item.label}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{item.value}</p>
                     </div>
                   </li>
                 ))}

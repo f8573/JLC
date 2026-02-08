@@ -179,6 +179,34 @@ public final class OptimizedBLAS3 {
     }
 
     /**
+     * Strided GEMM with optional transpose on A. This provides a convenience
+     * fast-path for A^T * B without requiring callers to materialize A^T.
+     */
+    public static void gemmStrided(boolean transposeA,
+                                  double[] a, int aOffset, int lda,
+                                  double[] b, int bOffset, int ldb,
+                                  double[] c, int cOffset, int ldc,
+                                  int m, int k, int n,
+                                  double alpha, double beta) {
+        if (!transposeA) {
+            gemmStrided(a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta);
+            return;
+        }
+
+        // Materialize A^T into a temp array (size k x m) then call core gemmStrided.
+        double[] At = new double[k * m];
+        for (int i = 0; i < m; i++) {
+            int srcRow = aOffset + i * lda;
+            for (int j = 0; j < k; j++) {
+                At[j * m + i] = a[srcRow + j];
+            }
+        }
+
+        // Now At has dimensions (k x m) with leading dimension m
+        gemmStrided(At, 0, m, b, bOffset, ldb, c, cOffset, ldc, k, m, n, alpha, beta);
+    }
+
+    /**
      * Single-threaded microkernel GEMM with optimal blocking.
      */
     private static void gemmMicrokernel(double[] a, int lda, double[] b, int ldb,

@@ -11,12 +11,12 @@ function ComingSoonModal({ open, onClose, title = 'Coming Soon' }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative bg-white rounded-xl shadow-lg p-8 max-w-md text-center">
+      <div className="relative bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg p-8 max-w-md text-center transition-colors duration-300">
         <div className="size-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
           <span className="material-symbols-outlined text-primary text-[32px]">construction</span>
         </div>
-        <h3 className="text-xl font-bold text-slate-900 mb-2">{title}</h3>
-        <p className="text-slate-500 mb-6">This feature is currently under development and will be available soon.</p>
+        <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-2">{title}</h3>
+        <p className="text-slate-500 dark:text-slate-400 mb-6">This feature is currently under development and will be available soon.</p>
         <button
           onClick={onClose}
           className="px-6 py-2.5 bg-primary text-white rounded-xl text-sm font-bold hover:bg-primary/90 transition-all"
@@ -49,9 +49,9 @@ function JsonModal({ open, onClose, matrixString, diagnostics }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-11/12 md:w-3/4 lg:w-2/3 max-h-[80vh] bg-white rounded-xl shadow-lg overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-          <h3 className="text-sm font-bold">JSON Data</h3>
+      <div className="relative w-11/12 md:w-3/4 lg:w-2/3 max-h-[80vh] bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg overflow-hidden transition-colors duration-300">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">JSON Data</h3>
           <div className="flex items-center gap-2">
             <button
               onClick={handleDownload}
@@ -69,7 +69,7 @@ function JsonModal({ open, onClose, matrixString, diagnostics }) {
           </div>
         </div>
         <div className="p-4 overflow-auto max-h-[72vh]">
-          <pre className="whitespace-pre-wrap text-sm font-mono text-slate-800">
+          <pre className="whitespace-pre-wrap text-sm font-mono text-slate-800 dark:text-slate-200">
             {JSON.stringify({ matrixString, diagnostics }, null, 2)}
           </pre>
         </div>
@@ -112,7 +112,7 @@ export default function MatrixActionBar({ matrixString, diagnostics, showExportL
         {showExportLatex && (
           <button 
             onClick={() => setLatexModalOpen(true)}
-            className="flex items-center gap-2 px-5 py-2.5 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl text-sm font-bold transition-all text-slate-700"
+            className="flex items-center gap-2 px-5 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl text-sm font-bold transition-all text-slate-700 dark:text-slate-200"
           >
             <span className="material-symbols-outlined text-[20px]">description</span>
             Export LaTeX
@@ -120,21 +120,21 @@ export default function MatrixActionBar({ matrixString, diagnostics, showExportL
         )}
         <button
           onClick={handleFullReport}
-          className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl text-sm font-bold transition-all text-slate-700"
+          className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl text-sm font-bold transition-all text-slate-700 dark:text-slate-200"
         >
           <span className="material-symbols-outlined text-[20px]">visibility</span>
           Full Report
         </button>
         <button
           onClick={() => setJsonModalOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl text-sm font-bold transition-all text-slate-700"
+          className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl text-sm font-bold transition-all text-slate-700 dark:text-slate-200"
         >
           <span className="material-symbols-outlined text-[20px]">data_object</span>
           JSON Data
         </button>
         <button
           onClick={() => isFavorited ? removeFavorite() : openFavorite()}
-          className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-50 rounded-xl text-sm font-bold transition-all text-slate-700"
+          className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-xl text-sm font-bold transition-all text-slate-700 dark:text-slate-200"
         >
           {isFavorited ? (
             <svg
@@ -211,8 +211,8 @@ export function MatrixFooterBar({ matrixString, diagnostics }) {
 
   return (
     <>
-      <div className="bg-slate-50 border-t border-slate-200 px-8 py-4 flex items-center justify-between">
-        <span className="text-xs text-slate-400 italic">Solved using high-precision JLA subroutines.</span>
+      <div className="bg-slate-50 dark:bg-slate-800/70 border-t border-slate-200 dark:border-slate-700 px-8 py-4 flex items-center justify-between transition-colors duration-300">
+        <span className="text-xs text-slate-400 dark:text-slate-500 italic">Solved using high-precision JLA subroutines.</span>
         <div className="flex gap-6">
           <a
             className="text-xs font-bold text-primary hover:text-primary/80 flex items-center gap-1.5"
@@ -234,9 +234,9 @@ export function MatrixFooterBar({ matrixString, diagnostics }) {
       {jsonModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40" onClick={() => setJsonModalOpen(false)} />
-          <div className="relative w-11/12 md:w-3/4 lg:w-2/3 max-h-[80vh] bg-white rounded-xl shadow-lg overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-              <h3 className="text-sm font-bold">JSON Data</h3>
+          <div className="relative w-11/12 md:w-3/4 lg:w-2/3 max-h-[80vh] bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg overflow-hidden transition-colors duration-300">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">JSON Data</h3>
               <div className="flex items-center gap-2">
                 <button
                   onClick={(e) => {
@@ -257,7 +257,7 @@ export function MatrixFooterBar({ matrixString, diagnostics }) {
               </div>
             </div>
             <div className="p-4 overflow-auto max-h-[72vh]">
-              <pre className="whitespace-pre-wrap text-sm font-mono text-slate-800">
+              <pre className="whitespace-pre-wrap text-sm font-mono text-slate-800 dark:text-slate-200">
                 {JSON.stringify({ matrixString, diagnostics }, null, 2)}
               </pre>
             </div>

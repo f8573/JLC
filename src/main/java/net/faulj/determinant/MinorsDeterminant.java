@@ -85,6 +85,9 @@ public class MinorsDeterminant {
         if (!A.isSquare()) {
             throw new IllegalArgumentException("Matrix must be square.");
         }
+        if (!A.isReal()) {
+            throw new IllegalArgumentException("MinorsDeterminant only supports real matrices. Use Determinant.computeComplex(Matrix).");
+        }
         int n = A.getRowCount();
 
         // Base cases for recursion

@@ -1,6 +1,7 @@
 package net.faulj.determinant;
 
 import net.faulj.matrix.Matrix;
+import net.faulj.scalar.Complex;
 import org.junit.Test;
 import static org.junit.Assert.*;
 
@@ -10,6 +11,11 @@ import static org.junit.Assert.*;
 public class DeterminantTest {
 
     private static final double TOL = 1e-9;
+    
+    private static void assertComplexEquals(Complex expected, Complex actual, double tol) {
+        assertEquals(expected.real, actual.real, tol);
+        assertEquals(expected.imag, actual.imag, tol);
+    }
 
     // ========== Determinant Tests ==========
 
@@ -109,5 +115,105 @@ public class DeterminantTest {
         double viaLUDet = LUDeterminant.compute(a);
         // Determinant facade dispatches to LUDeterminant for n>3
         assertEquals(134, viaLUDet, TOL);
+    }
+
+    /**
+     * Validates complex determinant on a fixed 2x2 matrix.
+     */
+    @Test
+    public void complexDeterminantMatchesExpected() {
+        Matrix a = new Matrix(
+                new double[][]{{1, 2}, {3, 4}},
+                new double[][]{{1, 0}, {0, -1}}
+        );
+
+        Complex det = Determinant.computeComplex(a);
+        assertComplexEquals(Complex.valueOf(-1, 3), det, TOL);
+    }
+
+    /**
+     * Validates complex determinant on an upper-triangular matrix (product of diagonal).
+     */
+    @Test
+    public void complexDeterminantMatchesDiagonalProductForUpperTriangular() {
+        Matrix a = new Matrix(
+                new double[][]{
+                        {1, 5, -2},
+                        {0, 2, 4},
+                        {0, 0, 3}
+                },
+                new double[][]{
+                        {1, -3, 2},
+                        {0, -1, 5},
+                        {0, 0, 2}
+                }
+        );
+
+        Complex det = Determinant.computeComplex(a);
+        assertComplexEquals(Complex.valueOf(7, 9), det, TOL);
+    }
+
+    /**
+     * Ensures complex determinant path handles pivoting and row-swap sign.
+     */
+    @Test
+    public void complexDeterminantHandlesPivoting() {
+        Matrix a = new Matrix(
+                new double[][]{{0, 1}, {2, 3}},
+                new double[][]{{0, 1}, {0, 0}}
+        );
+
+        Complex det = Determinant.computeComplex(a);
+        assertComplexEquals(Complex.valueOf(-2, -2), det, TOL);
+    }
+
+    /**
+     * Ensures complex determinant API matches real determinant for real matrices.
+     */
+    @Test
+    public void complexDeterminantMatchesRealDeterminantOnRealMatrix() {
+        Matrix a = new Matrix(new double[][]{
+                {4,2,1,3},
+                {0,5,3,1},
+                {1,3,6,2},
+                {3,1,2,4}
+        });
+
+        double expected = Determinant.compute(a);
+        Complex actual = Determinant.computeComplex(a);
+        assertEquals(expected, actual.real, TOL);
+        assertEquals(0.0, actual.imag, TOL);
+    }
+
+    /**
+     * Real-only determinant methods should reject complex matrices explicitly.
+     */
+    @Test
+    public void realDeterminantMethodsRejectComplexMatrices() {
+        Matrix complex = new Matrix(
+                new double[][]{{1, 2}, {3, 4}},
+                new double[][]{{1, 0}, {0, -1}}
+        );
+
+        try {
+            Determinant.compute(complex);
+            fail("Expected Determinant.compute to reject complex matrix");
+        } catch (IllegalArgumentException expected) {
+            // expected
+        }
+
+        try {
+            LUDeterminant.compute(complex);
+            fail("Expected LUDeterminant.compute to reject complex matrix");
+        } catch (IllegalArgumentException expected) {
+            // expected
+        }
+
+        try {
+            MinorsDeterminant.compute(complex);
+            fail("Expected MinorsDeterminant.compute to reject complex matrix");
+        } catch (IllegalArgumentException expected) {
+            // expected
+        }
     }
 }

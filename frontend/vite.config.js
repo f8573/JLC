@@ -21,6 +21,9 @@ export default defineConfig({
   server: {
     port: 5173,
     allowedHosts: ['lambdacompute.org'],
+    fs: {
+      allow: [path.resolve(__dirname)]
+    },
     proxy: {
       '/api': 'http://localhost:8080'
     }

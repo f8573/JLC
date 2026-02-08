@@ -5,6 +5,7 @@ import java.util.Set;
 
 import net.faulj.compute.BlockedMultiply;
 import net.faulj.core.Tolerance;
+import net.faulj.scalar.Complex;
 import net.faulj.vector.Vector;
 import net.faulj.spaces.SubspaceBasis;
 import jdk.incubator.vector.DoubleVector;
@@ -1016,7 +1017,7 @@ public class Matrix {
     }
 
     /**
-     * Compute the determinant.
+     * Compute the determinant for a real-valued matrix.
      *
      * @return determinant
      */
@@ -1103,12 +1104,116 @@ public class Matrix {
     }
 
     /**
+     * Compute the determinant for a real or complex matrix.
+     *
+     * @return complex determinant
+     */
+    public Complex determinantComplex() {
+        if (rows != columns) {
+            throw new ArithmeticException("Row-column count mismatch");
+        }
+        if (isReal()) {
+            return Complex.valueOf(determinant());
+        }
+
+        int n = rows;
+        if (n == 1) {
+            return Complex.valueOf(data[0], imag[0]);
+        }
+        if (n == 2) {
+            double aRe = data[0];
+            double aIm = imag[0];
+            double bRe = data[1];
+            double bIm = imag[1];
+            double cRe = data[2];
+            double cIm = imag[2];
+            double dRe = data[3];
+            double dIm = imag[3];
+            double adRe = aRe * dRe - aIm * dIm;
+            double adIm = aRe * dIm + aIm * dRe;
+            double bcRe = bRe * cRe - bIm * cIm;
+            double bcIm = bRe * cIm + bIm * cRe;
+            return Complex.valueOf(adRe - bcRe, adIm - bcIm);
+        }
+
+        double[] realWork = Arrays.copyOf(data, data.length);
+        double[] imagWork = Arrays.copyOf(imag, imag.length);
+        double tol = Tolerance.get();
+        int exchanges = 0;
+
+        for (int col = 0; col < n; col++) {
+            int pivotRow = col;
+            int pivotIndex = col * n + col;
+            double maxAbs = complexAbs(realWork[pivotIndex], imagWork[pivotIndex]);
+            for (int row = col + 1; row < n; row++) {
+                int idx = row * n + col;
+                double magnitude = complexAbs(realWork[idx], imagWork[idx]);
+                if (magnitude > maxAbs) {
+                    maxAbs = magnitude;
+                    pivotRow = row;
+                }
+            }
+            if (maxAbs <= tol) {
+                return Complex.ZERO;
+            }
+            if (pivotRow != col) {
+                swapRows(realWork, imagWork, n, col, pivotRow);
+                exchanges++;
+            }
+
+            pivotIndex = col * n + col;
+            double pivotRe = realWork[pivotIndex];
+            double pivotIm = imagWork[pivotIndex];
+            double pivotNormSq = pivotRe * pivotRe + pivotIm * pivotIm;
+
+            for (int row = col + 1; row < n; row++) {
+                int factorIndex = row * n + col;
+                double aRe = realWork[factorIndex];
+                double aIm = imagWork[factorIndex];
+                double factorRe = (aRe * pivotRe + aIm * pivotIm) / pivotNormSq;
+                double factorIm = (aIm * pivotRe - aRe * pivotIm) / pivotNormSq;
+                realWork[factorIndex] = 0.0;
+                imagWork[factorIndex] = 0.0;
+
+                int rowOffset = row * n;
+                int pivotOffset = col * n;
+                for (int c = col + 1; c < n; c++) {
+                    int idx = rowOffset + c;
+                    int pidx = pivotOffset + c;
+                    double pRe = realWork[pidx];
+                    double pIm = imagWork[pidx];
+                    double multRe = factorRe * pRe - factorIm * pIm;
+                    double multIm = factorRe * pIm + factorIm * pRe;
+                    realWork[idx] -= multRe;
+                    imagWork[idx] -= multIm;
+                }
+            }
+        }
+
+        double detRe = (exchanges & 1) == 0 ? 1.0 : -1.0;
+        double detIm = 0.0;
+        for (int i = 0; i < n; i++) {
+            int idx = i * n + i;
+            double dRe = realWork[idx];
+            double dIm = imagWork[idx];
+            double nextRe = detRe * dRe - detIm * dIm;
+            double nextIm = detRe * dIm + detIm * dRe;
+            detRe = nextRe;
+            detIm = nextIm;
+        }
+        return Complex.valueOf(detRe, detIm);
+    }
+
+    /**
      * Check whether this matrix is invertible.
      *
      * @return true if invertible
      */
     public boolean isInvertible() {
-        return determinant() != 0;
+        if (isReal()) {
+            return !Tolerance.isZero(determinant());
+        }
+        return determinantComplex().abs() > Tolerance.get();
     }
 
     /**
@@ -1455,6 +1560,25 @@ public class Matrix {
         return a00 * (a11 * a22 - a12 * a21)
                 - a01 * (a10 * a22 - a12 * a20)
                 + a02 * (a10 * a21 - a11 * a20);
+    }
+
+    private static double complexAbs(double real, double imaginary) {
+        return Math.hypot(real, imaginary);
+    }
+
+    private static void swapRows(double[] real, double[] imaginary, int n, int rowA, int rowB) {
+        int offsetA = rowA * n;
+        int offsetB = rowB * n;
+        for (int col = 0; col < n; col++) {
+            int a = offsetA + col;
+            int b = offsetB + col;
+            double tempRe = real[a];
+            real[a] = real[b];
+            real[b] = tempRe;
+            double tempIm = imaginary[a];
+            imaginary[a] = imaginary[b];
+            imaginary[b] = tempIm;
+        }
     }
 
     private Matrix inverseSmall(int n, double tol) {

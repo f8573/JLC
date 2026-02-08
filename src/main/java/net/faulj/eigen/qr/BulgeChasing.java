@@ -89,23 +89,23 @@ public class BulgeChasing {
                 double v1 = y * inv_denom;
                 double v2 = z * inv_denom;
 
-                // LAPACK: implicit normalization via tau
+                // Householder reflector P = I - tau * v * v^T
+                // where v = [1, v1, v2] and tau = 2 / (v^T v)
                 double tau = 2.0 / (1.0 + v1 * v1 + v2 * v2);
-                v0 *= tau; v1 *= tau; v2 *= tau;
 
                 if (k + nr - 1 > m) break;
 
                 // Apply from left to H
                 int jstart = Math.max(0, k - 1);
-                applyReflectorLeftRaw(h, n, k, jstart, n - 1, v0, v1, v2);
+                applyReflectorLeftRaw(h, n, k, jstart, n - 1, tau, v1, v2);
 
                 // Apply from right to H
                 int iend = Math.min(m + 1, k + 3);
-                applyReflectorRightRaw(h, n, k, iend, v0, v1, v2);
+                applyReflectorRightRaw(h, n, k, iend, tau, v1, v2);
 
                 // Accumulate Q
                 if (q != null) {
-                    applyReflectorRightRaw(q, qn, k, qn - 1, v0, v1, v2);
+                    applyReflectorRightRaw(q, qn, k, qn - 1, tau, v1, v2);
                 }
 
                 // Next bulge position
@@ -147,7 +147,8 @@ public class BulgeChasing {
     }
 
     /**
-     * Specialized 2x2 double-shift for small blocks (LAPACK dlaqr6 approach).
+     * Specialized 2x2 double-shift for small blocks.
+     * Applies a Givens rotation to perform an implicit QR step on the 2x2 block.
      */
     private static void performDoubleShift2x2(double[] h, int n, double[] q, int qn, int l, int m, double s1, double s2) {
         if (m - l != 1) return;
@@ -157,69 +158,74 @@ public class BulgeChasing {
         double a21 = h[m * n + l];
         double a22 = h[m * n + m];
 
-        double tr = a11 + a22;
-        double det = a11 * a22 - a12 * a21;
-        double shift_tr = s1 + s2;
-        double shift_det = s1 * s2;
+        // Compute first column of (H - s1*I)(H - s2*I) for the 2x2 block
+        double sum = s1 + s2;
+        double prod = s1 * s2;
+        double x = a11 * a11 + a12 * a21 - sum * a11 + prod;
+        double y = a21 * (a11 + a22 - sum);
 
-        // Apply implicit shift directly to 2x2 block
-        double scale = Math.abs(a11) + Math.abs(a12) + Math.abs(a21) + Math.abs(a22);
-        if (scale > 0) {
-            // Small perturbation to break symmetry if needed
-            h[l * n + l] = a11 + EPSILON * scale * (shift_tr - tr);
+        // Build Givens rotation to zero out y
+        double r = Math.hypot(x, y);
+        if (r < EPSILON) return;
+
+        double c = x / r;
+        double s = -y / r;
+
+        // Apply Givens rotation as similarity transformation: G^T * H * G
+        applyGivensLeftRaw(h, n, l, m, c, s, 0, n - 1);
+        applyGivensRightRaw(h, n, l, m, c, s, 0, m);
+        if (q != null) {
+            applyGivensRightRaw(q, qn, l, m, c, s, 0, qn - 1);
         }
     }
 
     /**
      * Apply 3x3 Householder reflector from left using raw arrays.
-     * LAPACK: P * A where P = I - 2*v*v^T, optimized for cache.
+     * P = I - tau * v * v^T where v = [1, v1, v2].
+     * Computes P * A for rows [row, row+2] and columns [colStart, colEnd].
      */
-    private static void applyReflectorLeftRaw(double[] a, int n, int row, int colStart, int colEnd, double v0, double v1, double v2) {
+    private static void applyReflectorLeftRaw(double[] a, int n, int row, int colStart, int colEnd, double tau, double v1, double v2) {
         int r0 = row * n;
         int r1 = (row + 1) * n;
         int r2 = (row + 2) * n;
 
         int jEnd = Math.min(colEnd + 1, n);
-        double twoV0 = 2.0 * v0;
-        double twoV1 = 2.0 * v1;
-        double twoV2 = 2.0 * v2;
 
-        // LAPACK: blocked update for cache efficiency
         for (int j = colStart; j < jEnd; j++) {
             double a0 = a[r0 + j];
             double a1 = a[r1 + j];
             double a2 = a[r2 + j];
-            double dot = v0 * a0 + v1 * a1 + v2 * a2;
-            a[r0 + j] = a0 - twoV0 * dot;
-            a[r1 + j] = a1 - twoV1 * dot;
-            a[r2 + j] = a2 - twoV2 * dot;
+            // dot = v^T * column = 1*a0 + v1*a1 + v2*a2
+            double dot = a0 + v1 * a1 + v2 * a2;
+            double tauDot = tau * dot;
+            a[r0 + j] = a0 - tauDot;
+            a[r1 + j] = a1 - v1 * tauDot;
+            a[r2 + j] = a2 - v2 * tauDot;
         }
     }
 
     /**
      * Apply 3x3 Householder reflector from right using raw arrays.
-     * LAPACK: A * P where P = I - 2*v*v^T, optimized for row-major layout.
+     * P = I - tau * v * v^T where v = [1, v1, v2].
+     * Computes A * P for rows [0, rowEnd] and columns [col, col+2].
      */
-    private static void applyReflectorRightRaw(double[] a, int n, int col, int rowEnd, double v0, double v1, double v2) {
+    private static void applyReflectorRightRaw(double[] a, int n, int col, int rowEnd, double tau, double v1, double v2) {
         int iEnd = Math.min(rowEnd + 1, n);
         int c0 = col;
         int c1 = col + 1;
         int c2 = col + 2;
 
-        double twoV0 = 2.0 * v0;
-        double twoV1 = 2.0 * v1;
-        double twoV2 = 2.0 * v2;
-
-        // LAPACK: vectorized update pattern
         for (int i = 0; i < iEnd; i++) {
             int ri = i * n;
             double a0 = a[ri + c0];
             double a1 = a[ri + c1];
             double a2 = a[ri + c2];
-            double dot = v0 * a0 + v1 * a1 + v2 * a2;
-            a[ri + c0] = a0 - twoV0 * dot;
-            a[ri + c1] = a1 - twoV1 * dot;
-            a[ri + c2] = a2 - twoV2 * dot;
+            // dot = row * v = a0*1 + a1*v1 + a2*v2
+            double dot = a0 + a1 * v1 + a2 * v2;
+            double tauDot = tau * dot;
+            a[ri + c0] = a0 - tauDot;
+            a[ri + c1] = a1 - v1 * tauDot;
+            a[ri + c2] = a2 - v2 * tauDot;
         }
     }
 

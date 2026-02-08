@@ -23,8 +23,8 @@ export function ThemeProvider({ children }) {
   // Apply theme class to document
   useEffect(() => {
     const root = document.documentElement
-    root.classList.remove('light', 'dark')
-    root.classList.add(theme)
+    root.classList.toggle('dark', theme === 'dark')
+    root.classList.toggle('light', theme !== 'dark')
     
     // Update CSS variables for accent color (used in custom styles)
     root.style.setProperty('--accent-color', accentColor)
@@ -65,6 +65,16 @@ export function ThemeProvider({ children }) {
       }
     }
   }, [theme, accentColor])
+
+  // Remove first-load transition/animation suppression once initial paint is complete.
+  useEffect(() => {
+    const root = document.documentElement
+    if (!root.classList.contains('no-theme-fade')) return
+    const id = window.requestAnimationFrame(() => {
+      root.classList.remove('no-theme-fade')
+    })
+    return () => window.cancelAnimationFrame(id)
+  }, [])
 
   const setTheme = (newTheme) => {
     setThemeState(newTheme)
