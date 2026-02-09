@@ -30,9 +30,22 @@ public final class GemmDispatch {
     private static final long TINY_THRESHOLD = 8 * 8 * 8;          // 512 FLOPs
     private static final long SMALL_THRESHOLD = 50_000;            // 50k FLOPs
     private static final long CUDA_THRESHOLD = 200_000_000;        // 200M FLOPs
-    private static final long PARALLEL_THRESHOLD = 5_000_000;      // 5M FLOPs
+    private static final long PARALLEL_THRESHOLD;      // 5M FLOPs (default, overridable)
 
     private GemmDispatch() {}
+
+    static {
+        long def = 5_000_000L;
+        String v = System.getProperty("la.gemm.parallelThreshold");
+        long parsed = def;
+        if (v != null) {
+            try {
+                parsed = Long.parseLong(v);
+            } catch (Exception ignored) {
+            }
+        }
+        PARALLEL_THRESHOLD = parsed;
+    }
 
     /**
      * Kernel selection result.
@@ -117,8 +130,30 @@ public final class GemmDispatch {
      */
     public static BlockSizes computeBlockSizes() {
         int vecLen = SPECIES.length();
-        int nr = vecLen;
-        int mr = MicroKernel.optimalMR(vecLen);
+        // Tuned defaults: MR=2, NR=4 gave best small-GEMM results on target hardware.
+        int nr = 4;
+        int mr = 2;
+        // Allow defaults to be adjusted by SIMD width when appropriate
+        if (vecLen >= 8 && nr < vecLen) {
+            // If AVX-512, allow larger NR but keep MR tuned
+            nr = vecLen;
+        }
+
+        // Allow runtime override for microkernel block sizes via system properties
+        try {
+            String mrProp = System.getProperty("la.gemm.mr");
+            String nrProp = System.getProperty("la.gemm.nr");
+            if (mrProp != null) {
+                int mrv = Integer.parseInt(mrProp);
+                if (mrv > 0) mr = mrv;
+            }
+            if (nrProp != null) {
+                int nrv = Integer.parseInt(nrProp);
+                if (nrv > 0) nr = nrv;
+            }
+        } catch (Exception e) {
+            // ignore and fall back to defaults
+        }
 
         // KC: size B panel (KC × NC) to fit in L2
         // Goal: KC × NC × 8 bytes ≈ L2_CACHE / 2 (leave room for A and C)

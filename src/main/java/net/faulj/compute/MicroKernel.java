@@ -4,6 +4,7 @@ import jdk.incubator.vector.DoubleVector;
 import jdk.incubator.vector.VectorMask;
 import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
+import net.faulj.util.PerfTimers;
 
 /**
  * Optimized register-blocked microkernel for GEMM.
@@ -42,7 +43,17 @@ public final class MicroKernel {
      * Using 8 provides good ILP and hides FMA latency effectively.
      */
     public static int optimalKUnroll(int vecLen) {
-        return 8;  // Use 8 for both AVX2 and AVX-512
+        // Allow runtime override
+        try {
+            String ku = System.getProperty("la.gemm.kunroll");
+            if (ku != null) {
+                int kuv = Integer.parseInt(ku);
+                if (kuv > 0) return kuv;
+            }
+        } catch (Exception ignored) {
+        }
+        // Tuned default: use k-unroll=8 to hide FMA latency on this hardware
+        return 8;
     }
 
     /**
@@ -96,6 +107,7 @@ public final class MicroKernel {
                                      double[] c, int cOffset, int ldc,
                                      int vecLen, int kUnroll,
                                      boolean useMask, VectorMask<Double> mask) {
+        long tMK = PerfTimers.start();
         // Load C registers
         int cBase = cOffset + j;
         DoubleVector c0, c1, c2, c3, c4, c5;
@@ -268,6 +280,7 @@ public final class MicroKernel {
             if (mr > 4) c4.intoArray(c, cBase + 4 * ldc);
             if (mr > 5) c5.intoArray(c, cBase + 5 * ldc);
         }
+        PerfTimers.record("MicroKernel.compute", tMK);
     }
 
     /**

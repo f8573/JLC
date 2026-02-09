@@ -3,6 +3,7 @@ package net.faulj.compute;
 import net.faulj.matrix.Matrix;
 import net.faulj.matrix.MatrixView;
 import net.faulj.matrix.OffHeapMatrix;
+import net.faulj.util.PerfTimers;
 
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
@@ -137,6 +138,7 @@ public final class OptimizedBLAS3 {
                                   double[] c, int cOffset, int ldc,
                                   int m, int k, int n,
                                   double alpha, double beta) {
+        long tGemm = PerfTimers.start();
         GemmWorkspace ws = GemmWorkspace.get();
         GemmDispatch.Kernel kernel = GemmDispatch.selectKernel(m, n, k, false, 1);
 
@@ -193,17 +195,44 @@ public final class OptimizedBLAS3 {
             return;
         }
 
-        // Materialize A^T into a temp array (size k x m) then call core gemmStrided.
-        double[] At = new double[k * m];
-        for (int i = 0; i < m; i++) {
-            int srcRow = aOffset + i * lda;
-            for (int j = 0; j < k; j++) {
-                At[j * m + i] = a[srcRow + j];
+        // Compute C = alpha * A^T * B + beta * C without materializing A^T.
+        // A is (m x k), B is (m x n), result C is (k x n).
+        // Scale C by beta first.
+        if (beta == 0.0) {
+            for (int i = 0; i < k; i++) {
+                java.util.Arrays.fill(c, cOffset + i * ldc, cOffset + i * ldc + n, 0.0);
+            }
+        } else if (beta != 1.0) {
+            for (int i = 0; i < k; i++) {
+                for (int j = 0; j < n; j++) {
+                    c[cOffset + i * ldc + j] *= beta;
+                }
             }
         }
 
-        // Now At has dimensions (k x m) with leading dimension m
-        gemmStrided(At, 0, m, b, bOffset, ldb, c, cOffset, ldc, k, m, n, alpha, beta);
+        if (alpha == 0.0 || m == 0 || k == 0 || n == 0) {
+            return;
+        }
+
+        final int block = 64;
+
+        // Loop over rows of A^T (columns of A)
+        for (int kk = 0; kk < k; kk++) {
+            int cRowOff = cOffset + kk * ldc;
+
+            // Accumulate into C[kk, :]
+            for (int ii = 0; ii < m; ii += block) {
+                int iend = Math.min(m, ii + block);
+                for (int i = ii; i < iend; i++) {
+                    double aVal = a[aOffset + i * lda + kk] * alpha;
+                    int bOff = bOffset + i * ldb;
+                    int cIdx = cRowOff;
+                    for (int j = 0; j < n; j++) {
+                        c[cIdx + j] += aVal * b[bOff + j];
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -212,6 +241,7 @@ public final class OptimizedBLAS3 {
     private static void gemmMicrokernel(double[] a, int lda, double[] b, int ldb,
                                        double[] c, int ldc, int m, int k, int n,
                                        double alpha, double beta, GemmWorkspace ws) {
+        long tGemm = PerfTimers.start();
         // Apply beta to C
         PackingUtils.scaleCPanel(c, 0, m, n, ldc, beta);
 
@@ -235,7 +265,9 @@ public final class OptimizedBLAS3 {
 
                 // Pack B panel
                 double[] bPack = ws.getPackB(kBlock * packedN);
+                long tPB = PerfTimers.start();
                 PackingUtils.packB(b, ldb, kk, kBlock, jj, nBlock, packedN, bPack);
+                PerfTimers.record("GEMM.packB", tPB);
 
                 for (int ii = 0; ii < m; ii += blocks.mc) {
                     int rowEnd = Math.min(ii + blocks.mc, m);
@@ -246,16 +278,21 @@ public final class OptimizedBLAS3 {
 
                         // Pack A panel
                         double[] aPack = ws.getPackA(mBlock * kBlock);
+                        long tPA = PerfTimers.start();
                         PackingUtils.packA(a, lda, i, mBlock, kk, kBlock, alpha, aPack);
+                        PerfTimers.record("GEMM.packA", tPA);
 
                         // Call microkernel
                         int cOffset = i * ldc + jj;
+                        long tMK = PerfTimers.start();
                         MicroKernel.compute(mBlock, kBlock, packedN, nBlock,
                                           aPack, bPack, c, cOffset, ldc);
+                        PerfTimers.record("GEMM.microkernel.call", tMK);
                     }
                 }
             }
         }
+        PerfTimers.record("GEMM.total", tGemm);
     }
 
     /**
@@ -266,6 +303,7 @@ public final class OptimizedBLAS3 {
                                               double[] c, int cOffset, int ldc,
                                               int m, int k, int n,
                                               double alpha, double beta, GemmWorkspace ws) {
+        long tGemm = PerfTimers.start();
         // Apply beta to C
         if (beta == 0.0) {
             for (int i = 0; i < m; i++) {
@@ -297,7 +335,9 @@ public final class OptimizedBLAS3 {
                 int kBlock = kEnd - kk;
 
                 double[] bPack = ws.getPackB(kBlock * packedN);
+                long tPB = PerfTimers.start();
                 PackingUtils.packB(b, ldb, bOffset + kk * ldb, kBlock, jj, nBlock, packedN, bPack);
+                PerfTimers.record("GEMM.packB", tPB);
 
                 for (int ii = 0; ii < m; ii += blocks.mc) {
                     int rowEnd = Math.min(ii + blocks.mc, m);
@@ -305,15 +345,20 @@ public final class OptimizedBLAS3 {
                     for (int i = ii; i < rowEnd; i += mr) {
                         int mBlock = Math.min(mr, rowEnd - i);
                         double[] aPack = ws.getPackA(mBlock * kBlock);
+                        long tPA = PerfTimers.start();
                         PackingUtils.packA(a, lda, aOffset + i * lda, mBlock, kk, kBlock, alpha, aPack);
+                        PerfTimers.record("GEMM.packA", tPA);
 
                         int cOff = cOffset + i * ldc + jj;
+                        long tMK = PerfTimers.start();
                         MicroKernel.compute(mBlock, kBlock, packedN, nBlock,
                                           aPack, bPack, c, cOff, ldc);
+                        PerfTimers.record("GEMM.microkernel.call", tMK);
                     }
                 }
             }
         }
+        PerfTimers.record("GEMM.total", tGemm);
     }
 
     /**

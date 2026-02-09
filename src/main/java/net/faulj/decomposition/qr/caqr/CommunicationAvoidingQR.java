@@ -1,6 +1,7 @@
 package net.faulj.decomposition.qr.caqr;
 
 import net.faulj.compute.OptimizedBLAS3;
+import net.faulj.util.PerfTimers;
 import java.nio.DoubleBuffer;
 
 /**
@@ -23,6 +24,8 @@ public final class CommunicationAvoidingQR {
     public static void applyWYUpdate(double[] A, int aOffset, int m, int n, int lda, WorkspaceManager workspace) {
         if (m <= 0 || n <= 0) return;
 
+        long tApply = PerfTimers.start();
+
         DoubleBuffer db = workspace.doubleBuffer();
 
         int b = Math.max(1, (int)Math.sqrt(workspace.tCombinedOffset - workspace.yCombinedOffset));
@@ -41,27 +44,35 @@ public final class CommunicationAvoidingQR {
 
         // Compute Z = Y^T * A  (Z: b x n) using optimized strided gemm with transpose flag
         double[] Z = new double[b * n];
+        long tZ = PerfTimers.start();
         OptimizedBLAS3.gemmStrided(true,
-                                   Y, 0, b,
-                                   A, aOffset, lda,
-                                   Z, 0, n,
-                                   b, m, n,
-                                   1.0, 0.0);
+                       Y, 0, b,
+                       A, aOffset, lda,
+                       Z, 0, n,
+                       b, m, n,
+                       1.0, 0.0);
+        PerfTimers.record("CAQR.applyWY.Z", tZ);
 
         // Compute W = T * Z (b x n)
         double[] W = new double[b * n];
+        long tW = PerfTimers.start();
         OptimizedBLAS3.gemmStrided(T, 0, b,
-                                   Z, 0, n,
-                                   W, 0, n,
-                                   b, b, n,
-                                   1.0, 0.0);
+                       Z, 0, n,
+                       W, 0, n,
+                       b, b, n,
+                       1.0, 0.0);
+        PerfTimers.record("CAQR.applyWY.W", tW);
 
         // A := A - Y * W  => use gemmStrided with alpha = -1, beta = 1
+        long tUpd = PerfTimers.start();
         OptimizedBLAS3.gemmStrided(Y, 0, b,
-                                   W, 0, n,
-                                   A, aOffset, lda,
-                                   m, b, n,
-                                   -1.0, 1.0);
+                       W, 0, n,
+                       A, aOffset, lda,
+                       m, b, n,
+                       -1.0, 1.0);
+        PerfTimers.record("CAQR.applyWY.UPDATE", tUpd);
+
+        PerfTimers.record("CAQR.applyWY.total", tApply);
     }
 
     /**
@@ -102,7 +113,7 @@ public final class CommunicationAvoidingQR {
             int rows = base + (i < rem ? 1 : 0);
             net.faulj.matrix.Matrix Ai = A.crop(rowStart, rowStart + rows - 1, 0, n - 1);
             // thin QR on Ai
-            net.faulj.decomposition.result.QRResult res = net.faulj.decomposition.qr.HouseholderQR.decomposeThin(Ai);
+            net.faulj.decomposition.result.QRResult res = net.faulj.decomposition.qr.HouseholderQR.decomposeHouseholder(Ai, true);
             Qs[i] = res.getQ();
             Rs[i] = res.getR().crop(0, n - 1, 0, n - 1); // ensure n x n
             rowStart += rows;
@@ -120,7 +131,7 @@ public final class CommunicationAvoidingQR {
         }
 
         // QR on S (thin)
-        net.faulj.decomposition.result.QRResult resS = net.faulj.decomposition.qr.HouseholderQR.decomposeThin(S);
+        net.faulj.decomposition.result.QRResult resS = net.faulj.decomposition.qr.HouseholderQR.decomposeHouseholder(S, true);
         net.faulj.matrix.Matrix QsStack = resS.getQ(); // (p*n x n)
         net.faulj.matrix.Matrix Rfinal = resS.getR(); // (n x n)
 

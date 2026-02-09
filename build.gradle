@@ -148,3 +148,50 @@ tasks.register('runDiagnostic', JavaExec) {
     main = 'net.faulj.benchmark.Diagnostic512'
     standardInput = System.in
 }
+
+// Run CAQR performance harness using Java toolchain (ensures same JDK used for compilation)
+tasks.register('runCAQRPerf', JavaExec) {
+    group = 'benchmark'
+    description = 'Run net.faulj.bench.RunCAQRPerf from main classes'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    main = 'net.faulj.bench.RunCAQRPerf'
+    standardInput = System.in
+}
+
+// Run CAQR microbenchmark harness from main classes (reproduces test behavior)
+tasks.register('runCAQRMicrobench', JavaExec) {
+    group = 'benchmark'
+    description = 'Run net.faulj.bench.RunCAQRMicrobench from main classes'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    main = 'net.faulj.bench.RunCAQRMicrobench'
+    standardInput = System.in
+}
+
+// Quick test to validate PerfTimers recording/dump
+tasks.register('runPerfTest', JavaExec) {
+    group = 'benchmark'
+    description = 'Run small PerfTimers test'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    main = 'net.faulj.bench.TestPerfTimers'
+    standardInput = System.in
+}
+
+tasks.register('runGemmTest', JavaExec) {
+    group = 'benchmark'
+    description = 'Run GEMM test to exercise BLAS3Kernels instrumentation'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    main = 'net.faulj.bench.TestGemm'
+    standardInput = System.in
+}

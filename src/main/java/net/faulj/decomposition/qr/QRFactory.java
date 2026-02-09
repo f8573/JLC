@@ -12,6 +12,10 @@ import net.faulj.matrix.Matrix;
 public final class QRFactory {
     public enum QRStrategy { HOUSEHOLDER, CAQR }
 
+    // Guard to prevent re-entrant CAQR -> QRFactory recursion when
+    // CAQR implementation calls back into QRFactory for local factorizations.
+    private static final ThreadLocal<Boolean> inCAQR = ThreadLocal.withInitial(() -> Boolean.FALSE);
+
     private QRFactory() {}
 
     public static QRStrategy currentStrategy() {
@@ -25,13 +29,15 @@ public final class QRFactory {
 
     public static QRResult decompose(Matrix A, boolean thin) {
         QRStrategy strat = currentStrategy();
-        if (strat == QRStrategy.CAQR) {
-            // Call CAQR implementation (may be a stub until implemented)
+        if (strat == QRStrategy.CAQR && !inCAQR.get()) {
+            // mark we are in CAQR to avoid recursive re-entry
+            inCAQR.set(Boolean.TRUE);
             try {
                 return CommunicationAvoidingQR.factor(A, thin, QRConfig.defaultConfig());
             } catch (UnsupportedOperationException ex) {
-                // Fall back to Householder if CAQR not implemented
                 return HouseholderQR.decomposeHouseholder(A, thin);
+            } finally {
+                inCAQR.set(Boolean.FALSE);
             }
         } else {
             return HouseholderQR.decomposeHouseholder(A, thin);
