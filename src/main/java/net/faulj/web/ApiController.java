@@ -22,6 +22,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.annotation.PreDestroy;
 
 import net.faulj.core.DiagnosticMetrics;
 import net.faulj.core.DiagnosticMetrics.DiagnosticItem;
@@ -71,6 +72,18 @@ public class ApiController {
     private volatile Map<String, Object> currentCpu = cpuTemplate("offline");
     private final ExecutorService sseExecutor = Executors.newSingleThreadExecutor();
     private final AtomicInteger queuedJobs = new AtomicInteger(0);
+
+    @PreDestroy
+    void onShutdown() {
+        for (SseEmitter emitter : sseEmitters) {
+            try {
+                emitter.complete();
+            } catch (Exception ignored) {
+            }
+        }
+        sseEmitters.clear();
+        sseExecutor.shutdownNow();
+    }
 
     /**
      * Notify connected SSE clients only when the status or CPU state changes.

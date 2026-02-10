@@ -1,7 +1,7 @@
 package net.faulj.benchmark.roofline;
 
 import net.faulj.compute.DispatchPolicy;
-import net.faulj.compute.OptimizedBLAS3;
+import net.faulj.kernels.gemm.Gemm;
 import net.faulj.matrix.Matrix;
 
 import java.util.Locale;
@@ -91,13 +91,13 @@ final class ComputeRoofProbe {
             .build();
 
         for (int i = 0; i < warmup; i++) {
-            OptimizedBLAS3.gemm(a, b, c, 1.0, 0.0, policy);
+            Gemm.gemm(a, b, c, 1.0, 0.0, policy);
         }
 
         double bestSeconds = Double.POSITIVE_INFINITY;
         for (int i = 0; i < runs; i++) {
             long start = System.nanoTime();
-            OptimizedBLAS3.gemm(a, b, c, 1.0, 0.0, policy);
+            Gemm.gemm(a, b, c, 1.0, 0.0, policy);
             long elapsed = System.nanoTime() - start;
             double seconds = elapsed / 1e9;
             if (seconds < bestSeconds) {

@@ -3,10 +3,9 @@ package net.faulj.bench;
 import net.faulj.decomposition.hessenberg.HessenbergReduction;
 import net.faulj.decomposition.qr.HouseholderQR;
 import net.faulj.matrix.Matrix;
-import net.faulj.compute.BLAS3Kernels;
 import net.faulj.compute.DispatchPolicy;
-import net.faulj.compute.OptimizedBLAS3;
-import net.faulj.compute.GemmDispatch;
+import net.faulj.kernels.gemm.Gemm;
+import net.faulj.kernels.gemm.dispatch.GemmDispatch;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
@@ -168,7 +167,7 @@ public class BenchmarkService {
                         .parallelism(Math.max(1, Runtime.getRuntime().availableProcessors()))
                         .build();
 
-                // Pre-allocate matrices once and operate on raw arrays using BLAS3 direct kernel
+                // Pre-allocate matrices once and operate on raw arrays via canonical GEMM facade
                 Matrix A = randomMatrix(n, n, 42L);
                 Matrix B = randomMatrix(n, n, 4242L);
                 Matrix C = Matrix.zero(n, n);
@@ -177,13 +176,13 @@ public class BenchmarkService {
                 double[] bd = B.getRawData();
                 double[] cd = C.getRawData();
 
-                // Use a direct packed BLAS3 path with a reasonable block size (matches tests)
+                // Use a direct strided packed path with a reasonable block size (matches tests)
                 final int blockSize = 64;
 
                 // Warmup: more iterations to stabilize JIT and CPU frequency
                 final int warmupRuns = 10;
                 for (int w = 0; w < warmupRuns; w++) {
-                    BLAS3Kernels.gemmStrided(ad, 0, n, bd, 0, n, cd, 0, n, n, n, n, 1.0, 0.0, blockSize);
+                    Gemm.gemmStrided(ad, 0, n, bd, 0, n, cd, 0, n, n, n, n, 1.0, 0.0, blockSize);
                 }
 
                 // Short pause to let frequency and caches settle
@@ -194,7 +193,7 @@ public class BenchmarkService {
                 long t0 = System.nanoTime();
                 for (int i = 0; i < measuredRuns; i++) {
                     // Note: beta=0.0 causes gemmStrided to zero C internally, no need for extra fill
-                    BLAS3Kernels.gemmStrided(ad, 0, n, bd, 0, n, cd, 0, n, n, n, n, 1.0, 0.0, blockSize);
+                    Gemm.gemmStrided(ad, 0, n, bd, 0, n, cd, 0, n, n, n, n, 1.0, 0.0, blockSize);
                 }
                 long t1 = System.nanoTime();
 
@@ -227,7 +226,7 @@ public class BenchmarkService {
                 diagInfo.put("measuredRuns", measuredRuns);
                 diagInfo.put("warmupRuns", warmupRuns);
 
-                // Also run a parallel measurement using OptimizedBLAS3 (default parallel policy)
+                // Also run a parallel measurement through the canonical GEMM facade
                 int availableThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
                 DispatchPolicy parallelPolicy = DispatchPolicy.builder()
                         .enableCuda(false)
@@ -238,14 +237,14 @@ public class BenchmarkService {
 
                 // Warmup for parallel path
                 for (int w = 0; w < Math.min(5, warmupRuns); w++) {
-                    OptimizedBLAS3.gemm(A, B, C, 1.0, 0.0, parallelPolicy);
+                    Gemm.gemm(A, B, C, 1.0, 0.0, parallelPolicy);
                 }
 
                 // Measured parallel runs (batch timed)
                 int measuredParallel = Math.max(reps, 10);
                 long tp0 = System.nanoTime();
                 for (int i = 0; i < measuredParallel; i++) {
-                    OptimizedBLAS3.gemm(A, B, C, 1.0, 0.0, parallelPolicy);
+                    Gemm.gemm(A, B, C, 1.0, 0.0, parallelPolicy);
                 }
                 long tp1 = System.nanoTime();
                 double totalSecondsParallel = (tp1 - tp0) / 1e9;
@@ -429,6 +428,17 @@ public class BenchmarkService {
         String classpath = System.getProperty("java.class.path");
         List<String> cmd = new ArrayList<>();
         cmd.add(javaBin);
+        // Kill isolated runner quickly on leak/OOM instead of limping in a degraded state.
+        cmd.add("-XX:+ExitOnOutOfMemoryError");
+        int heapMb = Math.max(128, parseInt(System.getProperty("faulj.benchmark.isolated.maxHeapMb"), 768));
+        cmd.add("-Xmx" + heapMb + "m");
+        String profile = System.getProperty("faulj.runtime.profile");
+        if (profile == null || profile.isBlank()) {
+            profile = System.getenv("FAULJ_RUNTIME_PROFILE");
+        }
+        if (profile != null && !profile.isBlank()) {
+            cmd.add("-Dfaulj.runtime.profile=" + profile.trim());
+        }
         cmd.add("--enable-preview");
         cmd.add("--add-modules=jdk.incubator.vector");
         cmd.add("-cp");

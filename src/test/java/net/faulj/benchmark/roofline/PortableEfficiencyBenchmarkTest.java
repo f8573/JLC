@@ -1,7 +1,7 @@
 package net.faulj.benchmark.roofline;
 
 import net.faulj.compute.DispatchPolicy;
-import net.faulj.compute.OptimizedBLAS3;
+import net.faulj.kernels.gemm.Gemm;
 import net.faulj.decomposition.hessenberg.HessenbergReduction;
 import net.faulj.decomposition.lu.LUDecomposition;
 import net.faulj.decomposition.qr.HouseholderQR;
@@ -80,7 +80,7 @@ public class PortableEfficiencyBenchmarkTest {
             .build();
 
         double bestSeconds = bestOf(warmupForSize(n), measuredRunsForSize(n), () -> {
-            OptimizedBLAS3.gemm(a, b, c, 1.0, 0.0, policy);
+            Gemm.gemm(a, b, c, 1.0, 0.0, policy);
             sink += c.get(0, 0);
         });
 

@@ -1,6 +1,6 @@
 package net.faulj.eigen.qr;
 
-import net.faulj.compute.BLAS3Kernels;
+import net.faulj.kernels.gemm.Gemm;
 import net.faulj.decomposition.result.HessenbergResult;
 import net.faulj.matrix.Matrix;
 
@@ -283,7 +283,7 @@ public class BlockedHessenbergQR {
         int nCols = n - colStart;
 
         double[] W = new double[panelWidth * nCols];
-        BLAS3Kernels.gemmStridedTransA(
+        Gemm.gemmStridedTransA(
             V, 0, panelWidth,
             a, (k + 1) * n + colStart, n,
             W, 0, nCols,
@@ -291,14 +291,14 @@ public class BlockedHessenbergQR {
             1.0, 0.0, panelWidth);
 
         double[] W2 = new double[panelWidth * nCols];
-        BLAS3Kernels.gemmStridedTransA(
+        Gemm.gemmStridedTransA(
             T, 0, panelWidth,
             W, 0, nCols,
             W2, 0, nCols,
             panelWidth, panelWidth, nCols,
             1.0, 0.0, panelWidth);
 
-        BLAS3Kernels.gemmStrided(
+        Gemm.gemmStrided(
             V, 0, panelWidth,
             W2, 0, nCols,
             a, (k + 1) * n + colStart, n,
@@ -320,7 +320,7 @@ public class BlockedHessenbergQR {
         }
 
         double[] W = new double[n * panelWidth];
-        BLAS3Kernels.gemmStrided(
+        Gemm.gemmStrided(
             a, fullStart, n,
             V, 0, panelWidth,
             W, 0, panelWidth,
@@ -328,14 +328,14 @@ public class BlockedHessenbergQR {
             1.0, 0.0, panelWidth);
 
         double[] W2 = new double[n * panelWidth];
-        BLAS3Kernels.gemmStrided(
+        Gemm.gemmStrided(
             W, 0, panelWidth,
             T, 0, panelWidth,
             W2, 0, panelWidth,
             n, panelWidth, panelWidth,
             1.0, 0.0, panelWidth);
 
-        BLAS3Kernels.gemmStridedColMajorB(
+        Gemm.gemmStridedColMajorB(
             W2, 0, panelWidth,
             V, colOffset * panelWidth, panelWidth,
             a, colStart, n,

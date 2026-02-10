@@ -2,8 +2,8 @@ package net.faulj.decomposition.qr;
 
 import net.faulj.decomposition.result.QRResult;
 import net.faulj.matrix.Matrix;
-import net.faulj.compute.BLAS3Kernels;
 import net.faulj.compute.DispatchPolicy;
+import net.faulj.kernels.gemm.Gemm;
 import jdk.incubator.vector.*;
 
 /**
@@ -202,14 +202,14 @@ public final class HouseholderQR {
             Matrix Wm = Matrix.wrap(ws.w, panelSize, blockCols);
 
             // W = V^T * C
-            BLAS3Kernels.gemm(Vt, Cb, Wm, 1.0, 0.0, policy);
+            Gemm.gemm(Vt, Cb, Wm, 1.0, 0.0, policy);
 
             // W = T^T * W
             applyTTranspose(ws.t, ws.w, panelSize, blockCols, ws.temp);
 
             // C = C - V * W
             Matrix V = Matrix.wrap(ws.vPack, rows, panelSize);
-            BLAS3Kernels.gemm(V, Wm, Cb, -1.0, 1.0, policy);
+            Gemm.gemm(V, Wm, Cb, -1.0, 1.0, policy);
 
             unpackTrailingBlock(AT, m, kEnd, kStart, colStart, blockColsUsed, blockCols, ws.cBlock);
         }

@@ -1,5 +1,6 @@
 package net.faulj.bench;
 
+import net.faulj.compute.RuntimeProfile;
 import net.faulj.decomposition.bidiagonal.Bidiagonalization;
 import net.faulj.decomposition.cholesky.CholeskyDecomposition;
 import net.faulj.decomposition.hessenberg.HessenbergReduction;
@@ -66,6 +67,7 @@ public final class Diagnostic512Runner {
     }
 
     public static void main(String[] args) {
+        RuntimeProfile.applyConfiguredProfile();
         final int n = 512;
         int iterations = 5;
         String output = "diagnostic_512_results.csv";

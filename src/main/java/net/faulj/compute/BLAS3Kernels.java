@@ -13,7 +13,10 @@ import jdk.incubator.vector.VectorSpecies;
 
 /**
  * Provides optimized Level-3 BLAS kernel operations.
+ *
+ * @deprecated Use {@link net.faulj.kernels.gemm.Gemm} as the canonical GEMM entry point.
  */
+@Deprecated(forRemoval = false, since = "1.0")
 public class BLAS3Kernels {
     private static final double ZERO_EPS = 1e-15;
     private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;

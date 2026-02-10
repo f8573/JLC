@@ -1,6 +1,6 @@
 package net.faulj.bench;
 
-import net.faulj.compute.BLAS3Kernels;
+import net.faulj.kernels.gemm.Gemm;
 import net.faulj.matrix.Matrix;
 import net.faulj.util.PerfTimers;
 
@@ -15,11 +15,11 @@ public class TestGemm {
 
         // Warmup
         for (int i = 0; i < 2; i++) {
-            BLAS3Kernels.gemm(A, B, C, 1.0, 0.0, null);
+            Gemm.gemm(A, B, C, 1.0, 0.0, null);
         }
 
         long t0 = System.nanoTime();
-        BLAS3Kernels.gemm(A, B, C, 1.0, 0.0, null);
+        Gemm.gemm(A, B, C, 1.0, 0.0, null);
         long dt = System.nanoTime() - t0;
         System.out.println("GEMM dt(s): " + (dt / 1e9));
 

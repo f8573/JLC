@@ -26,11 +26,18 @@ import java.util.concurrent.atomic.AtomicReference;
  * - CPU: 60-80% of peak GFLOPS (150-200 GF on AVX-512)
  * - GPU: Effective use for large problems (>200M FLOPs)
  * - Memory: Minimize cache misses via optimal blocking
+ *
+ * @deprecated Use {@link net.faulj.kernels.gemm.Gemm} as the canonical GEMM entry point.
  */
+@Deprecated(forRemoval = false, since = "1.0")
 public final class OptimizedBLAS3 {
 
     // Shared pool for parallel GEMM - avoids expensive pool creation per call
     private static final AtomicReference<ForkJoinPool> SHARED_POOL = new AtomicReference<>();
+
+    static {
+        Runtime.getRuntime().addShutdownHook(new Thread(OptimizedBLAS3::shutdownSharedPool, "faulj-optimizedblas3-shutdown"));
+    }
 
     private static ForkJoinPool getSharedPool(int threads) {
         ForkJoinPool pool = SHARED_POOL.get();
@@ -52,6 +59,14 @@ public final class OptimizedBLAS3 {
         return pool;
     }
 
+    static void shutdownSharedPool() {
+        ForkJoinPool pool = SHARED_POOL.getAndSet(null);
+        if (pool == null) {
+            return;
+        }
+        pool.shutdownNow();
+    }
+
     private OptimizedBLAS3() {}
 
     /**
@@ -61,6 +76,7 @@ public final class OptimizedBLAS3 {
      */
     public static void gemm(Matrix a, Matrix b, Matrix c,
                            double alpha, double beta, DispatchPolicy policy) {
+        RuntimeProfile.applyConfiguredProfile();
         if (a == null || b == null || c == null) {
             throw new IllegalArgumentException("Matrices must not be null");
         }

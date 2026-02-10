@@ -30,6 +30,10 @@ public class BlockedMultiply {
     private static final long TRANSPOSE_THRESHOLD = 16_384L;
     private static final ThreadLocal<double[]> PACK_BUFFER = new ThreadLocal<>();
 
+    static {
+        Runtime.getRuntime().addShutdownHook(new Thread(BlockedMultiply::shutdownPools, "faulj-blockedmultiply-shutdown"));
+    }
+
     private BlockedMultiply() {
     }
 
@@ -53,6 +57,7 @@ public class BlockedMultiply {
      * @return product matrix
      */
     public static Matrix multiply(Matrix a, Matrix b, DispatchPolicy policy) {
+        RuntimeProfile.applyConfiguredProfile();
         if (a == null || b == null) {
             throw new IllegalArgumentException("Matrices must not be null");
         }
@@ -76,31 +81,38 @@ public class BlockedMultiply {
         boolean parallel = active.shouldParallelize(m, n, k);
         int blockSize = active.blockSize(m, n, k);
         int parallelism = active.getParallelism();
-        if (algorithm == DispatchPolicy.Algorithm.CUDA) {
-            Matrix cuda = CudaGemm.multiply(a, b);
-            if (cuda != null) {
-                return cuda;
+        try {
+            if (algorithm == DispatchPolicy.Algorithm.CUDA) {
+                Matrix cuda = CudaGemm.multiply(a, b);
+                if (cuda != null) {
+                    return cuda;
+                }
+                algorithm = active.selectCpuAlgorithm(m, n, k);
             }
-            algorithm = active.selectCpuAlgorithm(m, n, k);
-        }
-        switch (algorithm) {
-            case SIMD:
-                return multiplySimdFlat(a, b, blockSize);
-            case BLAS3:
-                return BLAS3Kernels.gemm(a, b, active);
-            case PARALLEL:
-                return multiplyParallel(a, b, blockSize, parallelism);
-            case BLOCKED, STRASSEN:
-                if (parallel) {
+            switch (algorithm) {
+                case SIMD:
+                    return multiplySimdFlat(a, b, blockSize);
+                case BLAS3:
+                    return BLAS3Kernels.gemm(a, b, active);
+                case PARALLEL:
                     return multiplyParallel(a, b, blockSize, parallelism);
+                case BLOCKED, STRASSEN:
+                    if (parallel) {
+                        return multiplyParallel(a, b, blockSize, parallelism);
+                    }
+                    return multiplyBlocked(a, b, blockSize);
+                case NAIVE, SPECIALIZED:
+                default:
+                    if (parallel) {
+                        return multiplyNaiveParallel(a, b, parallelism);
+                    }
+                    return multiplyNaive(a, b);
                 }
-                return multiplyBlocked(a, b, blockSize);
-            case NAIVE, SPECIALIZED:
-            default:
-                if (parallel) {
-                    return multiplyNaiveParallel(a, b, parallelism);
-                }
-                return multiplyNaive(a, b);
+        } catch (OutOfMemoryError oom) {
+            // Release thread-local scratch and force a low-overhead fallback path.
+            PACK_BUFFER.remove();
+            System.gc();
+            return multiplyNaive(a, b);
         }
     }
 
@@ -750,6 +762,18 @@ public class BlockedMultiply {
     }
 
     private static ForkJoinPool getPool(int parallelism) {
-        return POOLS.computeIfAbsent(Math.max(1, parallelism), threads -> new ForkJoinPool(threads));
+        int maxThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
+        int threads = Math.max(1, Math.min(parallelism, maxThreads));
+        return POOLS.computeIfAbsent(threads, ForkJoinPool::new);
+    }
+
+    static void shutdownPools() {
+        for (ForkJoinPool pool : POOLS.values()) {
+            if (pool == null) {
+                continue;
+            }
+            pool.shutdownNow();
+        }
+        POOLS.clear();
     }
 }

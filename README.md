@@ -7,6 +7,7 @@ Live site: https://lambdacompute.org/
 ## What this project includes
 
 - `src/main/java/net/faulj`: Java core library (matrix/vector types, decompositions, solvers, eigen/spectral routines, condition/accuracy metrics, benchmarking helpers)
+- `src/main/java/net/faulj/kernels/gemm`: first-class GEMM nucleus (canonical GEMM facade, dispatch, microkernel, packing, SIMD adapters)
 - `src/main/java/net/faulj/web`: Spring Boot API layer (`/api/diagnostics`, `/api/status`, `/api/contact`, benchmark/status streams)
 - `frontend`: React + Vite client for matrix input, analysis views, decompositions, spectral reports, favorites/history, and settings
 
@@ -91,6 +92,34 @@ If you only want a targeted API smoke test:
 
 - Contact form delivery uses `DISCORD_WEBHOOK_URL` from environment variables.
 - Large matrices are intentionally limited for synchronous full diagnostics in the API.
+- GEMM kernel docs:
+  - `src/main/java/net/faulj/kernels/gemm/README.md`
+  - `src/main/java/net/faulj/kernels/gemm/PERFORMANCE.md`
+
+## Execution Policy Flags
+
+Runtime policy can be controlled without refactoring the architecture yet.
+
+- `faulj.runtime.profile` / `FAULJ_RUNTIME_PROFILE`:
+  - `default` (adaptive)
+  - `legacy` (single-thread, scalar-friendly defaults for low-spec hardware)
+- `faulj.exec.policy` / `FAULJ_EXEC_POLICY`:
+  - `AUTO`
+  - `SCALAR_SAFE` (single-thread, no SIMD/BLAS3/CUDA; guaranteed fallback tier)
+  - `SCALAR_PARALLEL` (parallel scalar only)
+  - `SIMD` (CPU vectorized, no CUDA)
+  - `ACCEL` (allow hardware acceleration including CUDA)
+- Fine-grained toggles:
+  - `faulj.parallel.enabled`, `faulj.parallelism`
+  - `faulj.simd.enabled` (or `faulj.vectorization.enabled`)
+  - `faulj.blas3.enabled`
+  - `faulj.cuda.enabled`
+
+Example:
+
+```powershell
+.\gradlew.bat bootRun -Dfaulj.exec.policy=SCALAR_SAFE
+```
 
 ## License
 

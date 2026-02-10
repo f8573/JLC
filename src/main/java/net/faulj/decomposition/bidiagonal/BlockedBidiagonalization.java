@@ -3,7 +3,7 @@ package net.faulj.decomposition.bidiagonal;
 import jdk.incubator.vector.DoubleVector;
 import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
-import net.faulj.compute.BLAS3Kernels;
+import net.faulj.kernels.gemm.Gemm;
 import net.faulj.decomposition.result.BidiagonalizationResult;
 import net.faulj.matrix.Matrix;
 
@@ -376,7 +376,7 @@ public class BlockedBidiagonalization {
 
         // Apply blocked update: B -= V * T * V^T * B
         // Step 1: W = V^T * B[rowStart:m, colStart:n]
-        BLAS3Kernels.gemmStridedTransA(
+        Gemm.gemmStridedTransA(
             V, 0, actualCount,
             b, rowStart * n + colStart, n,
             W, 0, nCols,
@@ -384,7 +384,7 @@ public class BlockedBidiagonalization {
             1.0, 0.0, actualCount);
 
         // Step 2: W2 = T * W
-        BLAS3Kernels.gemmStrided(
+        Gemm.gemmStrided(
             T, 0, actualCount,
             W, 0, nCols,
             W2, 0, nCols,
@@ -392,7 +392,7 @@ public class BlockedBidiagonalization {
             1.0, 0.0, actualCount);
 
         // Step 3: B -= V * W2
-        BLAS3Kernels.gemmStrided(
+        Gemm.gemmStrided(
             V, 0, actualCount,
             W2, 0, nCols,
             b, rowStart * n + colStart, n,
@@ -578,7 +578,7 @@ public class BlockedBidiagonalization {
 
         // Apply blocked update: B -= B * V * T * V^T
         // Step 1: W = B[rowStart:m, colStart:n] * V
-        BLAS3Kernels.gemmStrided(
+        Gemm.gemmStrided(
             b, rowStart * n + colStart, n,
             V, 0, vIdx,
             W, 0, vIdx,
@@ -586,7 +586,7 @@ public class BlockedBidiagonalization {
             1.0, 0.0, vIdx);
 
         // Step 2: W2 = W * T
-        BLAS3Kernels.gemmStrided(
+        Gemm.gemmStrided(
             W, 0, vIdx,
             T, 0, vIdx,
             W2, 0, vIdx,
@@ -594,7 +594,7 @@ public class BlockedBidiagonalization {
             1.0, 0.0, vIdx);
 
         // Step 3: B -= W2 * V^T
-        BLAS3Kernels.gemmStridedColMajorB(
+        Gemm.gemmStridedColMajorB(
             W2, 0, vIdx,
             V, 0, vIdx,
             b, rowStart * n + colStart, n,

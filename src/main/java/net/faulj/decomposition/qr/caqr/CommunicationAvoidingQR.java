@@ -1,6 +1,6 @@
 package net.faulj.decomposition.qr.caqr;
 
-import net.faulj.compute.OptimizedBLAS3;
+import net.faulj.kernels.gemm.Gemm;
 import net.faulj.util.PerfTimers;
 import java.nio.DoubleBuffer;
 
@@ -45,7 +45,7 @@ public final class CommunicationAvoidingQR {
         // Compute Z = Y^T * A  (Z: b x n) using optimized strided gemm with transpose flag
         double[] Z = new double[b * n];
         long tZ = PerfTimers.start();
-        OptimizedBLAS3.gemmStrided(true,
+        Gemm.gemmStrided(true,
                        Y, 0, b,
                        A, aOffset, lda,
                        Z, 0, n,
@@ -56,7 +56,7 @@ public final class CommunicationAvoidingQR {
         // Compute W = T * Z (b x n)
         double[] W = new double[b * n];
         long tW = PerfTimers.start();
-        OptimizedBLAS3.gemmStrided(T, 0, b,
+        Gemm.gemmStrided(T, 0, b,
                        Z, 0, n,
                        W, 0, n,
                        b, b, n,
@@ -65,7 +65,7 @@ public final class CommunicationAvoidingQR {
 
         // A := A - Y * W  => use gemmStrided with alpha = -1, beta = 1
         long tUpd = PerfTimers.start();
-        OptimizedBLAS3.gemmStrided(Y, 0, b,
+        Gemm.gemmStrided(Y, 0, b,
                        W, 0, n,
                        A, aOffset, lda,
                        m, b, n,
