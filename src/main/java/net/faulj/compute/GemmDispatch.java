@@ -130,9 +130,9 @@ public final class GemmDispatch {
      */
     public static BlockSizes computeBlockSizes() {
         int vecLen = SPECIES.length();
-        // Tuned defaults: MR=2, NR=4 gave best small-GEMM results on target hardware.
+        // Tuned defaults: MR=5, NR=4 gave best small-GEMM results on target hardware.
         int nr = 4;
-        int mr = 2;
+        int mr = 5;
         // Allow defaults to be adjusted by SIMD width when appropriate
         if (vecLen >= 8 && nr < vecLen) {
             // If AVX-512, allow larger NR but keep MR tuned

@@ -52,8 +52,8 @@ public final class MicroKernel {
             }
         } catch (Exception ignored) {
         }
-        // Tuned default: use k-unroll=8 to hide FMA latency on this hardware
-        return 8;
+        // Tuned default: use k-unroll=6 based on sweep results
+        return 6;
     }
 
     /**
