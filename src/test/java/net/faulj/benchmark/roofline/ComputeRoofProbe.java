@@ -16,8 +16,15 @@ final class ComputeRoofProbe {
     private static final String GEMM_ANCHOR_WARMUP_PROPERTY = "jlc.roofline.gemm_anchor_warmup";
     private static final String GEMM_ANCHOR_RUNS_PROPERTY = "jlc.roofline.gemm_anchor_runs";
 
-    private static final double DEFAULT_THEORETICAL_UTIL = 0.60;
-    private static final double DEFAULT_GEMM_ANCHOR_SCALE = 1.50;
+    // With correct issue_width (2 for modern x86), theoretical peak is
+    // realistic.  85% is an achievable sustained utilization for well-
+    // optimized GEMM on most microarchitectures.  The previous 60% was
+    // compensating for issue_width=1 (which halved the peak).
+    private static final double DEFAULT_THEORETICAL_UTIL = 0.85;
+    // Anchor headroom: the GEMM anchor measurement at n=512 may not fully
+    // saturate the machine.  1.20× leaves room for larger-n improvement
+    // without over-estimating.
+    private static final double DEFAULT_GEMM_ANCHOR_SCALE = 1.20;
     private static final int DEFAULT_GEMM_ANCHOR_N = 512;
     private static final int DEFAULT_GEMM_ANCHOR_WARMUP = 2;
     private static final int DEFAULT_GEMM_ANCHOR_RUNS = 4;

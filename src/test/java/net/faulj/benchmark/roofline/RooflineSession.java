@@ -37,7 +37,9 @@ final class RooflineSession {
             if (local == null) {
                 HardwareInfo hardware = HardwareProbe.probe();
                 ComputeRoofProbe.ComputeEstimate compute = ComputeRoofProbe.probe(hardware);
-                MemoryBandwidthProbe.BandwidthHierarchy bw = MemoryBandwidthProbe.probe();
+                // Measure bandwidth at the parallelism level that GEMM will use.
+                int parallelism = Math.max(1, Runtime.getRuntime().availableProcessors());
+                MemoryBandwidthProbe.BandwidthHierarchy bw = MemoryBandwidthProbe.probe(parallelism);
                 local = new RooflineSession(
                     hardware,
                     compute.bytesFlopsPerSecond,
