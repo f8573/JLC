@@ -69,6 +69,13 @@ final class MemoryBandwidthProbe {
             : threads > 0 ? threads
             : Math.max(1, Runtime.getRuntime().availableProcessors());
 
+        // Cap the number of threads used for bandwidth probing to avoid
+        // excessive memory allocation in constrained test environments.
+        final int MAX_PARALLEL_PROBE_THREADS = 4;
+        if (parallelThreads > MAX_PARALLEL_PROBE_THREADS) {
+            parallelThreads = MAX_PARALLEL_PROBE_THREADS;
+        }
+
         int loops = parsePositiveInt(System.getProperty(LOOPS_PROPERTY), DEFAULT_LOOPS);
         int runs = parsePositiveInt(System.getProperty(RUNS_PROPERTY), DEFAULT_RUNS);
 

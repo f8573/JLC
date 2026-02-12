@@ -34,7 +34,7 @@ public final class ConvergenceCriteria implements Serializable {
     }
 
     public ConvergenceCriteria() {
-        this(0.015, 0.03, 2, 8, 64);
+        this(0.015, 0.02, 2, 8, 64);
     }
 
     @Override

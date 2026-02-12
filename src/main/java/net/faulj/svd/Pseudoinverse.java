@@ -121,24 +121,48 @@ public class Pseudoinverse {
 
 		int m = U.getRowCount();
 		int n = V.getRowCount();
-		int r = Math.min(Math.min(U.getColumnCount(), V.getColumnCount()), singularValues.length);
+		int uCols = U.getColumnCount();
+		int vCols = V.getColumnCount();
+		int svLen = singularValues.length;
 
-		if (r == 0) {
+		// Ensure we select the largest singular values first (robust if SVD
+		// implementation returns unsorted singular values). Build an index
+		// ordering by descending magnitude and then select those above the
+		// tolerance.
+		Integer[] order = new Integer[svLen];
+		for (int i = 0; i < svLen; i++) order[i] = i;
+		java.util.Arrays.sort(order, (a, b) -> Double.compare(Math.abs(singularValues[b]), Math.abs(singularValues[a])));
+		java.util.ArrayList<Integer> keep = new java.util.ArrayList<>();
+		for (int idx : order) {
+			double s = singularValues[idx];
+			if (Math.abs(s) > tolerance) keep.add(idx);
+		}
+
+		if (keep.isEmpty()) {
 			return Matrix.zero(n, m);
 		}
 
-		Matrix Uthin = U.getColumnCount() == r ? U : U.crop(0, m - 1, 0, r - 1);
-		Matrix Vthin = V.getColumnCount() == r ? V : V.crop(0, n - 1, 0, r - 1);
+		int k = keep.size();
+		Matrix U_k = new Matrix(m, k);
+		Matrix V_k = new Matrix(n, k);
+		Matrix sigmaPlus = new Matrix(k, k);
 
-		Matrix sigmaPlus = new Matrix(r, r);
-		for (int i = 0; i < r; i++) {
-			double s = singularValues[i];
-			if (Math.abs(s) > tolerance) {
-				sigmaPlus.set(i, i, 1.0 / s);
+		for (int col = 0; col < k; col++) {
+			int svIndex = keep.get(col);
+			// Copy the corresponding column from U (m x uCols) and V (n x vCols)
+			for (int row = 0; row < m; row++) {
+				double val = (svIndex < uCols) ? U.get(row, svIndex) : 0.0;
+				U_k.set(row, col, val);
 			}
+			for (int row = 0; row < n; row++) {
+				double val = (svIndex < vCols) ? V.get(row, svIndex) : 0.0;
+				V_k.set(row, col, val);
+			}
+			double s = singularValues[svIndex];
+			sigmaPlus.set(col, col, (Math.abs(s) > 0.0) ? 1.0 / s : 0.0);
 		}
 
-		return Vthin.multiply(sigmaPlus).multiply(Uthin.transpose());
+		return V_k.multiply(sigmaPlus).multiply(U_k.transpose());
 	}
 
 	/**
@@ -157,6 +181,9 @@ public class Pseudoinverse {
 		if (maxSigma == 0.0) {
 			return 0.0;
 		}
-		return Math.max(rows, cols) * maxSigma * EPS;
+		// Use a slightly more conservative cutoff to avoid inverting
+		// tiny numerical singular values that arise from round-off
+		// in rank-deficient matrices. Multiply EPS by 10 for safety.
+		return Math.max(rows, cols) * maxSigma * (EPS * 10.0);
 	}
 }

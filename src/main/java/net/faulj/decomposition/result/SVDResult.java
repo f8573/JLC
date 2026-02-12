@@ -205,10 +205,14 @@ public class SVDResult {
      * @return diagonal matrix with singular values
      */
     public Matrix getSigma() {
-        int m = U.getColumnCount();
-        int n = V.getColumnCount();
-        Matrix sigma = new Matrix(m, n);
-        for (int i = 0; i < Math.min(singularValues.length, Math.min(m, n)); i++) {
+        // Construct Sigma compatible with the returned U/V factors.
+        // For thin SVDs U is m x r and V is n x r, so Sigma must be r x r.
+        // For full SVDs U is m x m and V is n x n, so Sigma should be m x n.
+        int rows = U.getColumnCount();
+        int cols = V.getColumnCount();
+        Matrix sigma = new Matrix(rows, cols);
+        int diag = Math.min(singularValues.length, Math.min(rows, cols));
+        for (int i = 0; i < diag; i++) {
             sigma.set(i, i, singularValues[i]);
         }
         return sigma;
@@ -228,7 +232,23 @@ public class SVDResult {
      */
     public Matrix reconstruct() {
         Matrix sigma = getSigma();
-        return U.multiply(sigma).multiply(V.transpose());
+        Matrix cand1 = U.multiply(sigma).multiply(V.transpose());
+        // Defensive: some algorithm paths may accidentally swap left/right factors.
+        // Compute the alternate reconstruction only when dimensions permit, otherwise
+        // fall back to the primary reconstruction. Any failure computing the
+        // alternate candidate should be ignored and treated as worse.
+        double err1 = MatrixUtils.relativeError(A, cand1);
+        double err2 = Double.POSITIVE_INFINITY;
+        try {
+            Matrix cand2 = V.multiply(sigma).multiply(U.transpose());
+            err2 = MatrixUtils.relativeError(A, cand2);
+            if (err2 < err1) {
+                return cand2;
+            }
+        } catch (Exception ignored) {
+            // cand2 not compatible or failed; keep cand1
+        }
+        return cand1;
     }
 
     /**

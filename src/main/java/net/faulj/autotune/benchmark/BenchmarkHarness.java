@@ -24,7 +24,7 @@ public final class BenchmarkHarness {
     private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
 
     private static final int WARMUP_RUNS = 3;
-    private static final int MEASURED_RUNS = 7;
+    private static final int MEASURED_RUNS = MeasurementTier.BASE_REPS;
 
     private static volatile double sink;
 
@@ -42,6 +42,14 @@ public final class BenchmarkHarness {
      * @return benchmark result with GFLOP/s and stability metrics
      */
     public static Result run(int n, int mc, int kc, int nc, int mr, int nr) {
+        return run(n, mc, kc, nc, mr, nr, WARMUP_RUNS, MEASURED_RUNS);
+    }
+
+    /**
+     * Run benchmark with explicit warmup and measured counts.
+     */
+    public static Result run(int n, int mc, int kc, int nc, int mr, int nr,
+                             int warmupRuns, int measuredRuns) {
         int vecLen = SPECIES.length();
 
         // ── Allocate matrices (row-major) ───────────────────────────────
@@ -57,15 +65,15 @@ public final class BenchmarkHarness {
         double[] bPack = new double[kc * packedN];
 
         // ── Warmup ──────────────────────────────────────────────────────
-        for (int w = 0; w < WARMUP_RUNS; w++) {
+        for (int w = 0; w < warmupRuns; w++) {
             Arrays.fill(c, 0.0);
             gemmBlocked(a, b, c, n, mc, kc, nc, mr, nr, vecLen, packedN, aPack, bPack);
             sink += c[0];
         }
 
         // ── Measured runs ───────────────────────────────────────────────
-        double[] times = new double[MEASURED_RUNS];
-        for (int r = 0; r < MEASURED_RUNS; r++) {
+        double[] times = new double[measuredRuns];
+        for (int r = 0; r < measuredRuns; r++) {
             Arrays.fill(c, 0.0);
             long start = System.nanoTime();
             gemmBlocked(a, b, c, n, mc, kc, nc, mr, nr, vecLen, packedN, aPack, bPack);
@@ -74,26 +82,81 @@ public final class BenchmarkHarness {
             sink += c[0];
         }
 
-        // ── Statistics ──────────────────────────────────────────────────
-        double flops = 2.0 * n * n * n;
-        Arrays.sort(times);
-        double bestSec = times[0];
-        double medianSec = times[MEASURED_RUNS / 2];
+        return computeResult(mr, nr, kc, mc, nc, n, times);
+    }
 
+    /**
+     * Append measured runs to an existing Result (no warmup), returning a new Result
+     * with accumulated measurements. Previous result's times are preserved.
+     */
+    public static Result appendMeasurements(Result previous, int extraMeasured) {
+        if (previous == null) throw new IllegalArgumentException("previous result required");
+        int n = previous.n;
+        int mc = previous.mc;
+        int kc = previous.kc;
+        int nc = previous.nc;
+        int mr = previous.mr;
+        int nr = previous.nr;
+
+        int vecLen = SPECIES.length();
+
+        // Allocate matrices for extra runs
+        double[] a = new double[n * n];
+        double[] b = new double[n * n];
+        double[] c = new double[n * n];
+        fillRandom(a);
+        fillRandom(b);
+
+        int packedN = PackingUtils.roundUp(nc, vecLen);
+        double[] aPack = new double[mr * kc];
+        double[] bPack = new double[kc * packedN];
+
+        double[] newTimes = new double[previous.times.length + extraMeasured];
+        System.arraycopy(previous.times, 0, newTimes, 0, previous.times.length);
+
+        for (int r = 0; r < extraMeasured; r++) {
+            Arrays.fill(c, 0.0);
+            long start = System.nanoTime();
+            gemmBlocked(a, b, c, n, mc, kc, nc, mr, nr, vecLen, packedN, aPack, bPack);
+            long elapsed = System.nanoTime() - start;
+            newTimes[previous.times.length + r] = elapsed / 1e9;
+            sink += c[0];
+        }
+
+        return computeResult(previous.mr, previous.nr, previous.kc, previous.mc, previous.nc, n, newTimes);
+    }
+
+    private static Result computeResult(int mr, int nr, int kc, int mc, int nc, int n, double[] times) {
+        double flops = 2.0 * n * n * n;
+
+        double[] timesCopy = times.clone();
+        Arrays.sort(timesCopy);
+        double bestSec = timesCopy[0];
+        double medianSec = timesCopy[timesCopy.length / 2];
+
+        // Convert to GFLOP/s values per-run
+        double[] gflops = new double[times.length];
+        for (int i = 0; i < times.length; i++) gflops[i] = flops / times[i] / 1e9;
+
+        // Median in GFLOP/s
+        double[] gflopsCopy = gflops.clone();
+        Arrays.sort(gflopsCopy);
+        double medianGflops = gflopsCopy[gflopsCopy.length / 2];
+
+        // Unbiased sample stddev over GFLOP/s
         double mean = 0.0;
-        for (double t : times) mean += t;
-        mean /= times.length;
+        for (double g : gflops) mean += g;
+        mean /= gflops.length;
 
         double variance = 0.0;
-        for (double t : times) variance += (t - mean) * (t - mean);
-        variance /= times.length;
-        double stddev = Math.sqrt(variance);
-        double cv = mean > 0 ? stddev / mean : 0.0;
+        for (double g : gflops) variance += (g - mean) * (g - mean);
+        double stddev = gflops.length > 1 ? Math.sqrt(variance / (gflops.length - 1)) : 0.0;
+
+        double cv = medianGflops > 0 ? stddev / medianGflops : 0.0;
 
         double bestGflops = flops / bestSec / 1e9;
-        double medianGflops = flops / medianSec / 1e9;
 
-        return new Result(mr, nr, kc, mc, nc, bestGflops, medianGflops, cv);
+        return new Result(mr, nr, kc, mc, nc, n, bestGflops, medianGflops, cv, stddev, times);
     }
 
     /**
@@ -158,20 +221,29 @@ public final class BenchmarkHarness {
         public final int kc;
         public final int mc;
         public final int nc;
+        public final int n;
         public final double bestGflops;
         public final double medianGflops;
         public final double cv; // coefficient of variation (stability)
+        public final double stddev; // unbiased sample stddev over GFLOP/s
+        public final double[] times; // measured run times in seconds
 
-        public Result(int mr, int nr, int kc, int mc, int nc,
-                      double bestGflops, double medianGflops, double cv) {
+        public Result(int mr, int nr, int kc, int mc, int nc, int n,
+                      double bestGflops, double medianGflops, double cv,
+                      double stddev, double[] times) {
             this.mr = mr;
             this.nr = nr;
             this.kc = kc;
             this.mc = mc;
             this.nc = nc;
+            this.n = n;
             this.bestGflops = bestGflops;
             this.medianGflops = medianGflops;
             this.cv = cv;
+            this.stddev = stddev;
+            this.times = times != null ? times.clone() : new double[0];
         }
+
+        public int getN() { return (int)Math.round(Math.cbrt((bestGflops>0? bestGflops:1.0) * 1e9)); }
     }
 }

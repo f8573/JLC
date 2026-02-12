@@ -153,27 +153,63 @@ public final class FineSearch {
         double bestKuGflops = 0.0;
         double bestKuMedian = 0.0;
         double bestKuCv = 1.0;
+        MeasurementTier kuTierUsed = MeasurementTier.BASE;
 
         int nc = findLegalNc(space.nc.min, space.nc, nr, bestKc, cs);
         int mc = findLegalMc(space.mc.min, space.mc, mr, bestKc, nc, cs);
 
         if (nc > 0 && mc > 0) {
+            // First pass BASE_REPS for all kUnroll candidates
+            java.util.List<BenchmarkHarness.Result> kuCandidates = new java.util.ArrayList<>();
+            java.util.List<Integer> kuVals = new java.util.ArrayList<>();
             for (int ku = kuRange.min; ku <= kuRange.max; ku += kuRange.step) {
                 if (!cs.isValidKcKUnroll(bestKc, ku)) continue;
                 if (!cs.isAdmissible(mr, nr, bestKc, nc, mc, ku)) continue;
 
-                BenchmarkHarness.Result result =
-                        BenchmarkHarness.run(BENCH_N, mc, bestKc, nc, mr, nr);
+                BenchmarkHarness.Result result = BenchmarkHarness.run(BENCH_N, mc, bestKc, nc, mr, nr, 3, MeasurementTier.BASE_REPS);
+                kuCandidates.add(result);
+                kuVals.add(ku);
 
-                System.out.printf(Locale.ROOT, "  kUnroll=%d -> %.1f GFLOP/s%n",
-                        ku, result.bestGflops);
+                System.out.printf(Locale.ROOT, "  kUnroll=%d -> %.1f GFLOP/s (median=%.1f, CV=%.3f) [BASE]%n",
+                        ku, result.bestGflops, result.medianGflops, result.cv);
+            }
 
-                if (result.bestGflops > bestKuGflops) {
-                    bestKu = ku;
-                    bestKuGflops = result.bestGflops;
-                    bestKuMedian = result.medianGflops;
-                    bestKuCv = result.cv;
+            if (!kuCandidates.isEmpty()) {
+                int bestKIdx = 0;
+                int secondKIdx = -1;
+                for (int i = 1; i < kuCandidates.size(); i++) {
+                    if (kuCandidates.get(i).medianGflops > kuCandidates.get(bestKIdx).medianGflops) {
+                        secondKIdx = bestKIdx;
+                        bestKIdx = i;
+                    } else if (secondKIdx < 0 || kuCandidates.get(i).medianGflops > kuCandidates.get(secondKIdx).medianGflops) {
+                        secondKIdx = i;
+                    }
                 }
+
+                BenchmarkHarness.Result bestKuResult = kuCandidates.get(bestKIdx);
+                double improvementOverPrev = bestKuResult.medianGflops > 0 ? (bestKuResult.medianGflops - bestGflops) / Math.max(1e-9, bestGflops) : 0.0;
+                double gapToSecond = (secondKIdx >= 0) ? Math.abs(bestKuResult.medianGflops - kuCandidates.get(secondKIdx).medianGflops) / Math.max(1e-9, bestKuResult.medianGflops) : Double.POSITIVE_INFINITY;
+
+                boolean escalate = (bestKuResult.cv > 0.02) || (improvementOverPrev > 0.05) || (gapToSecond < 0.03);
+                if (escalate) {
+                    System.out.printf(Locale.ROOT, "  Escalating kUnroll=%d to MID_REPS (%d)\n", kuVals.get(bestKIdx), MeasurementTier.MID_REPS);
+                    int extra = MeasurementTier.MID_REPS - bestKuResult.times.length;
+                    if (extra > 0) bestKuResult = BenchmarkHarness.appendMeasurements(bestKuResult, extra);
+                    kuTierUsed = MeasurementTier.MID;
+                    System.out.printf(Locale.ROOT, "    MID -> median=%.3f, CV=%.4f%n", bestKuResult.medianGflops, bestKuResult.cv);
+                    if (bestKuResult.cv > 0.02) {
+                        System.out.printf(Locale.ROOT, "  Escalating kUnroll=%d to HIGH_REPS (%d)\n", kuVals.get(bestKIdx), MeasurementTier.HIGH_REPS);
+                        int extra2 = MeasurementTier.HIGH_REPS - bestKuResult.times.length;
+                        if (extra2 > 0) bestKuResult = BenchmarkHarness.appendMeasurements(bestKuResult, extra2);
+                        kuTierUsed = MeasurementTier.HIGH;
+                        System.out.printf(Locale.ROOT, "    HIGH -> median=%.3f, CV=%.4f%n", bestKuResult.medianGflops, bestKuResult.cv);
+                    }
+                }
+
+                bestKu = kuVals.get(bestKIdx);
+                bestKuGflops = bestKuResult.medianGflops;
+                bestKuMedian = bestKuResult.medianGflops;
+                bestKuCv = bestKuResult.cv;
             }
         }
 
@@ -182,13 +218,27 @@ public final class FineSearch {
         double finalMedian = bestKuGflops >= bestGflops ? bestKuMedian : bestMedian;
         double finalCv = bestKuGflops >= bestGflops ? bestKuCv : bestCv;
 
-        System.out.printf(Locale.ROOT, "%n  Selected kUnroll=%d%n%n", bestKu);
+        System.out.printf(Locale.ROOT, "%n  Selected kUnroll=%d (tier=%s)%n%n", bestKu, kuTierUsed);
 
         int finalNc = findLegalNc(space.nc.min, space.nc, nr, bestKc, cs);
         int finalMc = findLegalMc(space.mc.min, space.mc, mr, bestKc, finalNc, cs);
 
+        // ── Final Revalidation Pass (mandatory) ─────────────────────────
+        System.out.printf(Locale.ROOT, "Final revalidation: warmup=20, reps=25 for MR=%d NR=%d KC=%d kUnroll=%d\n",
+            mr, nr, bestKc, bestKu);
+        BenchmarkHarness.Result validation = BenchmarkHarness.run(BENCH_N, finalMc, bestKc, finalNc, mr, nr, 20, MeasurementTier.HIGH_REPS);
+        System.out.printf(Locale.ROOT, "  Validation median=%.3f GFLOP/s, CV=%.4f\n", validation.medianGflops, validation.cv);
+
+        // Replace metrics with hardened measurement
+        double hardenedMedian = validation.medianGflops;
+        double hardenedCv = validation.cv;
+        double hardenedGflops = validation.medianGflops; // use median as canonical performance value
+
+        System.out.printf(Locale.ROOT, "  Final selection: MR=%d NR=%d KC=%d kUnroll=%d, median=%.3f, CV=%.4f, repetition_tier=%s, convergence_pending...\n",
+            mr, nr, bestKc, bestKu, hardenedMedian, hardenedCv, kuTierUsed);
+
         return new FineSearchResult(mr, nr, bestKc, bestKu, finalMc, finalNc,
-                finalGflops, finalMedian, finalCv, termination, lastImprovementRatio);
+            hardenedGflops, hardenedMedian, hardenedCv, termination, lastImprovementRatio);
     }
 
     // ── KC sweep helper ─────────────────────────────────────────────────
@@ -200,10 +250,15 @@ public final class FineSearch {
         double bestGflops = 0.0;
         double bestMedian = 0.0;
         double bestCv = 1.0;
+        MeasurementTier tierUsed = MeasurementTier.BASE;
 
         // Align lo to step
         int start = ((lo + step - 1) / step) * step;
         start = Math.max(start, kcRange.min);
+
+        // First pass: run BASE_REPS for all candidates
+        java.util.List<BenchmarkHarness.Result> candidates = new java.util.ArrayList<>();
+        java.util.List<Integer> candidateKcs = new java.util.ArrayList<>();
 
         for (int kc = start; kc <= Math.min(hi, kcRange.max); kc += step) {
             if (kc < kcRange.min || kc > kcRange.max) continue;
@@ -215,21 +270,62 @@ public final class FineSearch {
             if (nc < 0 || mc < 0 || ku < 0) continue;
             if (!cs.isAdmissible(mr, nr, kc, nc, mc, ku)) continue;
 
-            BenchmarkHarness.Result result =
-                    BenchmarkHarness.run(BENCH_N, mc, kc, nc, mr, nr);
+            BenchmarkHarness.Result result = BenchmarkHarness.run(BENCH_N, mc, kc, nc, mr, nr, 3, MeasurementTier.BASE_REPS);
+            candidates.add(result);
+            candidateKcs.add(kc);
 
-            System.out.printf(Locale.ROOT, "  KC=%d -> %.1f GFLOP/s%n",
-                    kc, result.bestGflops);
+            System.out.printf(Locale.ROOT, "  KC=%d -> %.1f GFLOP/s (median=%.1f, CV=%.3f) [BASE]%n",
+                    kc, result.bestGflops, result.medianGflops, result.cv);
+        }
 
-            if (result.bestGflops > bestGflops) {
-                bestKc = kc;
-                bestGflops = result.bestGflops;
-                bestMedian = result.medianGflops;
-                bestCv = result.cv;
+        if (candidates.isEmpty()) return null;
+
+        // Identify best and second best by median GFLOP/s
+        int bestIdx = 0;
+        int secondIdx = -1;
+        for (int i = 1; i < candidates.size(); i++) {
+            if (candidates.get(i).medianGflops > candidates.get(bestIdx).medianGflops) {
+                secondIdx = bestIdx;
+                bestIdx = i;
+            } else if (secondIdx < 0 || candidates.get(i).medianGflops > candidates.get(secondIdx).medianGflops) {
+                secondIdx = i;
             }
         }
 
-        if (bestKc < 0) return null;
+        // Apply escalation to best candidate if needed
+        BenchmarkHarness.Result bestResult = candidates.get(bestIdx);
+        double prevBest = bestGflops; // caller may pass in prev via outer scope
+        double improvementOverPrev = prevBest > 0 ? (bestResult.medianGflops - prevBest) / Math.max(1e-9, prevBest) : 0.0;
+        double gapToSecond = (secondIdx >= 0) ? Math.abs(bestResult.medianGflops - candidates.get(secondIdx).medianGflops) / Math.max(1e-9, bestResult.medianGflops) : Double.POSITIVE_INFINITY;
+
+        boolean escalateToMid = (bestResult.cv > 0.02) || (improvementOverPrev > 0.05) || (gapToSecond < 0.03);
+
+        if (escalateToMid) {
+            // escalate to MID_REPS
+            System.out.printf(Locale.ROOT, "  Escalating KC=%d to MID_REPS (%d)\n", candidateKcs.get(bestIdx), MeasurementTier.MID_REPS);
+            int extra = MeasurementTier.MID_REPS - bestResult.times.length;
+            if (extra > 0) {
+                bestResult = BenchmarkHarness.appendMeasurements(bestResult, extra);
+            }
+            tierUsed = MeasurementTier.MID;
+            System.out.printf(Locale.ROOT, "    MID -> median=%.3f, CV=%.4f%n", bestResult.medianGflops, bestResult.cv);
+
+            // if still unstable, escalate to HIGH
+            if (bestResult.cv > 0.02) {
+                System.out.printf(Locale.ROOT, "  Escalating KC=%d to HIGH_REPS (%d)\n", candidateKcs.get(bestIdx), MeasurementTier.HIGH_REPS);
+                int extra2 = MeasurementTier.HIGH_REPS - bestResult.times.length;
+                if (extra2 > 0) bestResult = BenchmarkHarness.appendMeasurements(bestResult, extra2);
+                tierUsed = MeasurementTier.HIGH;
+                System.out.printf(Locale.ROOT, "    HIGH -> median=%.3f, CV=%.4f%n", bestResult.medianGflops, bestResult.cv);
+            }
+        }
+
+        // Finalize best
+        bestKc = candidateKcs.get(bestIdx);
+        bestGflops = bestResult.medianGflops;
+        bestMedian = bestResult.medianGflops;
+        bestCv = bestResult.cv;
+
         return new KcResult(bestKc, bestGflops, bestMedian, bestCv);
     }
 

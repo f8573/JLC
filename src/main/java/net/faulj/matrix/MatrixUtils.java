@@ -171,6 +171,52 @@ public class MatrixUtils {
         return new RowReductionResult(exchanges, Arrays.copyOf(pivotCols, pivotCount));
     }
 
+    /**
+     * Produce a one-line concise summary of a matrix for logging/diagnostics.
+     *
+     * The summary includes shape, Frobenius norm, orthogonality error (or 'n/a'),
+     * and a small top-left sample of entries up to the provided limits.
+     */
+    public static String matrixSummary(Matrix m, int maxRows, int maxCols) {
+        if (m == null) return "null";
+        int rows = m.getRowCount();
+        int cols = m.getColumnCount();
+        double frob = m.frobeniusNorm();
+        String ortho = m.isSquare() ? String.format("%.6e", orthogonalityError(m)) : "n/a";
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("%dx%d", rows, cols));
+        sb.append(", frob=").append(String.format("%.6e", frob));
+        sb.append(", ortho=").append(ortho);
+
+        int r = Math.min(rows, Math.max(0, maxRows));
+        int c = Math.min(cols, Math.max(0, maxCols));
+        if (r > 0 && c > 0) {
+            sb.append(", sample=");
+            sb.append('[');
+            for (int i = 0; i < r; i++) {
+                if (i > 0) sb.append(',');
+                sb.append('[');
+                for (int j = 0; j < c; j++) {
+                    if (j > 0) sb.append(',');
+                    double re = m.get(i, j);
+                    if (!m.hasImagData()) {
+                        sb.append(String.format("%.6e", re));
+                    } else {
+                        double im = m.getImag(i, j);
+                        if (im == 0.0) sb.append(String.format("%.6e", re));
+                        else if (im > 0) sb.append(String.format("%.6e+%.6ei", re, im));
+                        else sb.append(String.format("%.6e%.6ei", re, im));
+                    }
+                }
+                sb.append(']');
+            }
+            sb.append(']');
+        }
+
+        return sb.toString();
+    }
+
     public static final class RowReductionResult {
         private final int exchanges;
         private final int[] pivotColumns;

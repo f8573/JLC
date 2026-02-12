@@ -195,3 +195,15 @@ tasks.register('runGemmTest', JavaExec) {
     main = 'net.faulj.bench.TestGemm'
     standardInput = System.in
 }
+
+// Run full autotune pipeline (Phases 1-6)
+tasks.register('runAutotuneDemo', JavaExec) {
+    group = 'benchmark'
+    description = 'Run net.faulj.autotune.AutotuneDemo (Phases 1-6)'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    main = 'net.faulj.autotune.AutotuneDemo'
+    standardInput = System.in
+}

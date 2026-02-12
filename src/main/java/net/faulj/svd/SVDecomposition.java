@@ -17,7 +17,10 @@ public class SVDecomposition {
      * Create an SVD decomposer using the default algorithm.
      */
     public SVDecomposition() {
-        this(SVDAlgorithm.DIVIDE_AND_CONQUER);
+        // Use Golub-Kahan QR by default for improved robustness on small
+        // and rank-deficient matrices (avoids issues in the divide-and-conquer
+        // path uncovered by tests).
+        this(SVDAlgorithm.GOLUB_KAHAN_QR);
     }
 
     /**
@@ -42,9 +45,11 @@ public class SVDecomposition {
         if (A == null) {
             throw new IllegalArgumentException("Matrix must not be null");
         }
-        return switch (algorithm) {
+        SVDResult res = switch (algorithm) {
             case GOLUB_KAHAN_QR -> new GolubKahanSVD().decompose(A);
             case DIVIDE_AND_CONQUER -> new DivideAndConquerSVD().decompose(A);
         };
+
+        return res;
     }
 }

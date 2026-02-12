@@ -2,6 +2,7 @@ package net.faulj.decomposition.bidiagonal;
 
 import net.faulj.decomposition.result.BidiagonalizationResult;
 import net.faulj.matrix.Matrix;
+import net.faulj.matrix.MatrixUtils;
 import jdk.incubator.vector.DoubleVector;
 import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
@@ -21,42 +22,40 @@ import jdk.incubator.vector.VectorSpecies;
  *   <li><b>U</b> is an m-by-m orthogonal matrix</li>
  *   <li><b>B</b> is an m-by-n bidiagonal matrix</li>
  *   <li><b>V</b> is an n-by-n orthogonal matrix</li>
- * </ul>
- *
- * <h2>Bidiagonal Form:</h2>
- * <p>
- * A bidiagonal matrix has non-zero elements only on the main diagonal and either the
- * superdiagonal (if m &ge; n) or subdiagonal (if m &lt; n):
- * </p>
- * <pre>
- * For m &ge; n (upper bidiagonal):     For m &lt; n (lower bidiagonal):
- *   ┌ d₁ e₁  0  0 ┐                      ┌ d₁  0  0  0  0 ┐
- *   │  0 d₂ e₂  0 │                      │ e₁ d₂  0  0  0 │
- *   │  0  0 d₃ e₃ │                      └  0 e₂ d₃  0  0 ┘
- *   │  0  0  0 d₄ │
- *   └  0  0  0  0 ┘
- * </pre>
- *
- * <h2>Algorithm:</h2>
- * <p>
- * The Golub-Kahan bidiagonalization algorithm alternately applies Householder reflections
- * to the left and right to zero out elements:
- * </p>
- * <ol>
- *   <li>Apply Householder transformation from the left to zero column below diagonal</li>
- *   <li>Apply Householder transformation from the right to zero row to the right of superdiagonal</li>
- *   <li>Repeat for each column/row pair</li>
- *   <li>Accumulate transformations to form U and V</li>
- * </ol>
- *
- * <h2>Computational Complexity:</h2>
- * <ul>
- *   <li><b>Bidiagonalization only:</b> O(mn<sup>2</sup>) for m &ge; n or O(m<sup>2</sup>n) for m &lt; n</li>
- *   <li><b>With U and V:</b> O(mn<sup>2</sup> + n<sup>3</sup>) or O(m<sup>2</sup>n + m<sup>3</sup>)</li>
- *   <li><b>Space complexity:</b> O(m + n) for Householder vectors</li>
- * </ul>
- *
- * <h2>Numerical Properties:</h2>
+        // First pass: normalize and orthogonalize any meaningful input columns
+        for (int i = 0; i < cols; i++) {
+            net.faulj.vector.Vector col = thin.getData()[i].copy();
+            double norm = col.norm2();
+            net.faulj.vector.Vector candidate = (norm > TOL) ? col : null;
+            if (candidate != null) {
+                candidate = orthogonalize(candidate, accepted);
+            }
+            double candNorm = candidate == null ? 0.0 : candidate.norm2();
+            if (candNorm <= TOL) {
+                // Try simple identity fallback to find a usable basis vector
+                for (int b = 0; b < rows; b++) {
+                    double[] data = new double[rows];
+                    data[b] = 1.0;
+                    net.faulj.vector.Vector fallback = new net.faulj.vector.Vector(data);
+                    fallback = orthogonalize(fallback, accepted);
+                    double fallbackNorm = fallback.norm2();
+                    if (fallbackNorm > TOL) {
+                        candidate = fallback;
+                        candNorm = fallbackNorm;
+                        break;
+                    }
+                }
+            }
+            if (candidate != null && candNorm > TOL) {
+                candidate = candidate.multiplyScalar(1.0 / candNorm);
+                basis[i] = candidate;
+                accepted.add(candidate);
+            } else {
+                // leave a zero placeholder; will be filled later
+                basis[i] = net.faulj.vector.VectorUtils.zero(rows);
+            }
+        }
+        int count = accepted.size();
  * <ul>
  *   <li><b>Stability:</b> Backward stable due to orthogonal transformations</li>
  *   <li><b>Orthogonality:</b> U and V satisfy U<sup>T</sup>U = I and V<sup>T</sup>V = I to machine precision</li>
@@ -135,6 +134,9 @@ public class Bidiagonalization {
     private static final ThreadLocal<HouseholderWorkspace> HH_WS =
             ThreadLocal.withInitial(HouseholderWorkspace::new);
 
+    /** Enable verbose bidiagonalization runtime diagnostics (temporary) */
+    private static final boolean DEBUG = false;
+
     private static final class HouseholderWorkspace {
         double[] dotBuffer = new double[4096];
 
@@ -200,6 +202,15 @@ public class Bidiagonalization {
         double[] vCol = new double[m];
         double[] vRow = new double[n];
 
+        // Store reflectors to assemble U and V after bidiagonalization
+        double[][] leftVecs = new double[limit][];
+        double[] leftTaus = new double[limit];
+        int[] leftLens = new int[limit];
+
+        double[][] rightVecs = new double[limit][];
+        double[] rightTaus = new double[limit];
+        int[] rightLens = new int[limit];
+
         for (int k = 0; k < limit; k++) {
             // ===== Column Householder =====
             int len = m - k;
@@ -239,8 +250,10 @@ public class Bidiagonalization {
 
                     // Apply Householder from left to B
                     applyHouseholderLeftRaw(b, n, k, k, vCol, len, tau);
-                    // Apply from right to U
-                    applyHouseholderRightRaw(u, m, 0, k, vCol, len, tau);
+                    // Store left reflector for later assembly of U
+                    leftVecs[k] = java.util.Arrays.copyOf(vCol, len);
+                    leftTaus[k] = tau;
+                    leftLens[k] = len;
 
                     // Set the column to bidiagonal form
                     b[k * n + k] = beta;
@@ -289,8 +302,10 @@ public class Bidiagonalization {
 
                         // Apply Householder from right to B
                         applyHouseholderRightRaw(b, n, k, k + 1, vRow, lenRow, tauRow);
-                        // Apply from right to V
-                        applyHouseholderRightRaw(v, n, 0, k + 1, vRow, lenRow, tauRow);
+                        // Store right reflector for later assembly of V
+                        rightVecs[k] = java.util.Arrays.copyOf(vRow, lenRow);
+                        rightTaus[k] = tauRow;
+                        rightLens[k] = lenRow;
 
                         // Set the row to bidiagonal form
                         b[k * n + k + 1] = betaRow;
@@ -302,12 +317,25 @@ public class Bidiagonalization {
             }
         }
 
-        return new BidiagonalizationResult(
-                A,
-                Matrix.wrap(u, m, m),
-                Matrix.wrap(b, m, n),
-                Matrix.wrap(v, n, n)
-        );
+        // Assemble U by applying stored left reflectors to identity in reverse order
+        for (int i = limit - 1; i >= 0; i--) {
+            if (leftVecs[i] != null && Math.abs(leftTaus[i]) > 0.0) {
+                applyHouseholderLeftRaw(u, m, i, 0, leftVecs[i], leftLens[i], leftTaus[i]);
+            }
+        }
+
+        // Assemble V by applying stored right reflectors to identity in forward order
+        for (int i = 0; i < limit; i++) {
+            if (rightVecs[i] != null && Math.abs(rightTaus[i]) > 0.0) {
+                applyHouseholderRightRaw(v, n, 0, i + 1, rightVecs[i], rightLens[i], rightTaus[i]);
+            }
+        }
+
+        Matrix Umat = Matrix.wrap(u, m, m);
+        Matrix Bmat = Matrix.wrap(b, m, n);
+        Matrix Vmat = Matrix.wrap(v, n, n);
+
+        return new BidiagonalizationResult(A, Umat, Bmat, Vmat);
     }
 
     /**
@@ -316,6 +344,15 @@ public class Bidiagonalization {
      */
     private static void applyHouseholderLeftRaw(double[] M, int cols, int startRow, int startCol,
                                                  double[] v, int len, double tau) {
+        if (DEBUG) {
+            int rows = M.length / cols;
+            try {
+                System.out.println("applyHouseholderLeftRaw called: startRow=" + startRow + " startCol=" + startCol + " len=" + len + " tau=" + tau);
+                System.out.println("v (first " + Math.min(len, 8) + ")=" + java.util.Arrays.toString(java.util.Arrays.copyOf(v, Math.min(len, 8))));
+                System.out.println("Before left apply M: " + MatrixUtils.matrixSummary(Matrix.wrap(M, rows, cols), 3, 3));
+            } catch (Exception ignored) {
+            }
+        }
         // LAPACK: process 8 columns at a time for maximum ILP
         int col = startCol;
         int limit = cols - 7;
@@ -338,6 +375,10 @@ public class Bidiagonalization {
                 dot7 += vi * M[rowBase + col + 7];
             }
 
+            if (DEBUG) {
+                System.out.println(String.format("left dots at col=%d: [%.6e, %.6e, %.6e, %.6e, %.6e, %.6e, %.6e, %.6e]", col, dot0, dot1, dot2, dot3, dot4, dot5, dot6, dot7));
+            }
+
             double scale0 = tau * dot0, scale1 = tau * dot1;
             double scale2 = tau * dot2, scale3 = tau * dot3;
             double scale4 = tau * dot4, scale5 = tau * dot5;
@@ -356,6 +397,10 @@ public class Bidiagonalization {
                 M[rowBase + col + 6] -= scale6 * vi;
                 M[rowBase + col + 7] -= scale7 * vi;
             }
+            if (DEBUG) {
+                int rows = M.length / cols;
+                System.out.println("After left block update M: " + MatrixUtils.matrixSummary(Matrix.wrap(M, rows, cols), 3, 3));
+            }
         }
 
         // Scalar remainder
@@ -364,9 +409,16 @@ public class Bidiagonalization {
             for (int i = 0; i < len; i++) {
                 dot += v[i] * M[(startRow + i) * cols + col];
             }
+            if (DEBUG) {
+                System.out.println(String.format("left dot at col=%d: %.6e", col, dot));
+            }
             double scale = tau * dot;
             for (int i = 0; i < len; i++) {
                 M[(startRow + i) * cols + col] -= scale * v[i];
+            }
+            if (DEBUG) {
+                int rows = M.length / cols;
+                System.out.println("After left scalar update M: " + MatrixUtils.matrixSummary(Matrix.wrap(M, rows, cols), 3, 3));
             }
         }
     }
@@ -378,6 +430,14 @@ public class Bidiagonalization {
     private static void applyHouseholderRightRaw(double[] M, int cols, int startRow, int startCol,
                                                   double[] v, int len, double tau) {
         int rows = M.length / cols;
+        if (DEBUG) {
+            try {
+                System.out.println("applyHouseholderRightRaw called: startRow=" + startRow + " startCol=" + startCol + " len=" + len + " tau=" + tau);
+                System.out.println("vRow (first " + Math.min(len, 8) + ")=" + java.util.Arrays.toString(java.util.Arrays.copyOf(v, Math.min(len, 8))));
+                System.out.println("Before right apply M: " + MatrixUtils.matrixSummary(Matrix.wrap(M, rows, cols), 3, 3));
+            } catch (Exception ignored) {
+            }
+        }
         int vecLen = SPECIES.length();
         int upperBound = SPECIES.loopBound(len);
 
@@ -401,7 +461,13 @@ public class Bidiagonalization {
                 dot += M[idx + j] * v[j];
             }
 
-            if (Math.abs(dot) < 1e-15) continue;
+            if (DEBUG) {
+                System.out.println(String.format("right dot at row=%d: %.6e", row, dot));
+            }
+
+            // Do not skip tiny dots here; perform the update even if dot is near zero
+            // to keep behavior symmetric with the left-apply helper and avoid
+            // accumulation mismatches for very small couplings.
 
             double scale = tau * dot;
             DoubleVector scaleVec = DoubleVector.broadcast(SPECIES, scale);
@@ -418,6 +484,12 @@ public class Bidiagonalization {
             for (; j < len; j++) {
                 M[idx + j] -= scale * v[j];
             }
+            if (DEBUG) {
+                System.out.println("After right update (row " + row + ") M: " + MatrixUtils.matrixSummary(Matrix.wrap(M, rows, cols), 3, 3));
+            }
+        }
+        if (DEBUG) {
+            System.out.println("applyHouseholderRightRaw complete M: " + MatrixUtils.matrixSummary(Matrix.wrap(M, rows, cols), 3, 3));
         }
     }
 }

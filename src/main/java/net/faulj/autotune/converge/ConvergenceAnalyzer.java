@@ -61,17 +61,35 @@ public final class ConvergenceAnalyzer {
         // ── Criterion 2: Stability ──────────────────────────────────────
         boolean stableMet = selected.cv < criteria.epsCv;
 
-        // ── Criterion 3: Local Dominance ────────────────────────────────
-        // No other fine result beats the selected by more than epsPerf.
+        // ── Criterion 3: Local Dominance (statistically defensible) ─────
+        // Use medians (mu) and unbiased stddev (sigma = cv * median). Declare
+        // dominance only if mu_best - 2*sigma_best > mu_next + 2*sigma_next.
         boolean locallyDominant = true;
-        double perfDelta = 0.0;
+        double perfDelta = 0.0; // keep a perf delta fallback for messages
         for (FineSearchResult other : fineResults) {
             if (other == selected) continue;
+            double muBest = selected.medianGflops;
+            double sigmaBest = selected.cv * selected.medianGflops;
+            double muNext = other.medianGflops;
+            double sigmaNext = other.cv * other.medianGflops;
+
+            // performance delta for logging
             double delta = (other.bestGflops - selected.bestGflops) / Math.max(1e-9, selected.bestGflops);
             if (delta > perfDelta) perfDelta = delta;
-            if (delta > criteria.epsPerf) {
+
+            boolean statisticallyDominates = (muBest - 2.0 * sigmaBest) > (muNext + 2.0 * sigmaNext);
+            if (!statisticallyDominates) {
                 locallyDominant = false;
             }
+        }
+
+        // If dominance not proven, treat as tied and deterministically prefer
+        // simpler configuration: lower MR, then lower kUnroll, then lower KC.
+        if (!locallyDominant) {
+            selected = fineResults.stream().min(Comparator.comparingInt((FineSearchResult r) -> r.mr)
+                    .thenComparingInt(r -> r.bestKUnroll)
+                    .thenComparingInt(r -> r.bestKc))
+                    .orElse(selected);
         }
 
         // ── Criterion 4: Exhaustion ─────────────────────────────────────

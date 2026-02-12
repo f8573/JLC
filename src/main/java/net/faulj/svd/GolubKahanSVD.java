@@ -70,6 +70,31 @@ public class GolubKahanSVD {
             singularValues = java.util.Arrays.copyOf(singularValues, r);
         }
 
+        // If assembled U is not orthogonal, re-orthonormalize via QR and a small SVD
+        try {
+            double uOrtho = net.faulj.matrix.MatrixUtils.orthogonalityError(U);
+            if (uOrtho > 1e-10) {
+                int rcols = Math.min(U.getColumnCount(), singularValues.length);
+                Matrix[] qr = U.thinQR();
+                Matrix Q = qr[0];
+                Matrix R = qr[1].crop(0, rcols - 1, 0, rcols - 1);
+                Matrix SigmaR = new Matrix(rcols, rcols);
+                for (int i = 0; i < rcols; i++) SigmaR.set(i, i, singularValues[i]);
+                Matrix S = R.multiply(SigmaR);
+                SVDResult small = new GolubKahanSVD().decomposeThin(S);
+                Matrix Usmall = small.getU();
+                double[] sigmaNew = small.getSingularValues();
+                Matrix Vsmall = small.getV();
+                Matrix Ufinal = Q.multiply(Usmall);
+                Matrix Vleft = V.getColumnCount() == rcols ? V : V.crop(0, V.getRowCount() - 1, 0, rcols - 1);
+                Matrix Vfinal = Vleft.multiply(Vsmall);
+                double[] finalSig = java.util.Arrays.copyOf(sigmaNew, sigmaNew.length);
+                return new SVDResult(A, Ufinal, finalSig, Vfinal);
+            }
+        } catch (Exception e) {
+            // fallback to returning the original computed result
+        }
+
         return new SVDResult(A, U, singularValues, V);
     }
 

@@ -129,6 +129,77 @@ public class SVDTests {
                 {3, 6, 9}
         });
 
+        // Diagnostic: inspect bidiagonalization output before full SVD
+        net.faulj.decomposition.bidiagonal.Bidiagonalization bidiag = new net.faulj.decomposition.bidiagonal.Bidiagonalization();
+        net.faulj.decomposition.result.BidiagonalizationResult bres = bidiag.decompose(A);
+        Matrix B = bres.getB();
+        System.out.println("Bidiagonal B: " + MatrixUtils.matrixSummary(B, 3, 3));
+        double[] diag = new double[Math.min(B.getRowCount(), B.getColumnCount())];
+        for (int i = 0; i < diag.length; i++) diag[i] = B.get(i, i);
+        System.out.println("B diag: " + Arrays.toString(diag));
+        // Inspect eigenvalues of B^T B which should match squared singular values of B
+        Matrix BtB = B.transpose().multiply(B);
+        net.faulj.decomposition.result.SchurResult br = net.faulj.eigen.schur.RealSchurDecomposition.decompose(BtB);
+        double[] bReal = br.getRealEigenvalues();
+        double[] bSigma = new double[bReal.length];
+        for (int i = 0; i < bReal.length; i++) bSigma[i] = Math.sqrt(Math.max(0.0, bReal[i]));
+        System.out.println("B^T B eigenvalues: " + Arrays.toString(bReal));
+        System.out.println("B singular values from eigen: " + Arrays.toString(bSigma));
+
+        // Diagnostic SVD inspection for rank-deficient case
+        SVDecomposition svd = new SVDecomposition();
+        SVDResult res = svd.decompose(A);
+        double[] s = res.getSingularValues();
+        System.out.println("Singular values: " + Arrays.toString(s));
+
+        // Additional diagnostics: inspect Sigma, U*Sigma, and reconstructed matrix
+        try {
+            Matrix Sigma = res.getSigma();
+            System.out.println("Sigma matrix: " + MatrixUtils.matrixSummary(Sigma, 3, 3));
+            Matrix USigma = res.getU().multiply(Sigma);
+            System.out.println("U * Sigma: " + MatrixUtils.matrixSummary(USigma, 3, 3));
+            Matrix recon = res.reconstruct();
+            System.out.println("Reconstructed: " + MatrixUtils.matrixSummary(recon, 3, 3));
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        // Effective rank check
+        int effRankFromArray = RankEstimation.effectiveRank(s, 1e-12);
+        int effRankFromMatrix = RankEstimation.effectiveRank(A);
+        System.out.println("Effective rank (from singulars): " + effRankFromArray);
+        System.out.println("Effective rank (from matrix): " + effRankFromMatrix);
+
+        // Orthogonality checks for U and V
+        Matrix U = res.getU();
+        Matrix V = res.getV();
+        double uOrth = MatrixUtils.orthogonalityError(U);
+        double vOrth = MatrixUtils.orthogonalityError(V);
+        System.out.println("U orthogonality error: " + uOrth);
+        System.out.println("V orthogonality error: " + vOrth);
+
+        // Reconstruction accuracy
+        double reconErr = reconstructionError(A, res.reconstruct());
+
+        // Check that singular values are non-increasing (sorted descending)
+        boolean sortedDesc = true;
+        for (int i = 0; i < s.length - 1; i++) {
+            if (s[i] < s[i + 1]) {
+                sortedDesc = false;
+                break;
+            }
+        }
+        System.out.println("Singular values sorted descending: " + sortedDesc);
+
+        System.out.println("SVD reconstruction relative error: " + reconErr);
+
+        // Validate SVD factors (orthogonality, reconstruction, singular values)
+        validateSvd(A, res, false, "Rank-deficient SVD");
+
+        // Expect rank == 1 for this matrix
+        assertEquals("Effective rank (from singulars)", 1, effRankFromArray);
+        assertEquals("Effective rank (from matrix)", 1, effRankFromMatrix);
+
         Matrix Aplus = new Pseudoinverse().compute(A);
         double cond = MatrixAccuracyValidator.estimateCondition(A);
 
