@@ -4,6 +4,7 @@ import Sidebar from '../Sidebar'
 import MatrixTabs from './MatrixTabs'
 import MatrixDisplay from '../matrix/MatrixDisplay'
 import { parseMatrixString, analyzeAndCache, matrixToString } from '../../utils/diagnostics'
+import { parseMatrixInputText } from '../../utils/matrixInput'
 import { formatDimension, formatPercent } from '../../utils/format'
 
 /**
@@ -42,7 +43,14 @@ export default function MatrixAnalysisLayout({
    * @returns {Promise<void>}
    */
   async function handleCompute(inputValue) {
-    const parsed = parseMatrixString(inputValue)
+    let parsed = parseMatrixString(inputValue)
+    if (!parsed) {
+      try {
+        parsed = parseMatrixInputText(inputValue)
+      } catch {
+        parsed = null
+      }
+    }
     if (!parsed) {
       return
     }
@@ -130,3 +138,4 @@ export default function MatrixAnalysisLayout({
     </div>
   )
 }
+

@@ -3,7 +3,7 @@ import FavoriteModal from './ui/FavoriteModal'
 import { useMatrix } from '../hooks/useMatrix'
 import { useMatrixAnimation } from '../hooks/useMatrixAnimation'
 import { analyzeAndCache, valuesToMatrixData, matrixToString } from '../utils/diagnostics'
-import Badge from './ui/Badge'
+import { parseMatrixInputText } from '../utils/matrixInput'
 import MatrixInputCard from './matrix/MatrixInputCard'
 import MatrixDimensionControl from './matrix/MatrixDimensionControl'
 import MatrixActions from './matrix/MatrixActions'
@@ -18,29 +18,66 @@ export default function MatrixInput() {
   const [favoriteModalOpen, setFavoriteModalOpen] = React.useState(false)
   const [favoriteDefaultName, setFavoriteDefaultName] = React.useState('')
   const [savedMessage, setSavedMessage] = React.useState('')
+  const [uploadMessage, setUploadMessage] = React.useState('')
+  const [uploadError, setUploadError] = React.useState('')
+  const [uploadBusy, setUploadBusy] = React.useState(false)
+  const fileInputRef = React.useRef(null)
 
-  async function handleAnalyze() {
-    const matrixData = valuesToMatrixData(values)
-    const matrixString = matrixToString(matrixData)
-    // store recent session (limit 10)
+  function storeRecentSession(matrixString) {
     try {
       const key = 'recentSessions'
       const raw = localStorage.getItem(key)
       const arr = raw ? JSON.parse(raw) : []
       arr.unshift({ title: matrixString, ts: Date.now() })
-      const sliced = arr.slice(0, 10)
-      localStorage.setItem(key, JSON.stringify(sliced))
+      localStorage.setItem(key, JSON.stringify(arr.slice(0, 10)))
     } catch (e) {
       // ignore
     }
+  }
 
+  async function navigateToAnalysis(matrixData, matrixString, withBasicTab = true) {
+    storeRecentSession(matrixString)
     try {
       await analyzeAndCache(matrixData, matrixString)
     } catch (e) {
       // allow navigation even if diagnostics failed
     }
+    const target = '/matrix=' + encodeURIComponent(matrixString) + (withBasicTab ? '/basic' : '')
+    window.location.href = target
+  }
 
-    window.location.href = '/matrix=' + encodeURIComponent(matrixString) + '/basic'
+  async function handleAnalyze() {
+    const matrixData = valuesToMatrixData(values)
+    const matrixString = matrixToString(matrixData)
+    await navigateToAnalysis(matrixData, matrixString, true)
+  }
+
+  function handleUploadClick() {
+    setUploadError('')
+    setUploadMessage('')
+    fileInputRef.current?.click()
+  }
+
+  async function handleUploadFileChange(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+
+    setUploadBusy(true)
+    setUploadError('')
+    setUploadMessage('')
+
+    try {
+      const rawContent = await file.text()
+      const parsedMatrix = parseMatrixInputText(rawContent)
+      const matrixString = matrixToString(parsedMatrix)
+      setUploadMessage(`Loaded ${file.name}`)
+      await navigateToAnalysis(parsedMatrix, matrixString, false)
+    } catch (err) {
+      setUploadError(err?.message || 'Failed to parse uploaded matrix file')
+    } finally {
+      setUploadBusy(false)
+    }
   }
 
   function handleFavorite() {
@@ -170,10 +207,25 @@ export default function MatrixInput() {
           onAnalyze={handleAnalyze}
           onTranspose={handleTranspose}
           onFavorite={handleFavorite}
+          onUpload={handleUploadClick}
+          uploadBusy={uploadBusy}
         />
+
+        {(uploadMessage || uploadError) && (
+          <div className="w-full max-w-md mt-4 text-center">
+            {uploadMessage && <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">{uploadMessage}</p>}
+            {uploadError && <p className="text-sm font-medium text-rose-600 dark:text-rose-400">{uploadError}</p>}
+          </div>
+        )}
         
         <FeatureGrid />
       </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={handleUploadFileChange}
+      />
     </main>
     <FavoriteModal open={favoriteModalOpen} defaultName={favoriteDefaultName} onCancel={() => { setFavoriteModalOpen(false); window.__pendingFavoriteMatrix = null }} onSave={(name) => saveFavorite(name)} />
     {savedMessage && (

@@ -1,0 +1,135 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Frontend Stress Test (Browser)</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    .row { margin-bottom: 8px; }
+    label { display:inline-block; width: 180px; }
+    input, select { width: 160px; }
+    #metrics { margin-top: 12px; }
+    #log { margin-top: 12px; height: 200px; overflow:auto; background:#f5f5f5; padding:8px; border:1px solid #ddd; }
+    button { margin-right: 8px; }
+  </style>
+</head>
+<body>
+  <h2>Frontend Stress Test (Browser)</h2>
+
+  <div class="row"><label>Target URL</label><input id="url" value="http://localhost:8080/api/diagnostics" /></div>
+  <div class="row"><label>Encoding</label>
+    <select id="encoding"><option value="json">JSON (matrix)</option></select>
+  </div>
+  <div class="row"><label>Matrix size</label><input id="matrix" value="512" /></div>
+  <div class="row"><label>Clients (concurrency)</label><input id="clients" value="20" /></div>
+  <div class="row"><label>Mode</label>
+    <select id="mode">
+      <option value="sustained">Sustained (rate)</option>
+      <option value="burst">Burst</option>
+    </select>
+  </div>
+  <div class="row"><label>Requests per client (burst)</label><input id="burstCount" value="50" /></div>
+  <div class="row"><label>RPS (global, sustained)</label><input id="rps" value="200" /></div>
+  <div class="row"><label>Duration (s)</label><input id="duration" value="60" /></div>
+  <div class="row"><label>Pattern</label><select id="pattern"><option value="random">random</option><option value="zeros">zeros</option><option value="ones">ones</option></select></div>
+
+  <div class="row">
+    <button id="start">Start</button>
+    <button id="stop" disabled>Stop</button>
+  </div>
+
+  <div id="metrics">
+    <b>Metrics:</b>
+    <div>Sent: <span id="sent">0</span></div>
+    <div>Pending: <span id="pending">0</span></div>
+    <div>Failed: <span id="failed">0</span></div>
+    <div>Avg latency(ms): <span id="avgLatency">0</span></div>
+    <div>Queue hint (latest): <span id="queueHint">-</span></div>
+  </div>
+
+  <div id="log"></div>
+
+<script>
+  const workerUrl = 'browser-worker.js';
+
+  let workers = [];
+  let running = false;
+  let stats = { sent:0, pending:0, failed:0, latencies:[], queueHint: null };
+
+  function log(msg) {
+    const el = document.getElementById('log');
+    const t = new Date().toISOString();
+    el.innerText = `[${t}] ${msg}\n` + el.innerText;
+  }
+
+  function updateUI() {
+    document.getElementById('sent').innerText = stats.sent;
+    document.getElementById('pending').innerText = stats.pending;
+    document.getElementById('failed').innerText = stats.failed;
+    const avg = stats.latencies.length ? (stats.latencies.reduce((a,b)=>a+b,0)/stats.latencies.length).toFixed(1) : '0';
+    document.getElementById('avgLatency').innerText = avg;
+    document.getElementById('queueHint').innerText = stats.queueHint == null ? '-' : stats.queueHint;
+  }
+
+  function onWorkerMessage(e) {
+    const msg = e.data;
+    if (msg.type === 'stats') {
+      if (msg.sent) stats.sent += msg.sent;
+      if (msg.pendingDelta) stats.pending += msg.pendingDelta;
+      if (msg.failed) stats.failed += msg.failed;
+      if (msg.latency != null) stats.latencies.push(msg.latency);
+      if (msg.queueHint != null) stats.queueHint = msg.queueHint;
+      updateUI();
+    } else if (msg.type === 'log') {
+      log(msg.text);
+    }
+  }
+
+  function start() {
+    if (running) return;
+    running = true;
+    stats = { sent:0, pending:0, failed:0, latencies:[], queueHint: null };
+    updateUI();
+    document.getElementById('start').disabled = true;
+    document.getElementById('stop').disabled = false;
+
+    const url = document.getElementById('url').value;
+    const encoding = document.getElementById('encoding').value;
+    const matrix = Number(document.getElementById('matrix').value);
+    const clients = Number(document.getElementById('clients').value);
+    const mode = document.getElementById('mode').value;
+    const rps = Number(document.getElementById('rps').value);
+    const duration = Number(document.getElementById('duration').value);
+    const burstCount = Number(document.getElementById('burstCount').value);
+    const pattern = document.getElementById('pattern').value;
+
+    for (let i = 0; i < clients; ++i) {
+      const w = new Worker(workerUrl);
+      w.onmessage = onWorkerMessage;
+      workers.push(w);
+      w.postMessage({
+        cmd: 'start',
+        url, encoding, matrix, mode, rps, duration, burstCount, pattern, clientId: i, totalClients: clients
+      });
+    }
+    log(`Started ${clients} workers, mode=${mode}, encoding=${encoding}`);
+  }
+
+  function stop() {
+    if (!running) return;
+    running = false;
+    document.getElementById('start').disabled = false;
+    document.getElementById('stop').disabled = true;
+    for (const w of workers) {
+      w.postMessage({ cmd: 'stop' });
+      w.terminate();
+    }
+    workers = [];
+    log('Stopped workers');
+  }
+
+  document.getElementById('start').addEventListener('click', start);
+  document.getElementById('stop').addEventListener('click', stop);
+</script>
+</body>
+</html>

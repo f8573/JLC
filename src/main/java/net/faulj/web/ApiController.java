@@ -62,7 +62,7 @@ import net.faulj.visualizer.MatrixLatexExporter;
  * REST controller exposing diagnostic and debug endpoints for matrix analysis.
  */
 public class ApiController {
-    private static final int FULL_DIAGNOSTIC_CELL_LIMIT = 65_536; // e.g. 256x256
+    private static final int FULL_DIAGNOSTIC_CELL_LIMIT = 262_144; // e.g. 512x512
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final BenchmarkService benchmarkService;
@@ -103,12 +103,21 @@ public class ApiController {
         nextCpu.put("state", cpuState);
         int q = queuedJobs.get();
         Object queuedObj = nextCpu.get("queuedJobs");
-        if (queuedObj instanceof Number n) {
-            q = Math.max(0, n.intValue());
+        try {
+            System.out.printf("[STATUS] maybeNotifyStatus cpuState=%s atomicQueued=%d nextCpuQueuedObj=%s%n",
+                    cpuState, q, String.valueOf(queuedObj));
+        } catch (Throwable ignore) {}
+        // Prefer the authoritative atomic counter unless the caller explicitly
+        // provides a positive queuedJobs value (e.g., a client-side position).
+        if (queuedObj instanceof Number n && n.intValue() > 0) {
+            q = Math.max(q, n.intValue());
         }
         nextCpu.put("queuedJobs", q);
 
         String derivedStatus = deriveSystemStatus(cpuState, q);
+        try {
+            System.out.printf("[SSE_SEND] derived=%s queued=%d nextCpu=%s%n", derivedStatus, q, nextCpu);
+        } catch (Throwable ignore) {}
         // Keep optional caller override only when it is one of our known values.
         if (status != null && !status.isBlank()) {
             String normalized = status.trim().toUpperCase();
@@ -149,7 +158,6 @@ public class ApiController {
         m.put("name", "CPU");
         m.put("gflops", null);
         m.put("state", state);
-        m.put("queuedJobs", 0);
         return m;
     }
 
@@ -315,7 +323,8 @@ public class ApiController {
     @GetMapping("/api/benchmark/diagnostic512")
     public ResponseEntity<Map<String, Object>> benchmarkDiagnostic512(
             @RequestParam(value = "iterations", required = false, defaultValue = "5") int iterations) {
-        queuedJobs.incrementAndGet();
+        int qInc = queuedJobs.incrementAndGet();
+        try { System.out.printf("[QUEUE] increment at benchmarkDiagnostic -> %d (%s)%n", qInc, Thread.currentThread().getName()); } catch (Throwable ignore) {}
         maybeNotifyStatus(null, Map.of("state", "online"));
         try {
             Map<String, Object> result = benchmarkService.runDiagnostic512(iterations);
@@ -332,7 +341,8 @@ public class ApiController {
             maybeNotifyStatus(null, Map.of("state", "degraded"));
             return ResponseEntity.status(500).body(Map.of("error", "diagnostic512 benchmark failed", "details", ex.getMessage()));
         } finally {
-            queuedJobs.updateAndGet(v -> Math.max(0, v - 1));
+            int qDec = queuedJobs.updateAndGet(v -> Math.max(0, v - 1));
+            try { System.out.printf("[QUEUE] decrement at benchmarkDiagnostic -> %d (%s)%n", qDec, Thread.currentThread().getName()); } catch (Throwable ignore) {}
             maybeNotifyStatus(null, null);
         }
     }
@@ -405,7 +415,8 @@ public class ApiController {
         if (matrixObj == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "matrix field is required"));
         }
-        queuedJobs.incrementAndGet();
+        int qInc2 = queuedJobs.incrementAndGet();
+        try { System.out.printf("[QUEUE] increment at streamDiagnostics -> %d (%s)%n", qInc2, Thread.currentThread().getName()); } catch (Throwable ignore) {}
         maybeNotifyStatus(null, Map.of("state", "online"));
         try {
             double[][] data = objectMapper.convertValue(matrixObj, double[][].class);
@@ -421,7 +432,8 @@ public class ApiController {
             maybeNotifyStatus(null, Map.of("state", "degraded"));
             return ResponseEntity.status(500).body(Map.of("error", "diagnostics failed", "details", ex.getMessage()));
         } finally {
-            queuedJobs.updateAndGet(v -> Math.max(0, v - 1));
+            int qDec2 = queuedJobs.updateAndGet(v -> Math.max(0, v - 1));
+            try { System.out.printf("[QUEUE] decrement at streamDiagnostics -> %d (%s)%n", qDec2, Thread.currentThread().getName()); } catch (Throwable ignore) {}
             maybeNotifyStatus(null, null);
         }
     }
@@ -437,7 +449,8 @@ public class ApiController {
         if (matrixJson == null || matrixJson.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("error", "matrix query param is required"));
         }
-        queuedJobs.incrementAndGet();
+        int qInc = queuedJobs.incrementAndGet();
+        try { System.out.printf("[QUEUE] increment at benchmarkDiagnostic -> %d (%s)%n", qInc, Thread.currentThread().getName()); } catch (Throwable ignore) {}
         maybeNotifyStatus(null, Map.of("state", "online"));
         try {
             double[][] data = objectMapper.readValue(matrixJson, double[][].class);
@@ -860,7 +873,8 @@ public class ApiController {
             maybeNotifyStatus(null, Map.of("state", "degraded"));
             return ResponseEntity.status(500).body(Map.of("error", "diagnostic benchmark failed", "details", ex.getMessage()));
         } finally {
-            queuedJobs.updateAndGet(v -> Math.max(0, v - 1));
+            int qDec = queuedJobs.updateAndGet(v -> Math.max(0, v - 1));
+            try { System.out.printf("[QUEUE] decrement at benchmarkDiagnostic -> %d (%s)%n", qDec, Thread.currentThread().getName()); } catch (Throwable ignore) {}
             maybeNotifyStatus(null, null);
         }
     }

@@ -1,19 +1,21 @@
-﻿/**
+﻿import { matrixToRealData, normalizeParsedMatrixData } from './matrixInput'
+
+/**
  * Parse a serialized matrix string into a 2D array.
  *
  * @param {string} matrixString
- * @returns {number[][] | null}
+ * @returns {number[][] | {data: number[][], imag: number[][]} | null}
  */
 export function parseMatrixString(matrixString) {
   if (!matrixString) return null
   try {
     const parsed = JSON.parse(matrixString)
-    if (!Array.isArray(parsed)) return null
-    return parsed
+    return normalizeParsedMatrixData(parsed)
   } catch {
     return null
   }
 }
+
 
 /**
  * Convert grid string values into numeric matrix data.
@@ -96,6 +98,8 @@ function cacheDiagnostics(matrixString, diagnostics) {
  * @returns {Promise<any>}
  */
 async function fetchDiagnostics(matrixData) {
+  const realMatrix = matrixToRealData(matrixData)
+
   // Determine current queue position and record a local pending-job marker so
   // UI components can reason about whether the user's job is within thresholds.
   try {
@@ -116,7 +120,8 @@ async function fetchDiagnostics(matrixData) {
   const response = await fetch('/api/diagnostics', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ matrix: matrixData })
+    // Backend diagnostics currently accepts real matrices only.
+    body: JSON.stringify({ matrix: realMatrix })
   })
 
   if (!response.ok) {
@@ -502,3 +507,4 @@ function classifySpectrum(eigenvalues, tol = 1e-8) {
 
   return { location, odeStability, discreteStability }
 }
+

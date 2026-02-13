@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "stress:node": "node ../tools/load-generator.js",
+    "stress:browser:serve": "npx http-server ./tests -p 8081 -c-1"
   },
   "dependencies": {
     "katex": "^0.16.8",
@@ -14,6 +16,9 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.0.0",
-    "vite": "^5.0.0"
+    "vite": "^5.0.0",
+    "axios": "^1.4.0",
+    "minimist": "^1.2.8",
+    "http-server": "^14.1.1"
   }
 }

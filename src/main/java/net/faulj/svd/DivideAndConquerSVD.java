@@ -165,14 +165,7 @@ public class DivideAndConquerSVD {
                 }
             }
             Matrix Uthin = keptU.isEmpty() ? new Matrix(B.getRowCount(), 0) : new Matrix(keptU.toArray(new net.faulj.vector.Vector[0]));
-            // Diagnostic: print per-column diagnostics for BV and Uthin
-            try {
-                // diagnostics omitted
-            } catch (Exception e) {
-                // ignore diagnostics failures
-            }
             Matrix U = full ? completeOrthonormalBasis(Uthin) : Uthin;
-            // Diagnostic: dump final U columns and pairwise inner products
             return new BidiagonalSVDResult(U, V, sigma);
         }
         double[] diag = extractDiagonal(B, m);
@@ -195,12 +188,6 @@ public class DivideAndConquerSVD {
             }
         }
         Matrix Vthin = keptV.isEmpty() ? new Matrix(B.getColumnCount(), 0) : new Matrix(keptV.toArray(new net.faulj.vector.Vector[0]));
-        // Diagnostic: print per-column diagnostics for BTU and Vthin
-            try {
-                // diagnostics omitted
-            } catch (Exception e) {
-                // ignore diagnostics failures
-            }
         Matrix V = full ? completeOrthonormalBasis(Vthin) : Vthin;
         return new BidiagonalSVDResult(U, V, sigma);
     }

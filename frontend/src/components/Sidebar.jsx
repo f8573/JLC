@@ -29,6 +29,8 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
   const [showInfoModal, setShowInfoModal] = useState(false)
   const initialBenchmarkDone = useRef(false)
   const benchmarkIntervalRef = useRef(null)
+  const esRef = useRef(null)
+  const reconnectAttemptsRef = useRef(0)
 
   useEffect(() => {
     function load() {
@@ -72,27 +74,70 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
   useEffect(() => {
     // attempt to load diagnostics on mount
     fetchDiagnostics()
-    // open SSE stream for status updates (only apply when changed)
-    const es = new EventSource('/api/diagnostics/stream')
-    es.addEventListener('status', (ev) => {
+
+    // Robust SSE connection with automatic reconnect/backoff.
+    function connectSse() {
       try {
-        const data = JSON.parse(ev.data)
-        setDiagnostics(data)
-        // start initial benchmark if CPU becomes online via SSE
-        const cpuOnline = data && data.cpu && String(data.cpu.state).toLowerCase() === 'online'
-        if (cpuOnline && !initialBenchmarkDone.current) {
-          initialBenchmarkDone.current = true
-          runSystemBenchmark()
+        // close previous if any
+        if (esRef.current) {
+          try { esRef.current.close() } catch (e) {}
+          esRef.current = null
+        }
+        const es = new EventSource('/api/diagnostics/stream')
+        esRef.current = es
+
+        es.addEventListener('status', (ev) => {
+          try {
+            const data = JSON.parse(ev.data)
+            setDiagnostics(data)
+            // start initial benchmark if CPU becomes online via SSE
+            const cpuOnline = data && data.cpu && String(data.cpu.state).toLowerCase() === 'online'
+            if (cpuOnline && !initialBenchmarkDone.current) {
+              initialBenchmarkDone.current = true
+              runSystemBenchmark()
+            }
+          } catch (e) {
+            // ignore malformed events
+          }
+        })
+
+        es.onopen = () => {
+          // reset backoff on successful open
+          reconnectAttemptsRef.current = 0
+        }
+
+        es.onerror = () => {
+          // close and schedule reconnect with exponential backoff
+          try { es.close() } catch (e) {}
+          const attempt = (reconnectAttemptsRef.current || 0) + 1
+          reconnectAttemptsRef.current = attempt
+          const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(attempt, 6)))
+          setTimeout(connectSse, delay)
         }
       } catch (e) {
-        // ignore malformed events
+        // on immediate failure schedule reconnect
+        const attempt = (reconnectAttemptsRef.current || 0) + 1
+        reconnectAttemptsRef.current = attempt
+        const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(attempt, 6)))
+        setTimeout(connectSse, delay)
       }
-    })
-    es.onerror = () => {
-      // if stream fails, close and leave current diagnostics as-is
-      try { es.close() } catch (e) {}
     }
-    return () => { try { es.close() } catch (e) {} }
+
+    connectSse()
+    return () => { try { if (esRef.current) esRef.current.close() } catch (e) {} }
+  }, [])
+
+  // Debug: log when diagnostics change to help debug staleness.
+  useEffect(() => {
+    try { console.debug('[Sidebar] diagnostics updated', diagnostics) } catch (e) {}
+  }, [diagnostics])
+
+  // Fallback polling: if SSE misses an event (browser/network), poll status periodically.
+  useEffect(() => {
+    const id = setInterval(() => {
+      try { fetchDiagnostics() } catch (e) {}
+    }, 5000)
+    return () => clearInterval(id)
   }, [])
 
   // schedule periodic benchmarks every 5 minutes
@@ -117,7 +162,13 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
   let userPendingJobPos = null
   try {
     if (window && window.__myPendingJob && Number.isFinite(Number(window.__myPendingJob.position))) {
-      userPendingJobPos = Number(window.__myPendingJob.position)
+      const entry = window.__myPendingJob
+      // only trust a recent pending-job marker (TTL 60s) to avoid stale positions
+      if (!entry.ts || (Date.now() - Number(entry.ts) <= 60000)) {
+        userPendingJobPos = Number(entry.position)
+      } else {
+        try { window.__myPendingJob = null } catch (e) {}
+      }
     }
   } catch {}
 

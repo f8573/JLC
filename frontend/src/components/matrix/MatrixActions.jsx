@@ -7,10 +7,13 @@ import Button from '../ui/Button'
  * @param {Object} props
  * @param {() => void} [props.onAnalyze]
  * @param {() => void} [props.onTranspose]
+ * @param {() => void} [props.onFavorite]
+ * @param {() => void} [props.onUpload]
+ * @param {boolean} [props.uploadBusy]
  */
-export default function MatrixActions({ onAnalyze, onTranspose, onFavorite }) {
+export default function MatrixActions({ onAnalyze, onTranspose, onFavorite, onUpload, uploadBusy = false }) {
   return (
-    <div className="flex flex-col sm:flex-row items-center justify-center gap-5 w-full max-w-md">
+    <div className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-5 w-full max-w-2xl">
       <Button 
         onClick={onAnalyze} 
         variant="primary" 
@@ -34,6 +37,14 @@ export default function MatrixActions({ onAnalyze, onTranspose, onFavorite }) {
       >
         <span className="material-symbols-outlined text-[20px] text-yellow-500">star</span>
         Favorite
+      </Button>
+      <Button
+        onClick={onUpload}
+        variant="secondary"
+        disabled={uploadBusy}
+      >
+        <span className="material-symbols-outlined text-[20px]">upload_file</span>
+        {uploadBusy ? 'Uploading...' : 'Upload File'}
       </Button>
     </div>
   )

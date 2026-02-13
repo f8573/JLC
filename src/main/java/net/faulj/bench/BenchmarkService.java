@@ -269,7 +269,6 @@ public class BenchmarkService {
                 cpu.put("name", "DiagnosticGEMM");
                 cpu.put("gflops", gflopsParallel);
                 cpu.put("state", "online");
-                cpu.put("queuedJobs", 0);
                 cpu.put("benchmark", Map.of(
                     "workload", "GEMM",
                     "size", n,
@@ -395,7 +394,6 @@ public class BenchmarkService {
             cpu.put("name", "Diagnostic512");
             cpu.put("gflops", gflops);
             cpu.put("state", "online");
-            cpu.put("queuedJobs", 0);
             cpu.put("benchmark", Map.of(
                     "workload", "Diagnostic512Runner (isolated JVM)",
                     "size", n,
