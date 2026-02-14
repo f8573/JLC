@@ -154,7 +154,7 @@ public class BenchmarkService {
         return out;
     }
 
-        public Map<String, Object> runGemm(int n, int iterations) {
+        public Map<String, Object> runGemm(int n, int iterations, int parallelism) {
             final int reps = Math.max(1, iterations);
             try {
                 List<Map<String, Object>> results = new ArrayList<>();
@@ -164,7 +164,7 @@ public class BenchmarkService {
                         .enableCuda(false)
                         .enableBlas3(true)
                         .enableParallel(true)
-                        .parallelism(Math.max(1, Runtime.getRuntime().availableProcessors()))
+                        .parallelism(Math.max(1, parallelism))
                         .build();
 
                 // Pre-allocate matrices once and operate on raw arrays via canonical GEMM facade
@@ -227,12 +227,12 @@ public class BenchmarkService {
                 diagInfo.put("warmupRuns", warmupRuns);
 
                 // Also run a parallel measurement through the canonical GEMM facade
-                int availableThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
+                int availableThreads = Math.max(1, parallelism);
                 DispatchPolicy parallelPolicy = DispatchPolicy.builder()
                         .enableCuda(false)
                         .enableBlas3(true)
                         .enableParallel(true)
-                        .parallelism(availableThreads)
+                    .parallelism(availableThreads)
                         .build();
 
                 // Warmup for parallel path

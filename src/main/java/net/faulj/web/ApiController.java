@@ -66,6 +66,8 @@ public class ApiController {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final BenchmarkService benchmarkService;
+    private final ComputeGovernor governor = new ComputeGovernor();
+    private final IpRateLimiter ipRateLimiter = new IpRateLimiter();
     // SSE emitters for streaming status updates to connected frontend clients
     private final CopyOnWriteArrayList<SseEmitter> sseEmitters = new CopyOnWriteArrayList<>();
     private volatile String currentStatus = "SERVICE_INTERRUPTION";
@@ -83,6 +85,7 @@ public class ApiController {
         }
         sseEmitters.clear();
         sseExecutor.shutdownNow();
+        try { governor.shutdownWatchdog(); } catch (Throwable ignored) {}
     }
 
     /**
@@ -101,7 +104,8 @@ public class ApiController {
 
         String cpuState = normalizeCpuState(nextCpu.get("state"));
         nextCpu.put("state", cpuState);
-        int q = queuedJobs.get();
+        // Prefer the new ComputeGovernor activeJobs metric as authoritative
+        int q = governor != null ? governor.getActiveJobs() : queuedJobs.get();
         Object queuedObj = nextCpu.get("queuedJobs");
         try {
             System.out.printf("[STATUS] maybeNotifyStatus cpuState=%s atomicQueued=%d nextCpuQueuedObj=%s%n",
@@ -188,7 +192,10 @@ public class ApiController {
         // At startup assume CPU is online and idle.
         maybeNotifyStatus("ONLINE", cpuTemplate("online"));
         // Run a lightweight CPU benchmark in background to estimate GFLOPs
-        runCpuBenchmark();
+        // Run a lightweight CPU benchmark only when explicitly enabled via system property
+        if (Boolean.parseBoolean(System.getProperty("faulj.benchmark.runOnStartup", "false"))) {
+            runCpuBenchmark();
+        }
     }
 
     private void runCpuBenchmark() {
@@ -318,13 +325,61 @@ public class ApiController {
     }
 
     /**
+     * Admin endpoint to reset the compute governor state when troubleshooting.
+     * This clears stuck active-job counts and restores available permits.
+     * Intended for local/dev recovery only.
+     */
+    @PostMapping("/api/admin/reset-governor")
+    public Map<String, Object> resetGovernor() {
+        try {
+            governor.forceReset();
+            maybeNotifyStatus(null, null);
+            return Map.of(
+                    "result", "ok",
+                    "activeJobs", governor.getActiveJobs(),
+                    "acquiredCount", governor.getAcquiredCount(),
+                    "rejectedCount", governor.getRejectedCount(),
+                    "resetCount", governor.getResetCount()
+            );
+        } catch (Exception ex) {
+            return Map.of("result", "error", "message", ex.getMessage());
+        }
+    }
+
+    @GetMapping("/api/admin/governor-metrics")
+    public Map<String, Object> governorMetrics() {
+        try {
+            return Map.of(
+                    "activeJobs", governor.getActiveJobs(),
+                    "maxParallelJobs", governor.getMaxParallelJobs(),
+                    "acquiredCount", governor.getAcquiredCount(),
+                    "rejectedCount", governor.getRejectedCount(),
+                    "resetCount", governor.getResetCount(),
+                    "oldestAcquireAgeSeconds", governor.getOldestAcquireAgeSeconds()
+            );
+        } catch (Exception ex) {
+            return Map.of("result", "error", "message", ex.getMessage());
+        }
+    }
+
+    /**
      * Run Diagnostic512 benchmark flow from backend.
      */
     @GetMapping("/api/benchmark/diagnostic512")
     public ResponseEntity<Map<String, Object>> benchmarkDiagnostic512(
             @RequestParam(value = "iterations", required = false, defaultValue = "5") int iterations) {
-        int qInc = queuedJobs.incrementAndGet();
-        try { System.out.printf("[QUEUE] increment at benchmarkDiagnostic -> %d (%s)%n", qInc, Thread.currentThread().getName()); } catch (Throwable ignore) {}
+        String clientIp = null;
+        try { clientIp = org.springframework.web.context.request.RequestContextHolder.currentRequestAttributes().getSessionId(); } catch (Throwable ignored) {}
+
+        // admission control: IP rate limit
+        if (!ipRateLimiter.allowRequest(clientIp)) {
+            return ResponseEntity.status(429).body(Map.of("error", "rate limit exceeded"));
+        }
+
+        // Try to acquire compute slot
+        if (!governor.tryAcquire()) {
+            return ResponseEntity.status(429).body(Map.of("error", "server busy - try again later"));
+        }
         maybeNotifyStatus(null, Map.of("state", "online"));
         try {
             Map<String, Object> result = benchmarkService.runDiagnostic512(iterations);
@@ -341,8 +396,7 @@ public class ApiController {
             maybeNotifyStatus(null, Map.of("state", "degraded"));
             return ResponseEntity.status(500).body(Map.of("error", "diagnostic512 benchmark failed", "details", ex.getMessage()));
         } finally {
-            int qDec = queuedJobs.updateAndGet(v -> Math.max(0, v - 1));
-            try { System.out.printf("[QUEUE] decrement at benchmarkDiagnostic -> %d (%s)%n", qDec, Thread.currentThread().getName()); } catch (Throwable ignore) {}
+            governor.release();
             maybeNotifyStatus(null, null);
         }
     }
@@ -415,8 +469,18 @@ public class ApiController {
         if (matrixObj == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "matrix field is required"));
         }
-        int qInc2 = queuedJobs.incrementAndGet();
-        try { System.out.printf("[QUEUE] increment at streamDiagnostics -> %d (%s)%n", qInc2, Thread.currentThread().getName()); } catch (Throwable ignore) {}
+        String clientIp = null;
+        try { clientIp = org.springframework.web.context.request.RequestContextHolder.currentRequestAttributes().getSessionId(); } catch (Throwable ignored) {}
+
+        // admission control: IP rate limit
+        if (!ipRateLimiter.allowRequest(clientIp)) {
+            return ResponseEntity.status(429).body(Map.of("error", "rate limit exceeded"));
+        }
+
+        // Try to acquire compute slot
+        if (!governor.tryAcquire()) {
+            return ResponseEntity.status(429).body(Map.of("error", "server busy - try again later"));
+        }
         maybeNotifyStatus(null, Map.of("state", "online"));
         try {
             double[][] data = objectMapper.convertValue(matrixObj, double[][].class);
@@ -432,8 +496,7 @@ public class ApiController {
             maybeNotifyStatus(null, Map.of("state", "degraded"));
             return ResponseEntity.status(500).body(Map.of("error", "diagnostics failed", "details", ex.getMessage()));
         } finally {
-            int qDec2 = queuedJobs.updateAndGet(v -> Math.max(0, v - 1));
-            try { System.out.printf("[QUEUE] decrement at streamDiagnostics -> %d (%s)%n", qDec2, Thread.currentThread().getName()); } catch (Throwable ignore) {}
+            governor.release();
             maybeNotifyStatus(null, null);
         }
     }
@@ -449,8 +512,18 @@ public class ApiController {
         if (matrixJson == null || matrixJson.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("error", "matrix query param is required"));
         }
-        int qInc = queuedJobs.incrementAndGet();
-        try { System.out.printf("[QUEUE] increment at benchmarkDiagnostic -> %d (%s)%n", qInc, Thread.currentThread().getName()); } catch (Throwable ignore) {}
+        String clientIp = null;
+        try { clientIp = org.springframework.web.context.request.RequestContextHolder.currentRequestAttributes().getSessionId(); } catch (Throwable ignored) {}
+
+        // admission control: IP rate limit
+        if (!ipRateLimiter.allowRequest(clientIp)) {
+            return ResponseEntity.status(429).body(Map.of("error", "rate limit exceeded"));
+        }
+
+        // Try to acquire compute slot
+        if (!governor.tryAcquire()) {
+            return ResponseEntity.status(429).body(Map.of("error", "server busy - try again later"));
+        }
         maybeNotifyStatus(null, Map.of("state", "online"));
         try {
             double[][] data = objectMapper.readValue(matrixJson, double[][].class);
@@ -468,7 +541,7 @@ public class ApiController {
             maybeNotifyStatus(null, Map.of("state", "degraded"));
             return ResponseEntity.status(500).body(Map.of("error", "diagnostics failed", "details", ex.getMessage()));
         } finally {
-            queuedJobs.updateAndGet(v -> Math.max(0, v - 1));
+            governor.release();
             maybeNotifyStatus(null, null);
         }
     }
@@ -846,13 +919,22 @@ public class ApiController {
             @RequestParam(value = "sizey", required = false, defaultValue = "512") int sizey,
             @RequestParam(value = "test", required = false, defaultValue = "GEMM") String test,
             @RequestParam(value = "iterations", required = false, defaultValue = "5") int iterations) {
-        queuedJobs.incrementAndGet();
+        // admission control
+        String clientIp = null;
+        try { clientIp = org.springframework.web.context.request.RequestContextHolder.currentRequestAttributes().getSessionId(); } catch (Throwable ignored) {}
+        if (!ipRateLimiter.allowRequest(clientIp)) {
+            return ResponseEntity.status(429).body(Map.of("error", "rate limit exceeded"));
+        }
+        if (!governor.tryAcquire()) {
+            return ResponseEntity.status(429).body(Map.of("error", "server busy - try again later"));
+        }
         maybeNotifyStatus(null, Map.of("state", "online"));
         try {
             // Only 512x512 GEMM is supported by the existing runner implementation.
             if (sizex == 512 && sizey == 512 && (test == null || test.equalsIgnoreCase("GEMM"))) {
                 // Run a dedicated GEMM throughput benchmark instead of the full decomposition runner
-                Map<String, Object> result = benchmarkService.runGemm(512, iterations);
+                int threadsPerJob = governor.computeThreadsPerJob();
+                Map<String, Object> result = benchmarkService.runGemm(512, iterations, threadsPerJob);
                 Object cpuObj = result.get("cpu");
                 if (cpuObj instanceof Map<?, ?> cpuMap) {
                     @SuppressWarnings("unchecked")
@@ -873,8 +955,7 @@ public class ApiController {
             maybeNotifyStatus(null, Map.of("state", "degraded"));
             return ResponseEntity.status(500).body(Map.of("error", "diagnostic benchmark failed", "details", ex.getMessage()));
         } finally {
-            int qDec = queuedJobs.updateAndGet(v -> Math.max(0, v - 1));
-            try { System.out.printf("[QUEUE] decrement at benchmarkDiagnostic -> %d (%s)%n", qDec, Thread.currentThread().getName()); } catch (Throwable ignore) {}
+            governor.release();
             maybeNotifyStatus(null, null);
         }
     }

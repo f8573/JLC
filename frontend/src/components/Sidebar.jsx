@@ -27,10 +27,10 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
   const [barWidthPercent, setBarWidthPercent] = useState(45)
   const [barColorClass, setBarColorClass] = useState('bg-primary')
   const [showInfoModal, setShowInfoModal] = useState(false)
-  const initialBenchmarkDone = useRef(false)
-  const benchmarkIntervalRef = useRef(null)
+  // Do not auto-run benchmarks on mount or on interval; manual only.
   const esRef = useRef(null)
   const reconnectAttemptsRef = useRef(0)
+  const previousQueuedRef = useRef(0)
 
   useEffect(() => {
     function load() {
@@ -56,14 +56,10 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
       const res = await fetch('/api/status')
       if (!res.ok) throw new Error('no-status')
       const json = await res.json()
-      setDiagnostics(json)
-      // If CPU is online and we haven't run initial benchmark, run it
+      // reconcile pending-job markers with authoritative server queuedJobs
+      reconcilePendingJobs(json)
+      // If CPU is online, do not auto-run benchmarks here; manual only
       const cpuOnline = json && json.cpu && String(json.cpu.state).toLowerCase() === 'online'
-      if (cpuOnline && !initialBenchmarkDone.current) {
-        initialBenchmarkDone.current = true
-        // run initial benchmark but account it as queued job
-        runSystemBenchmark()
-      }
     } catch (e) {
       setDiagnostics({ status: 'SERVICE_INTERRUPTION', cpu: { name: 'CPU', gflops: null, state: 'offline', queuedJobs: 0 } })
     } finally {
@@ -89,13 +85,11 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
         es.addEventListener('status', (ev) => {
           try {
             const data = JSON.parse(ev.data)
-            setDiagnostics(data)
+            // reconcile pending-job markers with authoritative server queuedJobs
+            reconcilePendingJobs(data)
             // start initial benchmark if CPU becomes online via SSE
+            // Do not auto-run benchmarks on SSE status events; manual only
             const cpuOnline = data && data.cpu && String(data.cpu.state).toLowerCase() === 'online'
-            if (cpuOnline && !initialBenchmarkDone.current) {
-              initialBenchmarkDone.current = true
-              runSystemBenchmark()
-            }
           } catch (e) {
             // ignore malformed events
           }
@@ -132,6 +126,30 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
     try { console.debug('[Sidebar] diagnostics updated', diagnostics) } catch (e) {}
   }, [diagnostics])
 
+  // Reconcile client pending-job markers with authoritative server queuedJobs
+  function reconcilePendingJobs(serverDiagnostics) {
+    try {
+      const serverQueued = serverDiagnostics && serverDiagnostics.cpu && Number.isFinite(Number(serverDiagnostics.cpu.queuedJobs))
+        ? Number(serverDiagnostics.cpu.queuedJobs)
+        : 0
+      // If server reports ONLINE or queuedJobs decreased to zero, clear local pending-job marker
+      const prev = Number(previousQueuedRef.current) || 0
+      const serverStatus = serverDiagnostics && serverDiagnostics.status ? String(serverDiagnostics.status).toUpperCase() : null
+      if (serverStatus === 'ONLINE' || serverQueued === 0 || serverQueued < prev) {
+        try {
+          if (window && window.__myPendingJob) {
+            window.__myPendingJob = null
+            console.debug('[Sidebar] cleared local pending-job marker due to server status/queued change', { prev, serverQueued, serverStatus })
+          }
+        } catch (e) {}
+      }
+      previousQueuedRef.current = serverQueued
+      setDiagnostics(serverDiagnostics)
+    } catch (e) {
+      setDiagnostics(serverDiagnostics)
+    }
+  }
+
   // Fallback polling: if SSE misses an event (browser/network), poll status periodically.
   useEffect(() => {
     const id = setInterval(() => {
@@ -140,18 +158,7 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
     return () => clearInterval(id)
   }, [])
 
-  // schedule periodic benchmarks every 5 minutes
-  useEffect(() => {
-    // runSystemBenchmark is stable within this component scope
-    // schedule interval
-    benchmarkIntervalRef.current = setInterval(() => {
-      // don't start a new one if one is running
-      if (!benchmarkRunning) runSystemBenchmark()
-    }, 5 * 60 * 1000)
-    return () => {
-      if (benchmarkIntervalRef.current) clearInterval(benchmarkIntervalRef.current)
-    }
-  }, [benchmarkRunning])
+  // Benchmarks are triggered only by user action (manual button). No auto-interval.
 
   const cpuState = diagnostics && diagnostics.cpu && diagnostics.cpu.state ? String(diagnostics.cpu.state).toLowerCase() : null
   const queuedJobs = diagnostics && diagnostics.cpu && Number.isFinite(Number(diagnostics.cpu.queuedJobs))
@@ -424,6 +431,10 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
       console.groupEnd()
       setBenchmarkRunning(false)
       setBenchmarkProgress((prev) => ({ ...prev, phase: '' }))
+      try {
+        // Immediately refresh authoritative status so UI removes finished jobs promptly
+        fetchDiagnostics().catch(() => {})
+      } catch (e) {}
     }
   }
 
