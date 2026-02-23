@@ -18,6 +18,10 @@ export default defineConfig({
     port: 5173,
     allowedHosts: ['lambdacompute.org'],
     fs: {
+      // Relax strict filesystem serving checks so files referenced
+      // by absolute Windows paths (e.g. C:\...) under the project
+      // can be served during local development.
+      strict: false,
       allow: [path.resolve(__dirname), path.resolve(__dirname, '..')]
     },
     proxy: {
