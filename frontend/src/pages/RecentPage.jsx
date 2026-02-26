@@ -12,7 +12,7 @@ export default function RecentPage() {
 
   const loadRecent = () => {
     try {
-      const raw = localStorage.getItem('recentSessions')
+      const raw = sessionStorage.getItem('recentSessions')
       const arr = raw ? JSON.parse(raw) : []
       setRecent(arr)
     } catch (e) {

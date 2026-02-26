@@ -84,12 +84,16 @@ If you only want a targeted API smoke test:
 - `GET /api/diagnostics?matrix=...`
 - `GET /api/diagnostics/stream` (SSE)
 - `GET /api/benchmark/diagnostic`
+- `POST /api/benchmark/diagnostic`
 - `GET /api/benchmark/diagnostic512`
 - `POST /api/contact`
 
 ## Notes
 
-- Contact form delivery uses `DISCORD_WEBHOOK_URL` from environment variables.
+- Contact form delivery uses backend-only `DISCORD_WEBHOOK_URL` from environment variables.
+- Do not place webhook secrets in `VITE_*` variables.
+- In production, set `APP_SECURITY_HEAVY_ENDPOINT_TOKEN` (backend) and `VITE_HEAVY_ENDPOINT_TOKEN` (frontend) for heavy API routes.
+- Debug Schur endpoint is disabled by default (`app.debug.endpoints.enabled=false`).
 - Large matrices are intentionally limited for synchronous full diagnostics in the API.
 
 ## License

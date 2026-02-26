@@ -43,7 +43,7 @@ export function SettingsProvider({ children }) {
 
   // Clear all search history (recent sessions)
   const clearSearchHistory = useCallback(() => {
-    localStorage.removeItem('recentSessions')
+    sessionStorage.removeItem('recentSessions')
     // Dispatch event to notify components that history was cleared
     window.dispatchEvent(new CustomEvent('history-cleared'))
   }, [])
@@ -51,7 +51,7 @@ export function SettingsProvider({ children }) {
   // Export all matrices from history as JSON
   const exportAllMatrices = useCallback(() => {
     try {
-      const raw = localStorage.getItem('recentSessions')
+      const raw = sessionStorage.getItem('recentSessions')
       const sessions = raw ? JSON.parse(raw) : []
       
       // Extract unique matrices by their title (matrix string)

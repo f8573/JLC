@@ -1,5 +1,5 @@
 <#
-Loads `frontend/.env`, sets `DISCORD_WEBHOOK_URL` from `VITE_DISCORD_WEBHOOK` (or other keys),
+Loads `frontend/.env`, sets `DISCORD_WEBHOOK_URL` from backend-only keys,
 and runs `gradlew.bat bootRun` in the repo root. Intended for local Windows dev only.
 
 Usage:
@@ -24,6 +24,7 @@ try {
     }
 
     $found = $false
+    $foundViteKey = $false
     Get-Content $EnvFile | ForEach-Object {
         $line = $_.Trim()
         if ($line.Length -eq 0 -or $line.StartsWith('#')) { return }
@@ -31,7 +32,11 @@ try {
             $key = $matches[1].Trim()
             $val = $matches[2].Trim()
             if ($val.StartsWith('"') -and $val.EndsWith('"')) { $val = $val.Substring(1,$val.Length-2) }
-            if ($key -in @('VITE_DISCORD_WEBHOOK','DISCORD_WEBHOOK_URL','DISCORD_WEBHOOK')) {
+            if ($key -eq 'VITE_DISCORD_WEBHOOK') {
+                $foundViteKey = $true
+                return
+            }
+            if ($key -in @('DISCORD_WEBHOOK_URL','DISCORD_WEBHOOK')) {
                 $env:DISCORD_WEBHOOK_URL = $val
                 Write-Host "Set DISCORD_WEBHOOK_URL from $key"
                 $found = $true
@@ -39,8 +44,12 @@ try {
         }
     }
 
+    if ($foundViteKey) {
+        Write-Warning "VITE_DISCORD_WEBHOOK was found in $EnvFile. Move secrets to DISCORD_WEBHOOK_URL (backend-only)."
+    }
+
     if (-not $found) {
-        Write-Warning "No Discord webhook key found in $EnvFile. Set VITE_DISCORD_WEBHOOK or DISCORD_WEBHOOK_URL."
+        Write-Warning "No backend Discord webhook key found in $EnvFile. Set DISCORD_WEBHOOK_URL."
         exit 1
     }
 

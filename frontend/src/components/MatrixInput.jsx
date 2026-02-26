@@ -25,11 +25,11 @@ export default function MatrixInput() {
     // store recent session (limit 10)
     try {
       const key = 'recentSessions'
-      const raw = localStorage.getItem(key)
+      const raw = sessionStorage.getItem(key)
       const arr = raw ? JSON.parse(raw) : []
       arr.unshift({ title: matrixString, ts: Date.now() })
       const sliced = arr.slice(0, 10)
-      localStorage.setItem(key, JSON.stringify(sliced))
+      sessionStorage.setItem(key, JSON.stringify(sliced))
     } catch (e) {
       // ignore
     }
@@ -100,7 +100,7 @@ export default function MatrixInput() {
 
     try {
       const key = 'favorites'
-      const raw = localStorage.getItem(key)
+      const raw = sessionStorage.getItem(key)
       const arr = raw ? JSON.parse(raw) : []
       const existing = arr.findIndex(item => item.matrixString === matrixString)
       const entry = { name, matrixString, rows: r, cols: c, density, type, ts: Date.now() }
@@ -115,7 +115,7 @@ export default function MatrixInput() {
       for (const it of arr) {
         if (!deduped.find(d => d.matrixString === it.matrixString)) deduped.push(it)
       }
-      localStorage.setItem(key, JSON.stringify(deduped))
+      sessionStorage.setItem(key, JSON.stringify(deduped))
       setSavedMessage('Saved to favorites')
       setTimeout(() => setSavedMessage(''), 2500)
     } catch (e) {

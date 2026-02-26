@@ -3,3 +3,5 @@
 build
 frontend/node*
 .env
+frontend/.env
+frontend/.env.*

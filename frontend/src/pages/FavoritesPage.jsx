@@ -32,7 +32,7 @@ export default function FavoritesPage() {
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem('favorites')
+      const raw = sessionStorage.getItem('favorites')
       const arr = raw ? JSON.parse(raw) : []
       setFavorites(arr)
     } catch (e) {
@@ -41,7 +41,7 @@ export default function FavoritesPage() {
   }, [])
 
   function persist(arr) {
-    localStorage.setItem('favorites', JSON.stringify(arr))
+    sessionStorage.setItem('favorites', JSON.stringify(arr))
     setFavorites(arr)
   }
 

@@ -29,7 +29,7 @@ export default function HistoryPage() {
 
   const loadHistory = () => {
     try {
-      const raw = localStorage.getItem('recentSessions')
+      const raw = sessionStorage.getItem('recentSessions')
       const arr = raw ? JSON.parse(raw) : []
       // Sort by timestamp descending (most recent first)
       arr.sort((a, b) => (b.ts || 0) - (a.ts || 0))

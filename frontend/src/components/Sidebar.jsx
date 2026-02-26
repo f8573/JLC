@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react'
+import { withHeavyAuthHeaders } from '../utils/apiHeaders'
 
 /**
  * Unified navigation sidebar across all pages.
@@ -33,7 +34,7 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
   useEffect(() => {
     function load() {
       try {
-        const raw = localStorage.getItem('recentSessions')
+        const raw = sessionStorage.getItem('recentSessions')
         const arr = raw ? JSON.parse(raw) : []
         setSessions(arr.slice(0, 5)) // Show only 5 recent sessions in sidebar
       } catch (e) {
@@ -315,8 +316,17 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
     try {
       // mark as queued locally so diagnostics reflect queue impact
       setDiagnostics((prev) => ({ ...(prev || {}), cpu: { ...(prev?.cpu || {}), queuedJobs: (Number(prev?.cpu?.queuedJobs) || 0) + 1 } }))
-      setBenchmarkProgress((prev) => ({ ...prev, phase: `calling /api/benchmark/diagnostic?sizex=${BENCHMARK_SIZES[0]}&sizey=${BENCHMARK_SIZES[0]}&test=${BENCHMARK_TEST}` }))
-      const res = await fetch(`/api/benchmark/diagnostic?sizex=${BENCHMARK_SIZES[0]}&sizey=${BENCHMARK_SIZES[0]}&test=${encodeURIComponent(BENCHMARK_TEST)}&iterations=${BENCHMARK_ITERATIONS}`)
+      setBenchmarkProgress((prev) => ({ ...prev, phase: `calling POST /api/benchmark/diagnostic (${BENCHMARK_TEST} ${BENCHMARK_SIZES[0]}x${BENCHMARK_SIZES[0]})` }))
+      const res = await fetch('/api/benchmark/diagnostic', {
+        method: 'POST',
+        headers: withHeavyAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({
+          sizex: BENCHMARK_SIZES[0],
+          sizey: BENCHMARK_SIZES[0],
+          test: BENCHMARK_TEST,
+          iterations: BENCHMARK_ITERATIONS,
+        }),
+      })
       if (!res.ok) throw new Error('diagnostic-benchmark-failed')
       const json = await res.json()
       const rows = Array.isArray(json?.iterations) ? json.iterations : []

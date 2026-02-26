@@ -26,7 +26,12 @@ export default function Latex({ tex = '', displayMode = false, className = '', s
       .replace(/\u2212/g, '-')  // unicode minus
     try {
       const engine = (typeof katex.renderToString === 'function') ? katex : (katex.default || katex)
-      const rendered = engine.renderToString(normalizedTex, { throwOnError: false, displayMode })
+      const rendered = engine.renderToString(normalizedTex, {
+        throwOnError: false,
+        displayMode,
+        trust: false,
+        strict: 'warn'
+      })
       setHtml(rendered)
     } catch (err) {
       // If rendering fails, keep plain text fallback and log error for debugging

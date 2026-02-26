@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 
 /**
- * Hook to manage favorite matrices stored in localStorage.
+ * Hook to manage favorite matrices stored in sessionStorage.
  *
  * @param {string} matrixString - The matrix identifier
  * @param {Object} diagnostics - The diagnostics data for the matrix
@@ -15,7 +15,7 @@ export function useFavorites(matrixString, diagnostics) {
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem('favorites')
+      const raw = sessionStorage.getItem('favorites')
       const arr = raw ? JSON.parse(raw) : []
       const found = arr.find(f => f.matrixString === matrixString)
       setIsFavorited(!!found)
@@ -41,7 +41,7 @@ export function useFavorites(matrixString, diagnostics) {
       else if (diag?.symmetric) type = 'symmetric'
       else if (diag?.hessenberg) type = 'hessenberg'
       const key = 'favorites'
-      const raw = localStorage.getItem(key)
+      const raw = sessionStorage.getItem(key)
       const arr = raw ? JSON.parse(raw) : []
       const existing = arr.findIndex(item => item.matrixString === matrixString)
       const entry = { name, matrixString, rows: r, cols: c, density, type, ts: Date.now() }
@@ -55,7 +55,7 @@ export function useFavorites(matrixString, diagnostics) {
       for (const it of arr) {
         if (!deduped.find(d => d.matrixString === it.matrixString)) deduped.push(it)
       }
-      localStorage.setItem(key, JSON.stringify(deduped))
+      sessionStorage.setItem(key, JSON.stringify(deduped))
       setSavedMessage('Saved to favorites')
       setTimeout(() => setSavedMessage(''), 2500)
       setIsFavorited(true)
@@ -69,12 +69,12 @@ export function useFavorites(matrixString, diagnostics) {
   const removeFavorite = useCallback(() => {
     try {
       const key = 'favorites'
-      const raw = localStorage.getItem(key)
+      const raw = sessionStorage.getItem(key)
       const arr = raw ? JSON.parse(raw) : []
       const idx = arr.findIndex(f => f.matrixString === matrixString)
       if (idx >= 0) {
         arr.splice(idx, 1)
-        localStorage.setItem(key, JSON.stringify(arr))
+        sessionStorage.setItem(key, JSON.stringify(arr))
       }
     } catch {
       // ignore

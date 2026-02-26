@@ -1,4 +1,6 @@
-﻿/**
+import { withHeavyAuthHeaders } from './apiHeaders'
+
+/**
  * Parse a serialized matrix string into a 2D array.
  *
  * @param {string} matrixString
@@ -14,6 +16,8 @@ export function parseMatrixString(matrixString) {
     return null
   }
 }
+
+
 
 /**
  * Convert grid string values into numeric matrix data.
@@ -50,43 +54,33 @@ function cacheKey(matrixString) {
   return `diagnostics:${encodeURIComponent(matrixString)}`
 }
 
+// In-memory cache only (intentionally not persisted to web storage).
+const diagnosticsCache = new Map()
+
 /**
- * Load cached diagnostics from session storage.
+ * Load cached diagnostics from in-memory cache.
  *
  * @param {string} matrixString
  * @returns {any | null}
  */
 export function loadCachedDiagnostics(matrixString) {
   if (!matrixString) return null
-  try {
-    const raw = sessionStorage.getItem(cacheKey(matrixString))
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    return parsed?.data ?? null
-  } catch {
-    return null
-  }
+  const entry = diagnosticsCache.get(cacheKey(matrixString))
+  return entry?.data ?? null
 }
 
 /**
- * Persist diagnostics to session storage.
+ * Persist diagnostics to in-memory cache.
  *
  * @param {string} matrixString
  * @param {any} diagnostics
  */
 function cacheDiagnostics(matrixString, diagnostics) {
   if (!matrixString || !diagnostics) return
-  try {
-    sessionStorage.setItem(
-      cacheKey(matrixString),
-      JSON.stringify({
-        ts: Date.now(),
-        data: diagnostics
-      })
-    )
-  } catch {
-    // ignore cache failures
-  }
+  diagnosticsCache.set(cacheKey(matrixString), {
+    ts: Date.now(),
+    data: diagnostics
+  })
 }
 
 /**
@@ -115,7 +109,7 @@ async function fetchDiagnostics(matrixData) {
 
   const response = await fetch('/api/diagnostics', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withHeavyAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ matrix: matrixData })
   })
 
@@ -469,15 +463,15 @@ function classifySpectrum(eigenvalues, tol = 1e-8) {
 
   let location = 'Mixed/General (across half-planes)'
   if (allImagAxis) {
-    location = 'Imaginary Axis (Re λ = 0)'
+    location = 'Imaginary Axis (Re ? = 0)'
   } else if (allRealNeg) {
     location = 'Left Half-Plane (Hurwitz)'
   } else if (allRealPos) {
     location = 'Right Half-Plane'
   } else if (allRealNonPos) {
-    location = 'Closed Left Half-Plane (Re λ ≤ 0)'
+    location = 'Closed Left Half-Plane (Re ? = 0)'
   } else if (allRealNonNeg) {
-    location = 'Closed Right Half-Plane (Re λ ≥ 0)'
+    location = 'Closed Right Half-Plane (Re ? = 0)'
   } else if (allReal) {
     location = 'Real Axis (mixed sign)'
   }
@@ -486,7 +480,7 @@ function classifySpectrum(eigenvalues, tol = 1e-8) {
   if (allRealNeg) {
     odeStability = 'Asymptotically Stable (Hurwitz)'
   } else if (!anyRealPos && allRealNonPos) {
-    odeStability = 'Marginal (Re λ ≤ 0)'
+    odeStability = 'Marginal (Re ? = 0)'
   }
 
   const allInside = mags.every(m => m < 1 - tol)
