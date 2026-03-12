@@ -8,8 +8,6 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
-import net.faulj.matrix.Matrix;
-import net.faulj.matrix.MatrixUtils;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -156,11 +154,7 @@ public class ContactController {
 
         Object matrix = payload.get("matrixContext");
         if (matrix != null) {
-            if (matrix instanceof Matrix) {
-                sb.append("Matrix: ").append(MatrixUtils.matrixSummary((Matrix) matrix, 6, 6)).append('\n');
-            } else {
-                sb.append("Matrix: ").append(matrix.toString()).append('\n');
-            }
+            sb.append("Matrix:\n```").append(matrix.toString()).append("```\n");
         }
 
         Object details = payload.get("details");

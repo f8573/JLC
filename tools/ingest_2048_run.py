@@ -4,7 +4,7 @@ import csv
 import shutil
 import datetime
 import argparse
-import pandas as pd
+# avoid heavy third-party deps during ingestion; use stdlib csv for small edits
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 BUILD_REPORTS = os.path.join(REPO_ROOT, 'build', 'reports')
@@ -39,16 +39,21 @@ def read_portable_csv(roofline_dir):
     path = os.path.join(roofline_dir, 'portable_efficiency_results.csv')
     if not os.path.exists(path):
         raise FileNotFoundError(path)
-    return pd.read_csv(path), path
+    with open(path, newline='', encoding='utf8') as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+    return rows, path
 
 
-def find_gemm_row_for_n(df, n):
-    # match kernel GEMM and m==n==k==n
-    mask = (df['kernel'] == 'GEMM') & (df['m'] == n) & (df['n'] == n) & (df['k'] == n)
-    found = df.loc[mask]
-    if found.shape[0] == 0:
-        return None
-    return found.iloc[0]
+def find_gemm_row_for_n(rows, n):
+    # match kernel GEMM and m==n==k==n (rows are dicts from csv.DictReader)
+    for r in rows:
+        try:
+            if r.get('kernel') == 'GEMM' and int(float(r.get('m', 0))) == n and int(float(r.get('n', 0))) == n and int(float(r.get('k', 0))) == n:
+                return r
+        except Exception:
+            continue
+    return None
 
 
 def replace_proxy_row_in_csvs(new_row, source_archive_path, commit_message=None):
@@ -56,40 +61,55 @@ def replace_proxy_row_in_csvs(new_row, source_archive_path, commit_message=None)
     for path in CONSOLIDATED_PATHS:
         if not os.path.exists(path):
             continue
-        df = pd.read_csv(path)
-        # find proxy 2048 row
-        mask = (df['kernel'] == 'GEMM') & (df['n'] == 2048) & (df.get('proxy', False) == True)
-        # Some proxy rows mark proxy as 'true' string; try alternative
-        if mask.sum() == 0:
-            # try string match in source_identifier
-            mask = (df['kernel'] == 'GEMM') & (df['n'] == 2048) & df['source_identifier'].astype(str).str.contains('PROXY')
-        if mask.sum() == 0:
-            # nothing to replace; append
-            append = True
-        else:
-            append = False
-            df = df.loc[~mask]
-        # build new consolidated row fields matching existing header
+        # read existing CSV
+        with open(path, newline='', encoding='utf8') as f:
+            reader = list(csv.DictReader(f))
+        # find proxy 2048 row(s)
+        new_rows = []
+        removed = False
+        for r in reader:
+            try:
+                if r.get('kernel') == 'GEMM' and int(float(r.get('n', 0))) == 2048 and (str(r.get('proxy', '')).lower() == 'true' or 'PROXY' in str(r.get('source_identifier', ''))):
+                    removed = True
+                    continue
+            except Exception:
+                pass
+            new_rows.append(r)
+
+        # build new consolidated row fields matching existing header order
         new_entry = {
             'kernel': 'GEMM',
-            'm': int(new_row['m']),
-            'n': int(new_row['n']),
-            'k': int(new_row['k']),
-            'measured_gflops_mean': float(new_row.get('measured_gflops', new_row.get('measured_gflops_mean', 0.0))),
-            'compute_roof_gflops': float(new_row.get('compute_roof_gflops', new_row.get('compute_roof_gflops', 0.0))),
-            'effective_roof_gflops': float(new_row.get('roof_gflops', new_row.get('effective_roof_gflops', 0.0))),
-            'PES': float(new_row.get('portable_efficiency_score', 0.0)),
+            'm': str(int(float(new_row.get('m', new_row.get('n', 2048))))),
+            'n': str(int(float(new_row.get('n', 2048)))),
+            'k': str(int(float(new_row.get('k', new_row.get('n', 2048))))),
+            'measured_gflops_mean': f"{float(new_row.get('measured_gflops', new_row.get('measured_gflops_mean', 0.0))):.4g}",
+            'compute_roof_gflops': f"{float(new_row.get('compute_roof_gflops', new_row.get('compute_roof_gflops', 0.0))):.4g}",
+            'effective_roof_gflops': f"{float(new_row.get('roof_gflops', new_row.get('effective_roof_gflops', 0.0))):.4g}",
+            'PES': f"{float(new_row.get('portable_efficiency_score', 0.0)):.4g}",
             'bound_type': new_row.get('bound_type', ''),
             'memory_level': new_row.get('memory_level', ''),
-            'source_file': os.path.relpath(source_archive_path, REPO_ROOT),
-            'source_identifier': f"case=GEMM;n={int(new_row['n'])}",
-            'proxy': False
+            'source_file': os.path.relpath(source_archive_path, REPO_ROOT).replace('\\', '/'),
+            'source_identifier': f"case=GEMM;n={int(float(new_row.get('n', 2048)))}",
+            'proxy': 'false'
         }
-        # enforce numeric formatting to 4 significant digits when writing later
-        # insert
-        df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
+
+        new_rows.append(new_entry)
+
+        # determine fieldnames: preserve existing columns if possible, else use this order
+        if reader:
+            fieldnames = list(reader[0].keys())
+            for k in new_entry.keys():
+                if k not in fieldnames:
+                    fieldnames.append(k)
+        else:
+            fieldnames = list(new_entry.keys())
+
         # write back
-        df.to_csv(path, index=False)
+        with open(path, 'w', newline='', encoding='utf8') as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for r in new_rows:
+                writer.writerow(r)
         updated_files.append(path)
     return updated_files
 
@@ -169,9 +189,12 @@ def main(argv):
     updated = replace_proxy_row_in_csvs(row, archive)
     print('Updated consolidated files:', updated)
 
-    # regenerate plots
-    run_plots()
-    print('Regenerated plots')
+    # regenerate plots (best-effort)
+    try:
+        run_plots()
+        print('Regenerated plots')
+    except Exception as e:
+        print('Plot generation skipped or failed:', e, file=sys.stderr)
 
     md = update_report_md(archive, row)
     if md:
@@ -180,8 +203,25 @@ def main(argv):
     if args.commit:
         # commit changes with requested message
         msg = 'Add explicit square 2048 GEMM measurement and update consolidated PES/plots'
-        os.system(f'git add {" ".join(["build/reports/gemm_pes_consolidated.csv","consolidated_gemm_pes.csv","build/reports/roofline_*\/plots/roofline.png","build/reports/roofline_*\/plots/pes_vs_size.png","REPORT_GEMM_PES.md"]) }')
-        os.system(f'git commit -m "{msg}"')
+        files = [
+            'build/reports/gemm_pes_consolidated.csv',
+            'consolidated_gemm_pes.csv',
+            'REPORT_GEMM_PES.md'
+        ]
+        # include any plot files under roofline_* archives
+        import glob
+        plot_paths = glob.glob(os.path.join(BUILD_REPORTS, 'roofline_*', 'plots', 'roofline.png'))
+        plot_paths += glob.glob(os.path.join(BUILD_REPORTS, 'roofline_*', 'plots', 'pes_vs_size.png'))
+        for p in plot_paths:
+            files.append(os.path.relpath(p, REPO_ROOT).replace('\\', '/'))
+
+        add_cmd = 'git add ' + ' '.join(f'"{f}"' for f in files)
+        rc = os.system(add_cmd)
+        if rc != 0:
+            print('git add failed', file=sys.stderr)
+        rc2 = os.system(f'git commit -m "{msg}"')
+        if rc2 != 0:
+            print('git commit failed', file=sys.stderr)
         # print short commit id
         os.system('git rev-parse --short HEAD')
 

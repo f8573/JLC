@@ -82,6 +82,27 @@ public class PortableEfficiencyBenchmarkTest {
         printSummary(roofline, results, maxima);
     }
 
+    @Test
+    public void runSingleGemm2048() throws IOException {
+        RooflineSession baseRoofline = RooflineSession.get();
+        List<PesResult> results = new ArrayList<>();
+
+        List<PesResult> gemmRaw = new ArrayList<>();
+        List<Integer> gemmSizes = new ArrayList<>();
+        sweepKernel("GEMM", new int[]{2048}, 2048, baseRoofline, PortableEfficiencyBenchmarkTest::runGemm, gemmRaw, gemmSizes);
+
+        double effectiveComputeRoof = deriveEffectiveComputeRoof(gemmRaw);
+        RooflineSession roofline = baseRoofline.withComputeRoof(effectiveComputeRoof, "gemm_single_2048");
+
+        List<PesResult> gemmRescored = rescoreResults(gemmRaw, roofline);
+        results.addAll(gemmRescored);
+
+        Files.createDirectories(OUTPUT_DIR);
+        writeCsv(results);
+        writeJson(roofline, results, new ArrayList<>());
+        printSummary(roofline, results, new ArrayList<>());
+    }
+
     private static PesResult runGemm(int n, RooflineSession roofline) {
         Matrix a = randomSquareMatrix(n, 1001L);
         Matrix b = randomSquareMatrix(n, 1002L);
