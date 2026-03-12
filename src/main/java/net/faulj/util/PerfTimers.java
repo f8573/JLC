@@ -13,28 +13,39 @@ import java.util.concurrent.atomic.LongAdder;
  * to build/reports/caqr_timers.csv on JVM shutdown.
  */
 public final class PerfTimers {
+    private static final String PROP_ENABLED = "faulj.perfTimers.enabled";
+    private static final String ENV_ENABLED = "FAULJ_PERF_TIMERS_ENABLED";
     private static final Map<String, LongAdder> COUNTS = new ConcurrentHashMap<>();
     private static final Map<String, LongAdder> NANOS = new ConcurrentHashMap<>();
+    private static final boolean ENABLED = readEnabled();
 
     static {
-        // Dump on exit
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            try {
-                dump(new File("build/reports/caqr_timers.csv"));
-            } catch (IOException e) {
-                // best-effort
-                e.printStackTrace();
-            }
-        }));
+        if (ENABLED) {
+            // Dump on exit
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                try {
+                    dump(new File("build/reports/caqr_timers.csv"));
+                } catch (IOException e) {
+                    // best-effort
+                    e.printStackTrace();
+                }
+            }));
+        }
     }
 
     private PerfTimers() {}
 
     public static long start() {
+        if (!ENABLED) {
+            return 0L;
+        }
         return System.nanoTime();
     }
 
     public static void record(String tag, long startNanos) {
+        if (!ENABLED || startNanos == 0L) {
+            return;
+        }
         long delta = System.nanoTime() - startNanos;
         NANOS.computeIfAbsent(tag, k -> new LongAdder()).add(delta);
         COUNTS.computeIfAbsent(tag, k -> new LongAdder()).increment();
@@ -54,5 +65,25 @@ public final class PerfTimers {
                 fw.write(tag + "," + inv + "," + total + "," + avg + "\n");
             }
         }
+    }
+
+    public static boolean isEnabled() {
+        return ENABLED;
+    }
+
+    private static boolean readEnabled() {
+        String raw = System.getProperty(PROP_ENABLED);
+        if (raw == null || raw.isBlank()) {
+            raw = System.getenv(ENV_ENABLED);
+        }
+        if (raw == null || raw.isBlank()) {
+            return false;
+        }
+        String value = raw.trim().toLowerCase();
+        return "1".equals(value)
+            || "true".equals(value)
+            || "yes".equals(value)
+            || "on".equals(value)
+            || "y".equals(value);
     }
 }

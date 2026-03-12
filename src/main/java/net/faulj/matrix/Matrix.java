@@ -3,8 +3,8 @@ package net.faulj.matrix;
 import java.util.Arrays;
 import java.util.Set;
 
-import net.faulj.compute.BlockedMultiply;
 import net.faulj.core.Tolerance;
+import net.faulj.kernels.gemm.Gemm;
 import net.faulj.scalar.Complex;
 import net.faulj.vector.Vector;
 import net.faulj.spaces.SubspaceBasis;
@@ -1223,7 +1223,7 @@ public class Matrix {
      * @return product matrix
      */
     public Matrix multiply(Matrix other) {
-        return BlockedMultiply.multiply(this, other);
+        return Gemm.multiply(this, other);
     }
 
     /**

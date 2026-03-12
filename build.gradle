@@ -196,6 +196,23 @@ tasks.register('runGemmTest', JavaExec) {
     standardInput = System.in
 }
 
+tasks.register('runGemm512Benchmark', JavaExec) {
+    group = 'benchmark'
+    description = 'Run 512x512 GEMM benchmark with warmup and median reporting'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    jvmArgs += [
+        '-Dfaulj.exec.policy=SIMD',
+        '-Dfaulj.simd.enabled=true',
+        '-Dfaulj.parallel.enabled=true',
+        '-Dfaulj.cuda.enabled=false'
+    ]
+    main = 'net.faulj.bench.Gemm512BenchmarkRunner'
+    standardInput = System.in
+}
+
 // Run full autotune pipeline (Phases 1-6)
 tasks.register('runAutotuneDemo', JavaExec) {
     group = 'benchmark'

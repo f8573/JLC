@@ -31,7 +31,6 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @Deprecated(forRemoval = false, since = "1.0")
 public final class OptimizedBLAS3 {
-
     // Shared pool for parallel GEMM - avoids expensive pool creation per call
     private static final AtomicReference<ForkJoinPool> SHARED_POOL = new AtomicReference<>();
 
@@ -104,11 +103,15 @@ public final class OptimizedBLAS3 {
         double[] cd = c.getRawData();
 
         // Dispatch to optimal kernel
+        DispatchPolicy activePolicy = policy == null ? DispatchPolicy.defaultPolicy() : policy;
         GemmWorkspace ws = GemmWorkspace.get();
-        int threads = policy == null ? 1 : policy.getParallelism();
+        int threads = activePolicy.isParallelEnabled() ? activePolicy.getParallelism() : 1;
+        boolean cudaAvailable = activePolicy.isCudaEnabled()
+            && ws.getCudaContext() != null
+            && ws.getCudaContext().isAvailable();
 
         GemmDispatch.Kernel kernel = GemmDispatch.selectKernel(m, n, k,
-            ws.getCudaContext() != null && ws.getCudaContext().isAvailable(), threads);
+            cudaAvailable, threads);
 
         switch (kernel) {
             case TINY:

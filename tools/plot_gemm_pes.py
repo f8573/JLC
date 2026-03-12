@@ -19,10 +19,27 @@ def load_data(repo_root):
     if consolidated is None:
         raise FileNotFoundError('Consolidated CSV not found')
 
-    roofline_path = os.path.join(repo_root, 'build', 'reports', 'roofline_20260311175904', 'portable_efficiency_results.csv')
-    if not os.path.exists(roofline_path):
-        raise FileNotFoundError(roofline_path)
-    roofline = pd.read_csv(roofline_path)
+    # Find the most recent roofline_* archived folder under build/reports
+    reports_dir = os.path.join(repo_root, 'build', 'reports')
+    roofline = None
+    roofline_path = None
+    if os.path.exists(reports_dir):
+        candidates = [d for d in os.listdir(reports_dir) if d.startswith('roofline_')]
+        candidates_sorted = sorted(candidates, reverse=True)
+        for cand in candidates_sorted:
+            p = os.path.join(reports_dir, cand, 'portable_efficiency_results.csv')
+            if os.path.exists(p):
+                roofline_path = p
+                roofline = pd.read_csv(p)
+                break
+    # fallback to unarchived 'roofline' folder
+    if roofline is None:
+        p = os.path.join(repo_root, 'build', 'reports', 'roofline', 'portable_efficiency_results.csv')
+        if os.path.exists(p):
+            roofline_path = p
+            roofline = pd.read_csv(p)
+    if roofline is None:
+        raise FileNotFoundError('portable_efficiency_results.csv not found in build/reports')
 
     gemm_analysis_path = os.path.join(repo_root, 'build', 'reports', 'gemm-analysis-quick-rerun', 'gemm_analysis_runs.csv')
     gemm_analysis = None

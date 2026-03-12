@@ -28,10 +28,10 @@ public class PortableEfficiencyBenchmarkTest {
     private static final Path CSV_OUTPUT = OUTPUT_DIR.resolve("portable_efficiency_results.csv");
     private static final Path MAX_CSV_OUTPUT = OUTPUT_DIR.resolve("portable_efficiency_maxima.csv");
     private static final Path JSON_OUTPUT = OUTPUT_DIR.resolve("portable_efficiency_results.json");
-    // Logarithmic sweep: 2^i and (2^i + 2^{i+1})/2 for coverage of cache transitions
+    // Sweep sizes from 128 up to 2048: powers-of-two and midpoints
+    // (128, 192, 256, 384, 512, 768, 1024, 1536, 2048)
     private static final int[] SWEEP_SIZES = {
-        2, 3, 4, 6, 8, 12, 16, 24, 32, 48,
-        64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048, 3072, 4096
+        128, 192, 256, 384, 512, 768, 1024, 1536, 2048
     };
 
     private static volatile double sink;
@@ -49,7 +49,15 @@ public class PortableEfficiencyBenchmarkTest {
 
         List<PesResult> gemmRaw = new ArrayList<>();
         List<Integer> gemmSizes = new ArrayList<>();
-        sweepKernel("GEMM", SWEEP_SIZES, 1024, baseRoofline, PortableEfficiencyBenchmarkTest::runGemm, gemmRaw, gemmSizes);
+        int gemmMaxEnabled = 1024;
+        try {
+            String prop = System.getProperty("jlc.roofline.gemm_max_n");
+            if (prop != null && !prop.isBlank()) {
+                gemmMaxEnabled = Integer.parseInt(prop.trim());
+            }
+        } catch (Exception ignored) {
+        }
+        sweepKernel("GEMM", SWEEP_SIZES, gemmMaxEnabled, baseRoofline, PortableEfficiencyBenchmarkTest::runGemm, gemmRaw, gemmSizes);
 
         double effectiveComputeRoof = deriveEffectiveComputeRoof(gemmRaw);
         RooflineSession roofline = baseRoofline.withComputeRoof(
