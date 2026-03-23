@@ -1,7 +1,8 @@
 Param(
     [string]$OutputDir = "build/reports/roofline-sweep",
     [int]$GemmAnchorRuns = 8,
-    [int]$GemmAnchorWarmup = 2
+    [int]$GemmAnchorWarmup = 2,
+    [switch]$GemmOnly
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,6 +33,10 @@ $args = @(
     "--no-daemon",
     "--console=plain"
 )
+
+if ($GemmOnly) {
+    $args = @("-Djlc.roofline.gemm_only=true") + $args
+}
 
 Write-Host "Running: .\gradlew.bat $($args -join ' ')"
 Write-Host "Logging to: $log"

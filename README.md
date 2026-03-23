@@ -9,6 +9,7 @@ Live site: https://lambdacompute.org/
 - `src/main/java/net/faulj`: Java core library (matrix/vector types, decompositions, solvers, eigen/spectral routines, condition/accuracy metrics, benchmarking helpers)
 - `src/main/java/net/faulj/kernels/gemm`: first-class GEMM nucleus (canonical GEMM facade, dispatch, microkernel, packing, SIMD adapters)
 - `src/main/java/net/faulj/web`: Spring Boot API layer (`/api/diagnostics`, `/api/status`, `/api/contact`, benchmark/status streams)
+- `JNI_CPP_LIBRARY_PROPOSAL.md`: proposed JNI-loaded C++ compute backend design
 - `frontend`: React + Vite client for matrix input, analysis views, decompositions, spectral reports, favorites/history, and settings
 
 ## Primary use cases

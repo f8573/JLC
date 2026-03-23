@@ -2,14 +2,13 @@ package net.faulj.benchmark.roofline;
 
 import net.faulj.compute.DispatchPolicy;
 import net.faulj.compute.GemmDispatch;
-import net.faulj.kernels.gemm.Gemm;
 import net.faulj.decomposition.hessenberg.HessenbergReduction;
 import net.faulj.decomposition.lu.LUDecomposition;
 import net.faulj.decomposition.qr.HouseholderQR;
 import net.faulj.decomposition.svd.SVDecomposition;
 import net.faulj.eigen.schur.RealSchurDecomposition;
+import net.faulj.kernels.gemm.Gemm;
 import net.faulj.matrix.Matrix;
-import org.junit.Assume;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -21,13 +20,27 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Random;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 public class PortableEfficiencyBenchmarkTest {
-    private static final Path OUTPUT_DIR = Paths.get("build", "reports", "roofline");
-    private static final Path CSV_OUTPUT = OUTPUT_DIR.resolve("portable_efficiency_results.csv");
-    private static final Path MAX_CSV_OUTPUT = OUTPUT_DIR.resolve("portable_efficiency_maxima.csv");
-    private static final Path JSON_OUTPUT = OUTPUT_DIR.resolve("portable_efficiency_results.json");
+    private static final Path DEFAULT_OUTPUT_DIR = Paths.get("build", "reports", "roofline");
+    private static final String OUTPUT_DIR_PROPERTY = "jlc.roofline.outputDir";
+    private static final String OUTPUT_DIR_PROPERTY_ALT = "jlc.roofline.output_dir";
+    private static final String OUTPUT_DIR_ENV = "JLC_ROOFLINE_OUTPUT_DIR";
+
+    private static final String RESULTS_CSV = "portable_efficiency_results.csv";
+    private static final String MAXIMA_CSV = "portable_efficiency_maxima.csv";
+    private static final String RESULTS_JSON = "portable_efficiency_results.json";
+    private static final String GEMM_RUNS_CSV = "portable_efficiency_gemm_runs.csv";
+    private static final String GEMM_BEST_BY_SIZE_CSV = "portable_efficiency_gemm_best_by_size.csv";
+
+    private static final String GEMM_MAX_N_PROPERTY = "jlc.roofline.gemm_max_n";
+    private static final String GEMM_THREADS_PROPERTY = "jlc.roofline.gemm_threads";
+    private static final String GEMM_MR_VALUES_PROPERTY = "jlc.roofline.gemm_mr_values";
+    private static final String GEMM_NR_VALUES_PROPERTY = "jlc.roofline.gemm_nr_values";
+
+    private static final int DEFAULT_GEMM_MAX_N = 2048;
     // Sweep sizes from 128 up to 2048: powers-of-two and midpoints
     // (128, 192, 256, 384, 512, 768, 1024, 1536, 2048)
     private static final int[] SWEEP_SIZES = {
@@ -38,90 +51,134 @@ public class PortableEfficiencyBenchmarkTest {
 
     @Test
     public void runPortableEfficiencyBenchmarks() throws IOException {
-//        Assume.assumeTrue(
-//            "Benchmark mode is disabled. Enable with -D" + BenchmarkMode.MODE_PROPERTY + "=true",
-//            BenchmarkMode.isEnabled()
-//        );
-
-        RooflineSession baseRoofline = RooflineSession.get();
+        BenchmarkOutputs outputs = BenchmarkOutputs.fromSystemProperties();
+        RooflineSession roofline = RooflineSession.get();
         List<PesResult> results = new ArrayList<>();
         List<KernelSweepSummary> maxima = new ArrayList<>();
 
-        List<PesResult> gemmRaw = new ArrayList<>();
-        List<Integer> gemmSizes = new ArrayList<>();
-        int gemmMaxEnabled = 1024;
-        try {
-            String prop = System.getProperty("jlc.roofline.gemm_max_n");
-            if (prop != null && !prop.isBlank()) {
-                gemmMaxEnabled = Integer.parseInt(prop.trim());
-            }
-        } catch (Exception ignored) {
+        GemmSweepArtifacts gemmArtifacts = sweepBestGemmBySize(SWEEP_SIZES, gemmMaxEnabled(), roofline);
+        results.addAll(gemmArtifacts.bestResults);
+        maxima.add(summarizeKernel("GEMM", gemmArtifacts.bestResults, gemmArtifacts.testedSizes));
+
+        if (!gemmOnlyMode()) {
+            maxima.add(sweepKernel("QR", SWEEP_SIZES, 2048, roofline, PortableEfficiencyBenchmarkTest::runQr, results, new ArrayList<>()));
+            maxima.add(sweepKernel("LU", SWEEP_SIZES, 2048, roofline, PortableEfficiencyBenchmarkTest::runLu, results, new ArrayList<>()));
+            maxima.add(sweepKernel("Hessenberg", SWEEP_SIZES, 1024, roofline, PortableEfficiencyBenchmarkTest::runHessenberg, results, new ArrayList<>()));
+            maxima.add(sweepKernel("Schur", SWEEP_SIZES, 512, roofline, PortableEfficiencyBenchmarkTest::runSchur, results, new ArrayList<>()));
+            maxima.add(sweepKernel("SVD", SWEEP_SIZES, 512, roofline, PortableEfficiencyBenchmarkTest::runSvd, results, new ArrayList<>()));
         }
-        sweepKernel("GEMM", SWEEP_SIZES, gemmMaxEnabled, baseRoofline, PortableEfficiencyBenchmarkTest::runGemm, gemmRaw, gemmSizes);
 
-        double effectiveComputeRoof = deriveEffectiveComputeRoof(gemmRaw);
-        RooflineSession roofline = baseRoofline.withComputeRoof(
-            effectiveComputeRoof,
-            "gemm_sweep_max*1.05"
-        );
-
-        List<PesResult> gemmRescored = rescoreResults(gemmRaw, roofline);
-        results.addAll(gemmRescored);
-        maxima.add(summarizeKernel("GEMM", gemmRescored, gemmSizes));
-
-        maxima.add(sweepKernel("QR", SWEEP_SIZES, 2048, roofline, PortableEfficiencyBenchmarkTest::runQr, results, new ArrayList<>()));
-        maxima.add(sweepKernel("LU", SWEEP_SIZES, 2048, roofline, PortableEfficiencyBenchmarkTest::runLu, results, new ArrayList<>()));
-        maxima.add(sweepKernel("Hessenberg", SWEEP_SIZES, 1024, roofline, PortableEfficiencyBenchmarkTest::runHessenberg, results, new ArrayList<>()));
-        maxima.add(sweepKernel("Schur", SWEEP_SIZES, 512, roofline, PortableEfficiencyBenchmarkTest::runSchur, results, new ArrayList<>()));
-        maxima.add(sweepKernel("SVD", SWEEP_SIZES, 512, roofline, PortableEfficiencyBenchmarkTest::runSvd, results, new ArrayList<>()));
-
-        Files.createDirectories(OUTPUT_DIR);
-        writeCsv(results);
-        writeMaxCsv(maxima);
-        writeJson(roofline, results, maxima);
-        printSummary(roofline, results, maxima);
+        Files.createDirectories(outputs.outputDir);
+        writeCsv(outputs.csvOutput, results);
+        writeMaxCsv(outputs.maxCsvOutput, maxima);
+        writeGemmRunsCsv(outputs.gemmRunsCsvOutput, gemmArtifacts.allRuns);
+        writeGemmBestBySizeCsv(outputs.gemmBestBySizeOutput, gemmArtifacts.bestRuns);
+        writeJson(outputs.jsonOutput, roofline, results, maxima, gemmArtifacts);
+        printSummary(outputs, roofline, results, maxima, gemmArtifacts.bestRuns);
     }
 
-    @Test
-    public void runSingleGemm2048() throws IOException {
-        RooflineSession baseRoofline = RooflineSession.get();
-        List<PesResult> results = new ArrayList<>();
+    private static GemmSweepArtifacts sweepBestGemmBySize(int[] sizes, int maxEnabledSize, RooflineSession roofline) {
+        GemmDispatch.BlockSizes defaults = GemmDispatch.computeBlockSizes();
+        GemmBenchmarkConfig config = GemmBenchmarkConfig.fromSystemProperties(defaults);
 
-        List<PesResult> gemmRaw = new ArrayList<>();
-        List<Integer> gemmSizes = new ArrayList<>();
-        sweepKernel("GEMM", new int[]{2048}, 2048, baseRoofline, PortableEfficiencyBenchmarkTest::runGemm, gemmRaw, gemmSizes);
+        List<GemmRunResult> allRuns = new ArrayList<>();
+        List<GemmRunResult> bestRuns = new ArrayList<>();
+        List<PesResult> bestResults = new ArrayList<>();
+        List<Integer> testedSizes = new ArrayList<>();
 
-        double effectiveComputeRoof = deriveEffectiveComputeRoof(gemmRaw);
-        RooflineSession roofline = baseRoofline.withComputeRoof(effectiveComputeRoof, "gemm_single_2048");
+        for (int n : sizes) {
+            if (n > maxEnabledSize) {
+                continue;
+            }
 
-        List<PesResult> gemmRescored = rescoreResults(gemmRaw, roofline);
-        results.addAll(gemmRescored);
+            Matrix a = randomSquareMatrix(n, 1001L + n);
+            Matrix b = randomSquareMatrix(n, 2001L + n);
+            Matrix c = new Matrix(n, n);
 
-        Files.createDirectories(OUTPUT_DIR);
-        writeCsv(results);
-        writeJson(roofline, results, new ArrayList<>());
-        printSummary(roofline, results, new ArrayList<>());
+            GemmRunResult best = null;
+            for (int threads : config.threadCandidates) {
+                for (int mr : config.mrCandidates) {
+                    for (int nr : config.nrCandidates) {
+                        GemmRunResult run = runGemmCandidate(n, a, b, c, threads, mr, nr, roofline);
+                        allRuns.add(run);
+                        if (isBetterGemmRun(run, best)) {
+                            best = run;
+                        }
+                    }
+                }
+            }
+
+            if (best != null) {
+                testedSizes.add(n);
+                bestRuns.add(best);
+                bestResults.add(best.result);
+            }
+        }
+
+        return new GemmSweepArtifacts(config, allRuns, bestRuns, bestResults, testedSizes);
     }
 
-    private static PesResult runGemm(int n, RooflineSession roofline) {
-        Matrix a = randomSquareMatrix(n, 1001L);
-        Matrix b = randomSquareMatrix(n, 1002L);
-        Matrix c = new Matrix(n, n);
-        DispatchPolicy policy = DispatchPolicy.builder()
-            .enableCuda(false)
-            .enableParallel(true)
-            .parallelism(Math.max(1, Runtime.getRuntime().availableProcessors()))
-            .build();
+    private static GemmRunResult runGemmCandidate(int n,
+                                                  Matrix a,
+                                                  Matrix b,
+                                                  Matrix c,
+                                                  int threads,
+                                                  int mr,
+                                                  int nr,
+                                                  RooflineSession roofline) {
+        String oldMr = System.getProperty("la.gemm.mr");
+        String oldNr = System.getProperty("la.gemm.nr");
 
-        double bestSeconds = bestOf(warmupForSize(n), measuredRunsForSize(n), () -> {
-            Gemm.gemm(a, b, c, 1.0, 0.0, policy);
-            sink += c.get(0, 0);
-        });
+        try {
+            System.setProperty("la.gemm.mr", Integer.toString(mr));
+            System.setProperty("la.gemm.nr", Integer.toString(nr));
 
-        // Use BLIS blocking-aware traffic model when the kernel is large enough to block.
-        GemmDispatch.BlockSizes blocks = GemmDispatch.computeBlockSizes();
-        KernelProfile profile = KernelModel.gemm(n, n, n, blocks.mc, blocks.nc, blocks.kc);
-        return PesScorer.score(profile, bestSeconds, roofline);
+            DispatchPolicy policy = DispatchPolicy.builder()
+                .enableCuda(false)
+                .enableParallel(threads > 1)
+                .parallelism(threads)
+                .enableStrassen(false)
+                .build();
+
+            double bestSeconds = bestOf(warmupForSize(n), measuredRunsForSize(n), () -> {
+                Gemm.gemm(a, b, c, 1.0, 0.0, policy);
+                sink += c.get(0, 0);
+            });
+
+            GemmDispatch.BlockSizes blocks = GemmDispatch.computeBlockSizes();
+            KernelProfile profile = KernelModel.gemm(n, n, n, blocks.mc, blocks.nc, blocks.kc);
+            PesResult result = PesScorer.score(profile, bestSeconds, roofline);
+            return new GemmRunResult(result, threads, blocks.mr, blocks.nr, blocks.mc, blocks.nc, blocks.kc);
+        } finally {
+            restoreProperty("la.gemm.mr", oldMr);
+            restoreProperty("la.gemm.nr", oldNr);
+        }
+    }
+
+    private static boolean isBetterGemmRun(GemmRunResult candidate, GemmRunResult incumbent) {
+        if (candidate == null) {
+            return false;
+        }
+        if (incumbent == null) {
+            return true;
+        }
+
+        int cmp = Double.compare(candidate.result.measuredGflops, incumbent.result.measuredGflops);
+        if (cmp != 0) {
+            return cmp > 0;
+        }
+
+        cmp = Double.compare(candidate.result.portableEfficiencyScore, incumbent.result.portableEfficiencyScore);
+        if (cmp != 0) {
+            return cmp > 0;
+        }
+
+        cmp = Double.compare(incumbent.result.elapsedSeconds, candidate.result.elapsedSeconds);
+        if (cmp != 0) {
+            return cmp > 0;
+        }
+
+        return candidate.threads < incumbent.threads;
     }
 
     private static PesResult runQr(int n, RooflineSession roofline) {
@@ -255,40 +312,6 @@ public class PortableEfficiencyBenchmarkTest {
         return new KernelSweepSummary(kernel, bestPes, bestN, tested);
     }
 
-    private static double deriveEffectiveComputeRoof(List<PesResult> gemmResults) {
-        double maxMeasuredGflops = 0.0;
-        for (PesResult result : gemmResults) {
-            if (result.measuredGflops > maxMeasuredGflops) {
-                maxMeasuredGflops = result.measuredGflops;
-            }
-        }
-        return Math.max(1e9, maxMeasuredGflops * 1.05 * 1e9);
-    }
-
-    private static List<PesResult> rescoreResults(List<PesResult> results, RooflineSession roofline) {
-        List<PesResult> rescored = new ArrayList<>(results.size());
-        for (PesResult result : results) {
-            KernelProfile profile = profileFor(result.kernel, result.n);
-            rescored.add(PesScorer.score(profile, result.elapsedSeconds, roofline));
-        }
-        return rescored;
-    }
-
-    private static KernelProfile profileFor(String kernel, int n) {
-        return switch (kernel) {
-            case "GEMM" -> {
-                GemmDispatch.BlockSizes blocks = GemmDispatch.computeBlockSizes();
-                yield KernelModel.gemm(n, n, n, blocks.mc, blocks.nc, blocks.kc);
-            }
-            case "QR" -> KernelModel.qr(n);
-            case "LU" -> KernelModel.lu(n);
-            case "Hessenberg" -> KernelModel.hessenberg(n);
-            case "Schur" -> KernelModel.schur(n);
-            case "SVD" -> KernelModel.svd(n);
-            default -> throw new IllegalArgumentException("Unknown kernel: " + kernel);
-        };
-    }
-
     private static KernelSweepSummary summarizeKernel(String kernel, List<PesResult> results, List<Integer> testedSizes) {
         double bestPes = Double.NEGATIVE_INFINITY;
         int bestN = -1;
@@ -307,7 +330,7 @@ public class PortableEfficiencyBenchmarkTest {
         return new KernelSweepSummary(kernel, bestPes, bestN, testedSizes);
     }
 
-    private static void writeCsv(List<PesResult> results) throws IOException {
+    private static void writeCsv(Path output, List<PesResult> results) throws IOException {
         StringBuilder sb = new StringBuilder();
         sb.append("kernel,m,n,k,arithmetic_intensity,traffic_model,bound_type,memory_level,")
             .append("compute_utilization,memory_utilization,algorithmic_efficiency,")
@@ -341,10 +364,10 @@ public class PortableEfficiencyBenchmarkTest {
                 .append(r.flag)
                 .append('\n');
         }
-        Files.writeString(CSV_OUTPUT, sb.toString(), StandardCharsets.UTF_8);
+        Files.writeString(output, sb.toString(), StandardCharsets.UTF_8);
     }
 
-    private static void writeMaxCsv(List<KernelSweepSummary> maxima) throws IOException {
+    private static void writeMaxCsv(Path output, List<KernelSweepSummary> maxima) throws IOException {
         StringBuilder sb = new StringBuilder();
         sb.append("kernel,pes_max,n_at_pes_max,tested_sizes");
         sb.append('\n');
@@ -356,10 +379,63 @@ public class PortableEfficiencyBenchmarkTest {
                 .append(tested)
                 .append('\n');
         }
-        Files.writeString(MAX_CSV_OUTPUT, sb.toString(), StandardCharsets.UTF_8);
+        Files.writeString(output, sb.toString(), StandardCharsets.UTF_8);
     }
 
-    private static void writeJson(RooflineSession roofline, List<PesResult> results, List<KernelSweepSummary> maxima) throws IOException {
+    private static void writeGemmRunsCsv(Path output, List<GemmRunResult> runs) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("m,n,k,threads,mr,nr,mc,nc,kc,measured_gflops,portable_efficiency_score,")
+            .append("compute_roof_gflops,roof_gflops,bound_type,memory_level,elapsed_seconds,")
+            .append("arithmetic_intensity,traffic_model,confidence,flag");
+        sb.append('\n');
+        for (GemmRunResult run : runs) {
+            appendGemmRunCsvLine(sb, run);
+        }
+        Files.writeString(output, sb.toString(), StandardCharsets.UTF_8);
+    }
+
+    private static void writeGemmBestBySizeCsv(Path output, List<GemmRunResult> bestRuns) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        sb.append("m,n,k,threads,mr,nr,mc,nc,kc,measured_gflops,portable_efficiency_score,")
+            .append("compute_roof_gflops,roof_gflops,bound_type,memory_level,elapsed_seconds,")
+            .append("arithmetic_intensity,traffic_model,confidence,flag");
+        sb.append('\n');
+        for (GemmRunResult run : bestRuns) {
+            appendGemmRunCsvLine(sb, run);
+        }
+        Files.writeString(output, sb.toString(), StandardCharsets.UTF_8);
+    }
+
+    private static void appendGemmRunCsvLine(StringBuilder sb, GemmRunResult run) {
+        PesResult r = run.result;
+        sb.append(r.m).append(',')
+            .append(r.n).append(',')
+            .append(r.k).append(',')
+            .append(run.threads).append(',')
+            .append(run.mr).append(',')
+            .append(run.nr).append(',')
+            .append(run.mc).append(',')
+            .append(run.nc).append(',')
+            .append(run.kc).append(',')
+            .append(format(r.measuredGflops)).append(',')
+            .append(format(r.portableEfficiencyScore)).append(',')
+            .append(format(r.computeRoofGflops)).append(',')
+            .append(format(r.roofGflops)).append(',')
+            .append(r.boundType).append(',')
+            .append(r.memoryLevel).append(',')
+            .append(format(r.elapsedSeconds)).append(',')
+            .append(format(r.arithmeticIntensity)).append(',')
+            .append(r.trafficModel).append(',')
+            .append(r.confidence).append(',')
+            .append(r.flag)
+            .append('\n');
+    }
+
+    private static void writeJson(Path output,
+                                  RooflineSession roofline,
+                                  List<PesResult> results,
+                                  List<KernelSweepSummary> maxima,
+                                  GemmSweepArtifacts gemmArtifacts) throws IOException {
         StringBuilder sb = new StringBuilder();
         sb.append("{\n");
         sb.append("  \"capability_tier\": \"").append(escape(roofline.hardware.tier.name())).append("\",\n");
@@ -392,6 +468,37 @@ public class PortableEfficiencyBenchmarkTest {
         sb.append("  \"memory_roof_source\": \"")
             .append(escape(roofline.memoryRoofSource))
             .append("\",\n");
+        sb.append("  \"gemm_config\": {\n");
+        sb.append("    \"thread_candidates\": [").append(intArrayJson(gemmArtifacts.config.threadCandidates)).append("],\n");
+        sb.append("    \"mr_candidates\": [").append(intArrayJson(gemmArtifacts.config.mrCandidates)).append("],\n");
+        sb.append("    \"nr_candidates\": [").append(intArrayJson(gemmArtifacts.config.nrCandidates)).append("]\n");
+        sb.append("  },\n");
+        sb.append("  \"gemm_best_by_size\": [\n");
+        for (int i = 0; i < gemmArtifacts.bestRuns.size(); i++) {
+            GemmRunResult run = gemmArtifacts.bestRuns.get(i);
+            PesResult r = run.result;
+            sb.append("    {\n");
+            sb.append("      \"m\": ").append(r.m).append(",\n");
+            sb.append("      \"n\": ").append(r.n).append(",\n");
+            sb.append("      \"k\": ").append(r.k).append(",\n");
+            sb.append("      \"threads\": ").append(run.threads).append(",\n");
+            sb.append("      \"mr\": ").append(run.mr).append(",\n");
+            sb.append("      \"nr\": ").append(run.nr).append(",\n");
+            sb.append("      \"mc\": ").append(run.mc).append(",\n");
+            sb.append("      \"nc\": ").append(run.nc).append(",\n");
+            sb.append("      \"kc\": ").append(run.kc).append(",\n");
+            sb.append("      \"measured_gflops\": ").append(format(r.measuredGflops)).append(",\n");
+            sb.append("      \"portable_efficiency_score\": ").append(format(r.portableEfficiencyScore)).append(",\n");
+            sb.append("      \"roof_gflops\": ").append(format(r.roofGflops)).append(",\n");
+            sb.append("      \"bound_type\": \"").append(escape(r.boundType)).append("\",\n");
+            sb.append("      \"memory_level\": \"").append(escape(r.memoryLevel)).append("\"\n");
+            sb.append("    }");
+            if (i < gemmArtifacts.bestRuns.size() - 1) {
+                sb.append(',');
+            }
+            sb.append('\n');
+        }
+        sb.append("  ],\n");
         sb.append("  \"results\": [\n");
         for (int i = 0; i < results.size(); i++) {
             PesResult r = results.get(i);
@@ -440,10 +547,14 @@ public class PortableEfficiencyBenchmarkTest {
         }
         sb.append("  ]\n");
         sb.append("}\n");
-        Files.writeString(JSON_OUTPUT, sb.toString(), StandardCharsets.UTF_8);
+        Files.writeString(output, sb.toString(), StandardCharsets.UTF_8);
     }
 
-    private static void printSummary(RooflineSession roofline, List<PesResult> results, List<KernelSweepSummary> maxima) {
+    private static void printSummary(BenchmarkOutputs outputs,
+                                     RooflineSession roofline,
+                                     List<PesResult> results,
+                                     List<KernelSweepSummary> maxima,
+                                     List<GemmRunResult> gemmBestRuns) {
         System.out.println("=== Portable Efficiency Score (PES) ===");
         System.out.printf(Locale.ROOT, "capability_tier=%s%n", roofline.hardware.tier.description);
         System.out.printf(Locale.ROOT, "hardware=%d cores, %.2f GHz, %d SIMD lanes, FMA=%s, issue_width=%d%n",
@@ -463,6 +574,13 @@ public class PortableEfficiencyBenchmarkTest {
             for (String assumption : roofline.hardware.assumptions) {
                 System.out.println("  - " + assumption);
             }
+        }
+        System.out.println("--- GEMM best-by-size ---");
+        for (GemmRunResult run : gemmBestRuns) {
+            PesResult r = run.result;
+            System.out.printf(Locale.ROOT,
+                "GEMM n=%d measured_gflops=%.4f pes=%.4f threads=%d mr=%d nr=%d bound=%s level=%s%n",
+                r.n, r.measuredGflops, r.portableEfficiencyScore, run.threads, run.mr, run.nr, r.boundType, r.memoryLevel);
         }
         System.out.println("--- Per-kernel results ---");
         for (PesResult r : results) {
@@ -485,9 +603,105 @@ public class PortableEfficiencyBenchmarkTest {
                 System.out.println(summary.kernel + " PES_max unavailable (no successful runs)");
             }
         }
-        System.out.println("CSV=" + CSV_OUTPUT);
-        System.out.println("MAX_CSV=" + MAX_CSV_OUTPUT);
-        System.out.println("JSON=" + JSON_OUTPUT);
+        System.out.println("CSV=" + outputs.csvOutput);
+        System.out.println("MAX_CSV=" + outputs.maxCsvOutput);
+        System.out.println("JSON=" + outputs.jsonOutput);
+        System.out.println("GEMM_RUNS_CSV=" + outputs.gemmRunsCsvOutput);
+        System.out.println("GEMM_BEST_BY_SIZE_CSV=" + outputs.gemmBestBySizeOutput);
+    }
+
+    private static int gemmMaxEnabled() {
+        return parsePositiveInt(System.getProperty(GEMM_MAX_N_PROPERTY), DEFAULT_GEMM_MAX_N);
+    }
+
+    private static boolean gemmOnlyMode() {
+        return Boolean.parseBoolean(System.getProperty("jlc.roofline.gemm_only", "false"));
+    }
+
+    private static void restoreProperty(String key, String value) {
+        if (value == null) {
+            System.clearProperty(key);
+        } else {
+            System.setProperty(key, value);
+        }
+    }
+
+    private static int[] defaultThreadCandidates() {
+        int maxThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
+        TreeSet<Integer> values = new TreeSet<>();
+        int threads = 1;
+        while (threads < maxThreads) {
+            values.add(threads);
+            threads <<= 1;
+        }
+        values.add(maxThreads);
+        return values.stream().mapToInt(Integer::intValue).toArray();
+    }
+
+    private static int[] defaultMrCandidates(int defaultMr) {
+        TreeSet<Integer> values = new TreeSet<>();
+        values.add(Math.max(1, defaultMr - 1));
+        values.add(Math.max(1, defaultMr));
+        values.add(Math.max(1, defaultMr + 1));
+        return values.stream().mapToInt(Integer::intValue).toArray();
+    }
+
+    private static int[] defaultNrCandidates(int defaultNr) {
+        return new int[]{Math.max(1, defaultNr)};
+    }
+
+    private static int[] parsePositiveIntList(String raw, int[] fallback) {
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+        TreeSet<Integer> values = new TreeSet<>();
+        for (String token : raw.split(",")) {
+            String trimmed = token.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            try {
+                int parsed = Integer.parseInt(trimmed);
+                if (parsed > 0) {
+                    values.add(parsed);
+                }
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        if (values.isEmpty()) {
+            return fallback;
+        }
+        return values.stream().mapToInt(Integer::intValue).toArray();
+    }
+
+    private static int parsePositiveInt(String value, int fallback) {
+        if (value == null) {
+            return fallback;
+        }
+        try {
+            int parsed = Integer.parseInt(value.trim());
+            return parsed > 0 ? parsed : fallback;
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private static String readPropertyOrEnv(String propertyKey, String alternatePropertyKey, String envKey, String fallback) {
+        String byProperty = System.getProperty(propertyKey);
+        if (byProperty != null && !byProperty.isBlank()) {
+            return byProperty;
+        }
+        if (alternatePropertyKey != null) {
+            String byAlternateProperty = System.getProperty(alternatePropertyKey);
+            if (byAlternateProperty != null && !byAlternateProperty.isBlank()) {
+                return byAlternateProperty;
+            }
+        }
+        String byEnv = System.getenv(envKey);
+        if (byEnv != null && !byEnv.isBlank()) {
+            return byEnv;
+        }
+        return fallback;
     }
 
     private static String format(double value) {
@@ -501,9 +715,109 @@ public class PortableEfficiencyBenchmarkTest {
         return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
+    private static String intArrayJson(int[] values) {
+        return java.util.Arrays.stream(values).mapToObj(String::valueOf).collect(Collectors.joining(","));
+    }
+
     @FunctionalInterface
     private interface KernelRunner {
         PesResult run(int n, RooflineSession roofline);
+    }
+
+    private static final class BenchmarkOutputs {
+        final Path outputDir;
+        final Path csvOutput;
+        final Path maxCsvOutput;
+        final Path jsonOutput;
+        final Path gemmRunsCsvOutput;
+        final Path gemmBestBySizeOutput;
+
+        BenchmarkOutputs(Path outputDir) {
+            this.outputDir = outputDir;
+            this.csvOutput = outputDir.resolve(RESULTS_CSV);
+            this.maxCsvOutput = outputDir.resolve(MAXIMA_CSV);
+            this.jsonOutput = outputDir.resolve(RESULTS_JSON);
+            this.gemmRunsCsvOutput = outputDir.resolve(GEMM_RUNS_CSV);
+            this.gemmBestBySizeOutput = outputDir.resolve(GEMM_BEST_BY_SIZE_CSV);
+        }
+
+        static BenchmarkOutputs fromSystemProperties() {
+            String rawPath = readPropertyOrEnv(
+                OUTPUT_DIR_PROPERTY,
+                OUTPUT_DIR_PROPERTY_ALT,
+                OUTPUT_DIR_ENV,
+                DEFAULT_OUTPUT_DIR.toString()
+            );
+            return new BenchmarkOutputs(Paths.get(rawPath));
+        }
+    }
+
+    private static final class GemmBenchmarkConfig {
+        final int[] threadCandidates;
+        final int[] mrCandidates;
+        final int[] nrCandidates;
+
+        GemmBenchmarkConfig(int[] threadCandidates, int[] mrCandidates, int[] nrCandidates) {
+            this.threadCandidates = threadCandidates;
+            this.mrCandidates = mrCandidates;
+            this.nrCandidates = nrCandidates;
+        }
+
+        static GemmBenchmarkConfig fromSystemProperties(GemmDispatch.BlockSizes defaults) {
+            int[] threadCandidates = parsePositiveIntList(
+                System.getProperty(GEMM_THREADS_PROPERTY),
+                defaultThreadCandidates()
+            );
+            int[] mrCandidates = parsePositiveIntList(
+                System.getProperty(GEMM_MR_VALUES_PROPERTY),
+                defaultMrCandidates(defaults.mr)
+            );
+            int[] nrCandidates = parsePositiveIntList(
+                System.getProperty(GEMM_NR_VALUES_PROPERTY),
+                defaultNrCandidates(defaults.nr)
+            );
+            return new GemmBenchmarkConfig(threadCandidates, mrCandidates, nrCandidates);
+        }
+    }
+
+    private static final class GemmRunResult {
+        final PesResult result;
+        final int threads;
+        final int mr;
+        final int nr;
+        final int mc;
+        final int nc;
+        final int kc;
+
+        GemmRunResult(PesResult result, int threads, int mr, int nr, int mc, int nc, int kc) {
+            this.result = result;
+            this.threads = threads;
+            this.mr = mr;
+            this.nr = nr;
+            this.mc = mc;
+            this.nc = nc;
+            this.kc = kc;
+        }
+    }
+
+    private static final class GemmSweepArtifacts {
+        final GemmBenchmarkConfig config;
+        final List<GemmRunResult> allRuns;
+        final List<GemmRunResult> bestRuns;
+        final List<PesResult> bestResults;
+        final List<Integer> testedSizes;
+
+        GemmSweepArtifacts(GemmBenchmarkConfig config,
+                           List<GemmRunResult> allRuns,
+                           List<GemmRunResult> bestRuns,
+                           List<PesResult> bestResults,
+                           List<Integer> testedSizes) {
+            this.config = config;
+            this.allRuns = allRuns;
+            this.bestRuns = bestRuns;
+            this.bestResults = bestResults;
+            this.testedSizes = testedSizes;
+        }
     }
 
     private static final class KernelSweepSummary {
