@@ -6,6 +6,7 @@ import net.faulj.matrix.Matrix;
 import net.faulj.compute.DispatchPolicy;
 import net.faulj.kernels.gemm.Gemm;
 import net.faulj.kernels.gemm.dispatch.GemmDispatch;
+import net.faulj.nativeblas.BackendRegistry;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
@@ -146,11 +147,13 @@ public class BenchmarkService {
         cpu.put("name", "LocalBenchmark");
         cpu.put("gflops", Math.max(maxQr, maxHess));
         cpu.put("state", "online");
+        cpu.put("backend", BackendRegistry.snapshot().toMap());
 
         Map<String, Object> out = new HashMap<>();
         out.put("status", "ONLINE");
         out.put("cpu", cpu);
         out.put("iterations", iterations);
+        out.put("backend", BackendRegistry.snapshot().toMap());
         return out;
     }
 
@@ -225,6 +228,7 @@ public class BenchmarkService {
                 diagInfo.put("requestedBlockSize", blockSize);
                 diagInfo.put("measuredRuns", measuredRuns);
                 diagInfo.put("warmupRuns", warmupRuns);
+                diagInfo.put("backend", BackendRegistry.snapshot().toMap());
 
                 // Also run a parallel measurement through the canonical GEMM facade
                 int availableThreads = Math.max(1, parallelism);
@@ -269,6 +273,7 @@ public class BenchmarkService {
                 cpu.put("name", "DiagnosticGEMM");
                 cpu.put("gflops", gflopsParallel);
                 cpu.put("state", "online");
+                cpu.put("backend", BackendRegistry.snapshot().toMap());
                 cpu.put("benchmark", Map.of(
                     "workload", "GEMM",
                     "size", n,
@@ -281,6 +286,7 @@ public class BenchmarkService {
                 out.put("status", "ONLINE");
                 out.put("cpu", cpu);
                 out.put("iterations", results);
+                out.put("backend", BackendRegistry.snapshot().toMap());
                 return out;
             } catch (Exception ex) {
                 throw new RuntimeException("Failed to run GEMM benchmark: " + ex.getMessage(), ex);
@@ -394,6 +400,7 @@ public class BenchmarkService {
             cpu.put("name", "Diagnostic512");
             cpu.put("gflops", gflops);
             cpu.put("state", "online");
+            cpu.put("backend", BackendRegistry.snapshot().toMap());
             cpu.put("benchmark", Map.of(
                     "workload", "Diagnostic512Runner (isolated JVM)",
                     "size", n,
@@ -406,6 +413,7 @@ public class BenchmarkService {
             out.put("cpu", cpu);
             out.put("iterations", rows);
             out.put("runnerExitCode", exit);
+            out.put("backend", BackendRegistry.snapshot().toMap());
             return out;
         } catch (Exception ex) {
             throw new RuntimeException("Failed to run Diagnostic512 in isolated process: " + ex.getMessage(), ex);

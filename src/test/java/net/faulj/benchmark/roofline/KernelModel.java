@@ -95,6 +95,22 @@ final class KernelModel {
         return new KernelProfile("Hessenberg", n, flops, flops, bytesMoved, workingSet);
     }
 
+    static KernelProfile bidiagonal(int n) {
+        double n3 = (double) n * n * n;
+        double flops = (4.0 / 3.0) * n3;
+        double bytesMoved = 8.0 * (0.09 * n3 + 28.0 * n * (double) n);
+        double workingSet = 8.0 * (28.0 * n * (double) n);
+        return new KernelProfile("Bidiagonal", n, flops, flops, bytesMoved, workingSet);
+    }
+
+    static KernelProfile cholesky(int n) {
+        double n3 = (double) n * n * n;
+        double flops = n3 / 3.0;
+        double bytesMoved = 8.0 * (0.018 * n3 + 8.0 * n * (double) n);
+        double workingSet = 8.0 * (8.0 * n * (double) n);
+        return new KernelProfile("Cholesky", n, flops, flops, bytesMoved, workingSet);
+    }
+
     static KernelProfile schur(int n) {
         double n3 = (double) n * n * n;
         double flops = 15.0 * n3;
@@ -109,5 +125,15 @@ final class KernelModel {
         double bytesMoved = 8.0 * (0.70 * n3 + 24.0 * n * (double) n);
         double workingSet = 8.0 * (24.0 * n * (double) n);
         return new KernelProfile("SVD", n, flops, flops, bytesMoved, workingSet);
+    }
+
+    static KernelProfile polar(int n) {
+        double n3 = (double) n * n * n;
+        // Current implementation is bidiagonalization plus dense factor reconstruction,
+        // not a true SVD-based 15n^3 path.
+        double flops = (22.0 / 3.0) * n3;
+        double bytesMoved = 8.0 * (0.48 * n3 + 40.0 * n * (double) n);
+        double workingSet = 8.0 * (40.0 * n * (double) n);
+        return new KernelProfile("Polar", n, flops, flops, bytesMoved, workingSet);
     }
 }

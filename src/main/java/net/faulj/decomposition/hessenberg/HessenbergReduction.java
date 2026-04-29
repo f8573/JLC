@@ -1,505 +1,475 @@
 package net.faulj.decomposition.hessenberg;
 
 import net.faulj.decomposition.result.HessenbergResult;
+import net.faulj.kernels.gemm.Gemm;
 import net.faulj.matrix.Matrix;
+import net.faulj.nativeblas.NativeLapackHessenbergSupport;
 
-import jdk.incubator.vector.DoubleVector;
-import jdk.incubator.vector.VectorOperators;
-import jdk.incubator.vector.VectorSpecies;
-
-import java.util.concurrent.ForkJoinPool;
-import java.util.concurrent.RecursiveAction;
+import java.util.Arrays;
 import java.util.stream.IntStream;
 
 /**
  * Reduces a square matrix to upper Hessenberg form using orthogonal Householder transformations.
- * Parallelized implementation for better performance on multi-core systems.
  */
 public class HessenbergReduction {
-	private static final double SAFE_MIN = Double.MIN_NORMAL;
-	private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
-	private static final int BLOCK_SIZE = 32; // LAPACK: smaller blocks = better cache
-	private static final int PARALLEL_THRESHOLD = 200; // Lower threshold for 512x512
-	private static final ForkJoinPool pool = ForkJoinPool.commonPool();
+    private static final double SAFE_MIN = Double.MIN_NORMAL;
+    private static final int DEFAULT_BLOCK_SIZE = 32;
+    private static final int PARALLEL_THRESHOLD = 200;
 
-	// ThreadLocal workspace to avoid per-block allocations in Q accumulation
-	private static final ThreadLocal<QAccumulationWorkspace> Q_WS =
-			ThreadLocal.withInitial(QAccumulationWorkspace::new);
+    private enum Mode {
+        H_ONLY,
+        H_AND_Q
+    }
 
-	private static final class QAccumulationWorkspace {
-		double[] V;
-		double[] T;
-		double[] W;
-		double[] WT;
-		double[] w;
-		double[] tw;
+    private static final class ReductionWorkspace {
+        final double[] reflector;
+        double[] V;
+        double[] T;
+        double[] W;
+        double[] WT;
+        double[] tauBlock;
+        double[] work;
 
-		void ensureCapacity(int blockLen, int panelSize, int n) {
-			int vSize = blockLen * panelSize;
-			int tSize = panelSize * panelSize;
-			int wSize = n * panelSize;
+        ReductionWorkspace(int n) {
+            this.reflector = new double[n];
+        }
 
-			if (V == null || V.length < vSize) V = new double[vSize];
-			if (T == null || T.length < tSize) T = new double[tSize];
-			if (W == null || W.length < wSize) W = new double[wSize];
-			if (WT == null || WT.length < wSize) WT = new double[wSize];
-			if (w == null || w.length < panelSize) w = new double[panelSize];
-			if (tw == null || tw.length < panelSize) tw = new double[panelSize];
-		}
-	}
+        void ensureBlockCapacity(int blockLen, int panelSize, int n) {
+            int vSize = blockLen * panelSize;
+            int squareSize = panelSize * panelSize;
+            int wideSize = n * panelSize;
 
-	public static HessenbergResult decompose(Matrix A) {
-		if (A == null) {
-			throw new IllegalArgumentException("Matrix must not be null");
-		}
-		if (!A.isReal()) {
-			throw new UnsupportedOperationException("Hessenberg reduction requires a real-valued matrix");
-		}
-		if (!A.isSquare()) {
-			throw new ArithmeticException("Matrix must be square to compute Hessenberg form");
-		}
-		int n = A.getRowCount();
-		if (n <= 2) {
-			Matrix H = A.copy();
-			return new HessenbergResult(A, H, Matrix.Identity(n));
-		}
+            if (V == null || V.length < vSize) {
+                V = new double[vSize];
+            }
+            if (T == null || T.length < squareSize) {
+                T = new double[squareSize];
+            }
+            if (W == null || W.length < wideSize) {
+                W = new double[wideSize];
+            }
+            if (WT == null || WT.length < wideSize) {
+                WT = new double[wideSize];
+            }
+            if (tauBlock == null || tauBlock.length < panelSize) {
+                tauBlock = new double[panelSize];
+            }
+            if (work == null || work.length < panelSize) {
+                work = new double[panelSize];
+            }
+        }
+    }
 
-		return decomposeOptimized(A);
-	}
+    private static final class ReductionState {
+        final Matrix hessenberg;
+        final double[] tau;
 
-	/**
-	 * Reduce a matrix to Hessenberg form without forming Q.
-	 * Useful for benchmarking to reduce allocation pressure.
-	 *
-	 * @param A matrix to reduce
-	 * @return Hessenberg matrix H
-	 */
-	public static Matrix reduceToHessenberg(Matrix A) {
-		if (A == null) {
-			throw new IllegalArgumentException("Matrix must not be null");
-		}
-		if (!A.isReal()) {
-			throw new UnsupportedOperationException("Hessenberg reduction requires a real-valued matrix");
-		}
-		if (!A.isSquare()) {
-			throw new ArithmeticException("Matrix must be square to compute Hessenberg form");
-		}
-		int n = A.getRowCount();
-		if (n <= 2) {
-			return A.copy();
-		}
+        ReductionState(Matrix hessenberg, double[] tau) {
+            this.hessenberg = hessenberg;
+            this.tau = tau;
+        }
+    }
 
-		ReductionState state = computeHessenberg(A, false);
-		return state.H;
-	}
-	
-	private static HessenbergResult decomposeOptimized(Matrix A) {
-		ReductionState state = computeHessenberg(A, true);
-		int n = state.H.getRowCount();
-		double[] Q = accumulateQBlocked(n, state.tau, state.reflectors);
-		return new HessenbergResult(A, state.H, Matrix.wrap(Q, n, n));
-	}
+    public static HessenbergResult decompose(Matrix A) {
+        validateInput(A);
+        int n = A.getRowCount();
+        if (n <= 2) {
+            Matrix h = A.copy();
+            return new HessenbergResult(A, h, Matrix.Identity(n));
+        }
 
-	private static ReductionState computeHessenberg(Matrix A, boolean storeReflectors) {
-		Matrix H = A.copy();
-		int n = H.getRowCount();
-		double[] h = H.getRawData();
+        Matrix nativeH = A.copy();
+        double[] nativeQ = new double[n * n];
+        if (NativeLapackHessenbergSupport.tryDecompose(nativeH.getRawData(), n, nativeQ)) {
+            zeroBelowSubdiagonal(nativeH.getRawData(), n);
+            return new HessenbergResult(A, nativeH, Matrix.wrap(nativeQ, n, n));
+        }
 
-		double[] allTau = storeReflectors ? new double[n - 2] : null;
-		double[][] allReflectors = storeReflectors ? new double[n - 2][] : null;
+        ReductionState state = reduce(A, Mode.H_AND_Q);
+        Matrix H = state.hessenberg;
+        double[] h = H.getRawData();
+        ReductionWorkspace workspace = new ReductionWorkspace(n);
+        double[] q = accumulateQBlocked(h, state.tau, n, workspace);
+        zeroBelowSubdiagonal(h, n);
+        return new HessenbergResult(A, H, Matrix.wrap(q, n, n));
+    }
 
-		// LAPACK: pre-allocate workspace once to minimize allocation overhead
-		double[] vExternal = new double[n];
-		int vecLen = SPECIES.length();
+    /**
+     * Reduce a matrix to Hessenberg form without forming Q.
+     * Useful for benchmarking to reduce allocation pressure.
+     */
+    public static Matrix reduceToHessenberg(Matrix A) {
+        validateInput(A);
+        if (A.getRowCount() <= 2) {
+            return A.copy();
+        }
 
-		// LAPACK-style: use blocking for better cache performance
-		final int blockSize = 32;
+        Matrix nativeH = A.copy();
+        if (NativeLapackHessenbergSupport.tryReduce(nativeH.getRawData(), nativeH.getRowCount())) {
+            zeroBelowSubdiagonal(nativeH.getRawData(), nativeH.getRowCount());
+            return nativeH;
+        }
 
-		for (int kb = 0; kb < n - 2; kb += blockSize) {
-			int kend = Math.min(kb + blockSize, n - 2);
+        ReductionState state = reduce(A, Mode.H_ONLY);
+        zeroBelowSubdiagonal(state.hessenberg.getRawData(), state.hessenberg.getRowCount());
+        return state.hessenberg;
+    }
 
-			for (int k = kb; k < kend; k++) {
-			int start = k + 1;
-			int len = n - start;
+    private static ReductionState reduce(Matrix A, Mode mode) {
+        Matrix H = A.copy();
+        int n = H.getRowCount();
+        double[] h = H.getRawData();
+        double[] tau = new double[n - 2];
+        ReductionWorkspace workspace = new ReductionWorkspace(n);
+        reduceUnblocked(h, n, tau, workspace.reflector);
+        return new ReductionState(H, tau);
+    }
 
-			// ===== LAPACK dlarfg-style Householder generation =====
-			int base = start * n + k;
+    private static void reduceUnblocked(double[] h, int n, double[] tau, double[] reflector) {
+        for (int k = 0; k < n - 2; k++) {
+            factorColumn(h, n, k, tau, reflector);
+            double tauK = tau[k];
+            if (tauK == 0.0) {
+                continue;
+            }
+            applyFromLeft(h, n, k, tauK, reflector);
+            applyFromRight(h, n, k, tauK, reflector);
+        }
+    }
 
-			// LAPACK: compute norm directly (fast path for most cases)
-			double x0 = h[base];
-			double scale = Math.abs(x0);
-			double ssq = 1.0;
+    private static void validateInput(Matrix A) {
+        if (A == null) {
+            throw new IllegalArgumentException("Matrix must not be null");
+        }
+        if (!A.isReal()) {
+            throw new UnsupportedOperationException("Hessenberg reduction requires a real-valued matrix");
+        }
+        if (!A.isSquare()) {
+            throw new ArithmeticException("Matrix must be square to compute Hessenberg form");
+        }
+    }
 
-			for (int i = 1; i < len; i++) {
-				double absxi = Math.abs(h[(start + i) * n + k]);
-				if (absxi > scale) {
-					double temp = scale / absxi;
-					ssq = 1.0 + ssq * temp * temp;
-					scale = absxi;
-				} else if (absxi > 0.0) {
-					double temp = absxi / scale;
-					ssq += temp * temp;
-				}
-			}
+    private static void factorColumn(double[] h, int n, int k, double[] tau, double[] v) {
+        int start = k + 1;
+        int len = n - start;
+        int base = start * n + k;
 
-			double xnorm = scale * Math.sqrt(ssq);
-			if (xnorm < SAFE_MIN) {
-				if (storeReflectors) allTau[k] = 0.0;
-				continue;
-			}
+        double x0 = h[base];
+        double scale = Math.abs(x0);
+        double ssq = 1.0;
+        for (int i = 1; i < len; i++) {
+            double absxi = Math.abs(h[(start + i) * n + k]);
+            if (absxi > scale) {
+                double temp = scale / absxi;
+                ssq = 1.0 + ssq * temp * temp;
+                scale = absxi;
+            } else if (absxi > 0.0) {
+                double temp = absxi / scale;
+                ssq += temp * temp;
+            }
+        }
 
-			// LAPACK: choose sign for stability
-			double beta = (x0 >= 0.0) ? -xnorm : xnorm;
-			double tau = (beta - x0) / beta;
-			double invV0 = 1.0 / (x0 - beta);
+        double xnorm = scale == 0.0 ? 0.0 : scale * Math.sqrt(ssq);
+        if (!(xnorm >= SAFE_MIN)) {
+            tau[k] = 0.0;
+            return;
+        }
 
-			if (storeReflectors) allTau[k] = tau;
-			h[base] = beta;
+        double beta = x0 >= 0.0 ? -xnorm : xnorm;
+        double tauK = (beta - x0) / beta;
+        double invV0 = 1.0 / (x0 - beta);
 
-			// LAPACK: normalize Householder vector in-place for speed
-			double[] v = vExternal;
-			v[0] = 1.0;
-			for (int i = 1; i < len; i++) {
-				v[i] = h[(start + i) * n + k] * invV0;
-			}
+        tau[k] = tauK;
+        h[base] = beta;
+        v[0] = 1.0;
+        for (int i = 1; i < len; i++) {
+            double vi = h[(start + i) * n + k] * invV0;
+            v[i] = vi;
+            h[(start + i) * n + k] = vi;
+        }
+    }
 
-			if (storeReflectors) {
-				double[] reflector = new double[len];
-				reflector[0] = 1.0;
-				for (int i = 1; i < len; i++) {
-					reflector[i] = v[i];
-				}
-				allReflectors[k] = reflector;
-			}
+    private static void applyFromLeft(double[] h, int n, int k, double tau, double[] v) {
+        int start = k + 1;
+        int len = n - start;
+        int numCols = n - start;
 
-			int numCols = n - k - 1;
-			final int fk = k, fstart = start, flen = len;
-			final double ftau = tau;
-			final double[] fv = v;
+        if (numCols >= PARALLEL_THRESHOLD && n >= 400) {
+            final int fStart = start;
+            final int fLen = len;
+            final int fLimit = len - 3;
+            IntStream.range(0, numCols).parallel().forEach(colOff -> {
+                int col = fStart + colOff;
+                double dot = h[fStart * n + col];
+                int i = 1;
+                for (; i < fLimit; i += 4) {
+                    dot = Math.fma(v[i], h[(fStart + i) * n + col], dot);
+                    dot = Math.fma(v[i + 1], h[(fStart + i + 1) * n + col], dot);
+                    dot = Math.fma(v[i + 2], h[(fStart + i + 2) * n + col], dot);
+                    dot = Math.fma(v[i + 3], h[(fStart + i + 3) * n + col], dot);
+                }
+                for (; i < fLen; i++) {
+                    dot = Math.fma(v[i], h[(fStart + i) * n + col], dot);
+                }
+                dot *= tau;
+                h[fStart * n + col] -= dot;
+                i = 1;
+                for (; i < fLimit; i += 4) {
+                    h[(fStart + i) * n + col] -= dot * v[i];
+                    h[(fStart + i + 1) * n + col] -= dot * v[i + 1];
+                    h[(fStart + i + 2) * n + col] -= dot * v[i + 2];
+                    h[(fStart + i + 3) * n + col] -= dot * v[i + 3];
+                }
+                for (; i < fLen; i++) {
+                    h[(fStart + i) * n + col] -= dot * v[i];
+                }
+            });
+            return;
+        }
 
-			// ===== LAPACK: Apply from LEFT with optimized loop structure =====
-			if (numCols >= PARALLEL_THRESHOLD && n >= 400) {
-				IntStream.range(0, numCols).parallel().forEach(colOff -> {
-					int col = fk + 1 + colOff;
-					double dot = h[fstart * n + col];
-					int i = 1;
-					int limit = flen - 3;
-					// 4x unroll for ILP
-					for (; i < limit; i += 4) {
-						dot += fv[i] * h[(fstart + i) * n + col];
-						dot += fv[i+1] * h[(fstart + i+1) * n + col];
-						dot += fv[i+2] * h[(fstart + i+2) * n + col];
-						dot += fv[i+3] * h[(fstart + i+3) * n + col];
-					}
-					for (; i < flen; i++) {
-						dot += fv[i] * h[(fstart + i) * n + col];
-					}
-					dot *= ftau;
-					h[fstart * n + col] -= dot;
-					i = 1;
-					for (; i < limit; i += 4) {
-						h[(fstart + i) * n + col] -= dot * fv[i];
-						h[(fstart + i+1) * n + col] -= dot * fv[i+1];
-						h[(fstart + i+2) * n + col] -= dot * fv[i+2];
-						h[(fstart + i+3) * n + col] -= dot * fv[i+3];
-					}
-					for (; i < flen; i++) {
-						h[(fstart + i) * n + col] -= dot * fv[i];
-					}
-				});
-			} else {
-				for (int colOff = 0; colOff < numCols; colOff++) {
-					int col = k + 1 + colOff;
-					double dot = h[start * n + col];
-					int i = 1;
-					int limit = len - 3;
-					for (; i < limit; i += 4) {
-						dot += v[i] * h[(start + i) * n + col];
-						dot += v[i+1] * h[(start + i+1) * n + col];
-						dot += v[i+2] * h[(start + i+2) * n + col];
-						dot += v[i+3] * h[(start + i+3) * n + col];
-					}
-					for (; i < len; i++) {
-						dot += v[i] * h[(start + i) * n + col];
-					}
-					dot *= tau;
-					h[start * n + col] -= dot;
-					i = 1;
-					for (; i < limit; i += 4) {
-						h[(start + i) * n + col] -= dot * v[i];
-						h[(start + i+1) * n + col] -= dot * v[i+1];
-						h[(start + i+2) * n + col] -= dot * v[i+2];
-						h[(start + i+3) * n + col] -= dot * v[i+3];
-					}
-					for (; i < len; i++) {
-						h[(start + i) * n + col] -= dot * v[i];
-					}
-				}
-			}
+        for (int col = start; col < n; col++) {
+            double dot = h[start * n + col];
+            int i = 1;
+            int limit = len - 3;
+            for (; i < limit; i += 4) {
+                dot = Math.fma(v[i], h[(start + i) * n + col], dot);
+                dot = Math.fma(v[i + 1], h[(start + i + 1) * n + col], dot);
+                dot = Math.fma(v[i + 2], h[(start + i + 2) * n + col], dot);
+                dot = Math.fma(v[i + 3], h[(start + i + 3) * n + col], dot);
+            }
+            for (; i < len; i++) {
+                dot = Math.fma(v[i], h[(start + i) * n + col], dot);
+            }
+            dot *= tau;
+            h[start * n + col] -= dot;
+            i = 1;
+            for (; i < limit; i += 4) {
+                h[(start + i) * n + col] -= dot * v[i];
+                h[(start + i + 1) * n + col] -= dot * v[i + 1];
+                h[(start + i + 2) * n + col] -= dot * v[i + 2];
+                h[(start + i + 3) * n + col] -= dot * v[i + 3];
+            }
+            for (; i < len; i++) {
+                h[(start + i) * n + col] -= dot * v[i];
+            }
+        }
+    }
 
-			// ===== LAPACK: Apply from RIGHT with SIMD + better memory access =====
-			if (n >= PARALLEL_THRESHOLD && n >= 400) {
-				IntStream.range(0, n).parallel().forEach(row -> {
-					int idx = row * n + fstart;
-					double dot = h[idx];
-					int j = 1;
-					int limit = flen - 3;
-					// 4x unroll before SIMD
-					for (; j < limit; j += 4) {
-						dot += h[idx + j] * fv[j];
-						dot += h[idx + j+1] * fv[j+1];
-						dot += h[idx + j+2] * fv[j+2];
-						dot += h[idx + j+3] * fv[j+3];
-					}
-					for (; j < flen; j++) {
-						dot += h[idx + j] * fv[j];
-					}
-					dot *= ftau;
-					h[idx] -= dot;
-					j = 1;
-					for (; j < limit; j += 4) {
-						h[idx + j] -= dot * fv[j];
-						h[idx + j+1] -= dot * fv[j+1];
-						h[idx + j+2] -= dot * fv[j+2];
-						h[idx + j+3] -= dot * fv[j+3];
-					}
-					for (; j < flen; j++) {
-						h[idx + j] -= dot * fv[j];
-					}
-				});
-			} else {
-				// LAPACK: non-parallel path with 4x unrolling
-				for (int row = 0; row < n; row++) {
-					int idx = row * n + start;
-					double dot = h[idx];
-					int j = 1;
-					int limit = len - 3;
-					for (; j < limit; j += 4) {
-						dot += h[idx + j] * v[j];
-						dot += h[idx + j+1] * v[j+1];
-						dot += h[idx + j+2] * v[j+2];
-						dot += h[idx + j+3] * v[j+3];
-					}
-					for (; j < len; j++) {
-						dot += h[idx + j] * v[j];
-					}
-					dot *= tau;
-					h[idx] -= dot;
-					j = 1;
-					for (; j < limit; j += 4) {
-						h[idx + j] -= dot * v[j];
-						h[idx + j+1] -= dot * v[j+1];
-						h[idx + j+2] -= dot * v[j+2];
-						h[idx + j+3] -= dot * v[j+3];
-					}
-					for (; j < len; j++) {
-						h[idx + j] -= dot * v[j];
-					}
-				}
-			}
-			}
-		}
-		
-		// Zero out elements below subdiagonal
-		for (int col = 0; col < n - 2; col++) {
-			for (int row = col + 2; row < n; row++) {
-				h[row * n + col] = 0.0;
-			}
-		}
-		
-		return new ReductionState(H, allTau, allReflectors);
-	}
+    private static void applyFromRight(double[] h, int n, int k, double tau, double[] v) {
+        int start = k + 1;
+        int len = n - start;
 
-	private static final class ReductionState {
-		final Matrix H;
-		final double[] tau;
-		final double[][] reflectors;
+        if (n >= PARALLEL_THRESHOLD && n >= 400) {
+            final int fStart = start;
+            final int fLen = len;
+            final int fLimit = len - 3;
+            IntStream.range(0, n).parallel().forEach(row -> {
+                int idx = row * n + fStart;
+                double dot = h[idx];
+                int j = 1;
+                for (; j < fLimit; j += 4) {
+                    dot = Math.fma(h[idx + j], v[j], dot);
+                    dot = Math.fma(h[idx + j + 1], v[j + 1], dot);
+                    dot = Math.fma(h[idx + j + 2], v[j + 2], dot);
+                    dot = Math.fma(h[idx + j + 3], v[j + 3], dot);
+                }
+                for (; j < fLen; j++) {
+                    dot = Math.fma(h[idx + j], v[j], dot);
+                }
+                dot *= tau;
+                h[idx] -= dot;
+                j = 1;
+                for (; j < fLimit; j += 4) {
+                    h[idx + j] -= dot * v[j];
+                    h[idx + j + 1] -= dot * v[j + 1];
+                    h[idx + j + 2] -= dot * v[j + 2];
+                    h[idx + j + 3] -= dot * v[j + 3];
+                }
+                for (; j < fLen; j++) {
+                    h[idx + j] -= dot * v[j];
+                }
+            });
+            return;
+        }
 
-		ReductionState(Matrix H, double[] tau, double[][] reflectors) {
-			this.H = H;
-			this.tau = tau;
-			this.reflectors = reflectors;
-		}
-	}
-	
-	private static double[] accumulateQBlocked(int n, double[] tau, double[][] reflectors) {
-		double[] Q = new double[n * n];
-		for (int i = 0; i < n; i++) {
-			Q[i * n + i] = 1.0;
-		}
+        for (int row = 0; row < n; row++) {
+            int idx = row * n + start;
+            double dot = h[idx];
+            int j = 1;
+            int limit = len - 3;
+            for (; j < limit; j += 4) {
+                dot = Math.fma(h[idx + j], v[j], dot);
+                dot = Math.fma(h[idx + j + 1], v[j + 1], dot);
+                dot = Math.fma(h[idx + j + 2], v[j + 2], dot);
+                dot = Math.fma(h[idx + j + 3], v[j + 3], dot);
+            }
+            for (; j < len; j++) {
+                dot = Math.fma(h[idx + j], v[j], dot);
+            }
+            dot *= tau;
+            h[idx] -= dot;
+            j = 1;
+            for (; j < limit; j += 4) {
+                h[idx + j] -= dot * v[j];
+                h[idx + j + 1] -= dot * v[j + 1];
+                h[idx + j + 2] -= dot * v[j + 2];
+                h[idx + j + 3] -= dot * v[j + 3];
+            }
+            for (; j < len; j++) {
+                h[idx + j] -= dot * v[j];
+            }
+        }
+    }
 
-		int vecLen = SPECIES.length();
+    private static double[] accumulateQBlocked(double[] h, double[] tau, int n, ReductionWorkspace workspace) {
+        double[] q = new double[n * n];
+        for (int i = 0; i < n; i++) {
+            q[i * n + i] = 1.0;
+        }
 
-		// Get workspace to avoid per-block allocations
-		final QAccumulationWorkspace ws = Q_WS.get();
+        int blockSize = blockSize();
+        for (int kBlock = 0; kBlock < n - 2; kBlock += blockSize) {
+            int blockCount = Math.min(blockSize, n - 2 - kBlock);
+            int blockStart = kBlock + 1;
+            int blockLen = n - blockStart;
 
-		for (int kBlock = 0; kBlock < n - 2; kBlock += BLOCK_SIZE) {
-			int nbActual = Math.min(BLOCK_SIZE, n - 2 - kBlock);
-			int blockStart = kBlock + 1;
-			int blockLen = n - blockStart;
+            int activeCount = 0;
+            for (int j = 0; j < blockCount; j++) {
+                if (tau[kBlock + j] != 0.0) {
+                    activeCount++;
+                }
+            }
+            if (activeCount == 0) {
+                continue;
+            }
 
-			int actualCount = 0;
-			for (int j = 0; j < nbActual; j++) {
-				if (tau[kBlock + j] != 0.0 && reflectors[kBlock + j] != null) {
-					actualCount++;
-				}
-			}
-			if (actualCount == 0) continue;
+            workspace.ensureBlockCapacity(blockLen, activeCount, n);
+            Arrays.fill(workspace.V, 0, blockLen * activeCount, 0.0);
+            Arrays.fill(workspace.T, 0, activeCount * activeCount, 0.0);
 
-			// Use workspace arrays instead of allocating new ones
-			ws.ensureCapacity(blockLen, actualCount, n);
-			final double[] V = ws.V;
-			final double[] T = ws.T;
-			final double[] W = ws.W;
-			final double[] WT = ws.WT;
-			final double[] w = ws.w;
-			final double[] tw = ws.tw;
+            int column = 0;
+            for (int j = 0; j < blockCount; j++) {
+                int k = kBlock + j;
+                double tauK = tau[k];
+                if (tauK == 0.0) {
+                    continue;
+                }
 
-			// Zero out V and T for this block
-			java.util.Arrays.fill(V, 0, blockLen * actualCount, 0.0);
-			java.util.Arrays.fill(T, 0, actualCount * actualCount, 0.0);
+                int rowStart = k + 1;
+                int len = n - rowStart;
+                int localOffset = rowStart - blockStart;
+                workspace.tauBlock[column] = tauK;
+                workspace.V[localOffset * activeCount + column] = 1.0;
+                for (int i = 1; i < len; i++) {
+                    workspace.V[(localOffset + i) * activeCount + column] = h[(rowStart + i) * n + k];
+                }
+                column++;
+            }
 
-			int colIdx = 0;
-			for (int j = 0; j < nbActual; j++) {
-				int k = kBlock + j;
-				if (tau[k] == 0.0 || reflectors[k] == null) continue;
+            buildBlockReflectorFactor(workspace.V, blockLen, activeCount, workspace.tauBlock, workspace.T, workspace.work);
+            applyBlockRight(q, n, blockStart, blockLen, activeCount, workspace);
+        }
 
-				double[] v = reflectors[k];
-				int vLen = v.length;
-				int vOffset = k + 1 - blockStart;
+        return q;
+    }
 
-				for (int i = 0; i < vLen; i++) {
-					V[(vOffset + i) * actualCount + colIdx] = v[i];
-				}
+    private static void buildBlockReflectorFactor(double[] V, int blockLen, int panelSize,
+                                                  double[] tau, double[] T, double[] work) {
+        Arrays.fill(T, 0, panelSize * panelSize, 0.0);
+        for (int i = 0; i < panelSize; i++) {
+            double tauI = tau[i];
+            if (tauI == 0.0) {
+                T[i * panelSize + i] = 0.0;
+                continue;
+            }
 
-				T[colIdx * actualCount + colIdx] = tau[k];
+            for (int j = 0; j < i; j++) {
+                double dot = 0.0;
+                for (int row = 0; row < blockLen; row++) {
+                    dot = Math.fma(V[row * panelSize + j], V[row * panelSize + i], dot);
+                }
+                work[j] = -tauI * dot;
+            }
 
-				if (colIdx > 0) {
-					// Compute w = V^T * v_colIdx using workspace array with 4x unrolling
-					java.util.Arrays.fill(w, 0, colIdx, 0.0);
-					for (int i = 0; i < colIdx; i++) {
-						double dot = 0.0;
-						int row = 0;
-						int limit = blockLen - 3;
+            for (int j = 0; j < i; j++) {
+                double sum = 0.0;
+                for (int l = j; l < i; l++) {
+                    sum = Math.fma(T[j * panelSize + l], work[l], sum);
+                }
+                T[j * panelSize + i] = sum;
+            }
 
-						// 4x unrolled loop for better ILP
-						for (; row < limit; row += 4) {
-							int base0 = row * actualCount;
-							int base1 = (row + 1) * actualCount;
-							int base2 = (row + 2) * actualCount;
-							int base3 = (row + 3) * actualCount;
-							dot += V[base0 + i] * V[base0 + colIdx];
-							dot += V[base1 + i] * V[base1 + colIdx];
-							dot += V[base2 + i] * V[base2 + colIdx];
-							dot += V[base3 + i] * V[base3 + colIdx];
-						}
+            T[i * panelSize + i] = tauI;
+        }
+    }
 
-						// Scalar remainder
-						for (; row < blockLen; row++) {
-							dot += V[row * actualCount + i] * V[row * actualCount + colIdx];
-						}
-						w[i] = dot;
-					}
+    private static void applyBlockRight(double[] a, int n, int blockStart, int blockLen, int panelSize,
+                                        ReductionWorkspace workspace) {
+        double[] V = workspace.V;
+        double[] T = workspace.T;
+        double[] W = workspace.W;
+        double[] WT = workspace.WT;
+        int wideSize = n * panelSize;
 
-					// Compute tw = T * w (T is upper triangular) using workspace array with 4x unrolling
-					java.util.Arrays.fill(tw, 0, colIdx, 0.0);
-					for (int i = 0; i < colIdx; i++) {
-						double sum = 0.0;
-						int p = i;
-						int limit = colIdx - 3;
+        Arrays.fill(W, 0, wideSize, 0.0);
+        Arrays.fill(WT, 0, wideSize, 0.0);
 
-						// 4x unrolled loop for better ILP
-						for (; p < limit; p += 4) {
-							int base = i * actualCount;
-							sum += T[base + p] * w[p];
-							sum += T[base + p + 1] * w[p + 1];
-							sum += T[base + p + 2] * w[p + 2];
-							sum += T[base + p + 3] * w[p + 3];
-						}
+        Gemm.gemmStrided(
+            a, blockStart, n,
+            V, 0, panelSize,
+            W, 0, panelSize,
+            n, blockLen, panelSize,
+            1.0, 0.0, panelSize
+        );
 
-						// Scalar remainder
-						for (; p < colIdx; p++) {
-							sum += T[i * actualCount + p] * w[p];
-						}
-						tw[i] = sum;
-					}
+        Gemm.gemmStrided(
+            W, 0, panelSize,
+            T, 0, panelSize,
+            WT, 0, panelSize,
+            n, panelSize, panelSize,
+            1.0, 0.0, panelSize
+        );
 
-					for (int i = 0; i < colIdx; i++) {
-						T[i * actualCount + colIdx] = -tau[k] * tw[i];
-					}
-				}
-				colIdx++;
-			}
+        Gemm.gemmStridedColMajorB(
+            WT, 0, panelSize,
+            V, 0, panelSize,
+            a, blockStart, n,
+            n, panelSize, blockLen,
+            -1.0, 1.0, panelSize
+        );
+    }
 
-			final int fBlockStart = blockStart;
-			final int fBlockLen = blockLen;
-			final int fActualCount = actualCount;
+    private static void zeroBelowSubdiagonal(double[] h, int n) {
+        for (int col = 0; col < n - 2; col++) {
+            for (int row = col + 2; row < n; row++) {
+                h[row * n + col] = 0.0;
+            }
+        }
+    }
 
-			// W = Q(:, blockStart:) * V - PARALLEL
-			// Zero out W for this computation
-			java.util.Arrays.fill(W, 0, n * actualCount, 0.0);
-			if (n >= PARALLEL_THRESHOLD) {
-				final double[] fV = V;
-				final double[] fW = W;
-				IntStream.range(0, n).parallel().forEach(i -> {
-					for (int j = 0; j < fActualCount; j++) {
-						double sum = 0.0;
-						for (int p = 0; p < fBlockLen; p++) {
-							sum += Q[i * n + fBlockStart + p] * fV[p * fActualCount + j];
-						}
-						fW[i * fActualCount + j] = sum;
-					}
-				});
-			} else {
-				for (int i = 0; i < n; i++) {
-					for (int j = 0; j < actualCount; j++) {
-						double sum = 0.0;
-						for (int p = 0; p < blockLen; p++) {
-							sum += Q[i * n + blockStart + p] * V[p * actualCount + j];
-						}
-						W[i * actualCount + j] = sum;
-					}
-				}
-			}
+    private static int blockSize() {
+        return firstPositiveIntegerProperty(
+            "net.faulj.decomposition.hessenberg.blockSize",
+            "net.faulj.eigen.qr.BlockedHessenbergQR.blockSize",
+            "net.faulj.eigen.qr.blockSize"
+        );
+    }
 
-			// WT = W * T (T is upper triangular)
-			java.util.Arrays.fill(WT, 0, n * actualCount, 0.0);
-			for (int i = 0; i < n; i++) {
-				for (int j = 0; j < actualCount; j++) {
-					double sum = 0.0;
-					for (int p = 0; p <= j; p++) {
-						sum += W[i * actualCount + p] * T[p * actualCount + j];
-					}
-					WT[i * actualCount + j] = sum;
-				}
-			}
-
-			// Q(:, blockStart:) -= WT * V' - PARALLEL
-			if (n >= PARALLEL_THRESHOLD) {
-				final double[] fV = V;
-				final double[] fWT = WT;
-				IntStream.range(0, n).parallel().forEach(i -> {
-					for (int j = 0; j < fBlockLen; j++) {
-						double sum = 0.0;
-						for (int p = 0; p < fActualCount; p++) {
-							sum += fWT[i * fActualCount + p] * fV[j * fActualCount + p];
-						}
-						Q[i * n + fBlockStart + j] -= sum;
-					}
-				});
-			} else {
-				for (int i = 0; i < n; i++) {
-					for (int j = 0; j < blockLen; j++) {
-						double sum = 0.0;
-						for (int p = 0; p < actualCount; p++) {
-							sum += WT[i * actualCount + p] * V[j * actualCount + p];
-						}
-						Q[i * n + blockStart + j] -= sum;
-					}
-				}
-			}
-		}
-
-		return Q;
-	}
+    private static int firstPositiveIntegerProperty(String... keys) {
+        for (String key : keys) {
+            String value = System.getProperty(key);
+            if (value == null || value.isBlank()) {
+                continue;
+            }
+            try {
+                int parsed = Integer.parseInt(value.trim());
+                if (parsed >= 1) {
+                    return parsed;
+                }
+            } catch (NumberFormatException ignored) {
+                // Fall through to the next property key.
+            }
+        }
+        return DEFAULT_BLOCK_SIZE;
+    }
 }

@@ -33,6 +33,7 @@ import net.faulj.eigen.schur.RealSchurDecomposition;
 import net.faulj.eigen.schur.SchurEigenExtractor;
 import net.faulj.matrix.Matrix;
 import net.faulj.matrix.MatrixAccuracyValidator;
+import net.faulj.nativeblas.BackendRegistry;
 import net.faulj.scalar.Complex;
 import net.faulj.vector.Vector;
 import net.faulj.visualizer.MatrixLatexExporter;
@@ -104,6 +105,7 @@ public class ApiController {
 
         String cpuState = normalizeCpuState(nextCpu.get("state"));
         nextCpu.put("state", cpuState);
+        nextCpu.put("backend", BackendRegistry.snapshot().toMap());
         // Prefer the new ComputeGovernor activeJobs metric as authoritative
         int q = governor != null ? governor.getActiveJobs() : queuedJobs.get();
         Object queuedObj = nextCpu.get("queuedJobs");
@@ -162,6 +164,7 @@ public class ApiController {
         m.put("name", "CPU");
         m.put("gflops", null);
         m.put("state", state);
+        m.put("backend", BackendRegistry.snapshot().toMap());
         return m;
     }
 

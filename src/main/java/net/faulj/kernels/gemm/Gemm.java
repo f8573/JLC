@@ -1,10 +1,9 @@
 package net.faulj.kernels.gemm;
 
-import net.faulj.compute.BLAS3Kernels;
 import net.faulj.compute.DispatchPolicy;
-import net.faulj.compute.OptimizedBLAS3;
 import net.faulj.matrix.Matrix;
 import net.faulj.matrix.OffHeapMatrix;
+import net.faulj.nativeblas.BackendRegistry;
 
 /**
  * Canonical GEMM facade for the library.
@@ -51,7 +50,7 @@ public final class Gemm {
      */
     public static void gemm(Matrix a, Matrix b, Matrix c,
                             double alpha, double beta, DispatchPolicy policy) {
-        OptimizedBLAS3.gemm(a, b, c, alpha, beta, policy);
+        BackendRegistry.gemmBackend().gemm(a, b, c, alpha, beta, policy);
     }
 
     /**
@@ -62,7 +61,7 @@ public final class Gemm {
                                    double[] c, int cOffset, int ldc,
                                    int m, int k, int n,
                                    double alpha, double beta) {
-        OptimizedBLAS3.gemmStrided(a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta);
+        BackendRegistry.gemmBackend().gemmStrided(a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta);
     }
 
     /**
@@ -74,7 +73,7 @@ public final class Gemm {
                                    double[] c, int cOffset, int ldc,
                                    int m, int k, int n,
                                    double alpha, double beta) {
-        OptimizedBLAS3.gemmStrided(transposeA, a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta);
+        BackendRegistry.gemmBackend().gemmStrided(transposeA, a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta);
     }
 
     /**
@@ -85,7 +84,7 @@ public final class Gemm {
                                    double[] cd, int cOff, int ldc,
                                    int m, int k, int n,
                                    double alpha, double beta, int blockSize) {
-        BLAS3Kernels.gemmStrided(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
+        BackendRegistry.gemmBackend().gemmStrided(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
     }
 
     /**
@@ -96,7 +95,7 @@ public final class Gemm {
                                          double[] cd, int cOff, int ldc,
                                          int m, int k, int n,
                                          double alpha, double beta, int blockSize) {
-        BLAS3Kernels.gemmStridedTransA(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
+        BackendRegistry.gemmBackend().gemmStridedTransA(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
     }
 
     /**
@@ -107,7 +106,7 @@ public final class Gemm {
                                             double[] cd, int cOff, int ldc,
                                             int m, int k, int n,
                                             double alpha, double beta, int blockSize) {
-        BLAS3Kernels.gemmStridedColMajorA(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
+        BackendRegistry.gemmBackend().gemmStridedColMajorA(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
     }
 
     /**
@@ -118,6 +117,21 @@ public final class Gemm {
                                             double[] cd, int cOff, int ldc,
                                             int m, int k, int n,
                                             double alpha, double beta, int blockSize) {
-        BLAS3Kernels.gemmStridedColMajorB(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
+        BackendRegistry.gemmBackend().gemmStridedColMajorB(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
+    }
+
+    /**
+     * Batched strided GEMM for row-major operands.
+     */
+    public static void gemmStridedBatched(double[] a, int aOffset, int lda, int aStride,
+                                          double[] b, int bOffset, int ldb, int bStride,
+                                          double[] c, int cOffset, int ldc, int cStride,
+                                          int m, int k, int n,
+                                          int batchCount,
+                                          double alpha, double beta) {
+        BackendRegistry.gemmBackend().gemmStridedBatched(a, aOffset, lda, aStride,
+            b, bOffset, ldb, bStride,
+            c, cOffset, ldc, cStride,
+            m, k, n, batchCount, alpha, beta);
     }
 }

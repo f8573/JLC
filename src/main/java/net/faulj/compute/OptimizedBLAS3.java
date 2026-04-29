@@ -355,7 +355,7 @@ public final class OptimizedBLAS3 {
 
                 double[] bPack = ws.getPackB(kBlock * packedN);
                 long tPB = PerfTimers.start();
-                PackingUtils.packB(b, ldb, bOffset + kk * ldb, kBlock, jj, nBlock, packedN, bPack);
+                PackingUtils.packBStrided(b, bOffset, ldb, kk, kBlock, jj, nBlock, packedN, bPack);
                 PerfTimers.record("GEMM.packB", tPB);
 
                 for (int ii = 0; ii < m; ii += blocks.mc) {
@@ -365,7 +365,7 @@ public final class OptimizedBLAS3 {
                         int mBlock = Math.min(mr, rowEnd - i);
                         double[] aPack = ws.getPackA(mBlock * kBlock);
                         long tPA = PerfTimers.start();
-                        PackingUtils.packA(a, lda, aOffset + i * lda, mBlock, kk, kBlock, alpha, aPack);
+                        PackingUtils.packAStrided(a, aOffset, lda, i, mBlock, kk, kBlock, alpha, aPack);
                         PerfTimers.record("GEMM.packA", tPA);
 
                         int cOff = cOffset + i * ldc + jj;

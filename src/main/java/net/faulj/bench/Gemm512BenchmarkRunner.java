@@ -4,6 +4,8 @@ import net.faulj.compute.DispatchPolicy;
 import net.faulj.compute.RuntimeProfile;
 import net.faulj.kernels.gemm.Gemm;
 import net.faulj.matrix.Matrix;
+import net.faulj.nativeblas.BackendSnapshot;
+import net.faulj.nativeblas.BackendRegistry;
 import jdk.incubator.vector.DoubleVector;
 
 import java.util.Arrays;
@@ -65,11 +67,18 @@ public final class Gemm512BenchmarkRunner {
             mean += sec;
         }
         mean /= seconds.length;
+        BackendSnapshot backend = BackendRegistry.snapshot();
 
         System.out.println("GEMM_512_BENCHMARK");
         System.out.println("size=" + n);
         System.out.println("vector_lanes=" + DoubleVector.SPECIES_PREFERRED.length());
         System.out.println("parallelism=" + policy.getParallelism());
+        System.out.println("backend_requested=" + backend.requestedBackend().id());
+        System.out.println("backend_active=" + backend.activeBackend());
+        System.out.println("backend_fallback=" + backend.fallbackToJava());
+        System.out.println("native_status=" + backend.nativeContext().getStatus());
+        System.out.println("native_provider=" + backend.nativeContext().getProviderDescription());
+        System.out.println("native_workspace_handle=" + backend.nativeContext().getWorkspaceHandle().address());
         System.out.println("warmupRuns=" + warmupRuns);
         System.out.println("measuredRuns=" + measuredRuns);
         System.out.printf("best_ms=%.6f%n", best * 1000.0);

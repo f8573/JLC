@@ -3,6 +3,7 @@ package net.faulj.eigen.qr;
 import java.util.ArrayList;
 import java.util.List;
 
+import net.faulj.decomposition.hessenberg.HessenbergReduction;
 import net.faulj.decomposition.qr.HouseholderQR;
 import net.faulj.decomposition.result.HessenbergResult;
 import net.faulj.decomposition.result.QRResult;
@@ -69,7 +70,7 @@ public class ExplicitQRIteration {
         boolean symmetric = isSymmetric(A, EPSILON);
         
         // Step 1: Reduce to Hessenberg form
-        HessenbergResult hessResult = BlockedHessenbergQR.decompose(A);
+        HessenbergResult hessResult = HessenbergReduction.decompose(A);
         Matrix T = hessResult.getH();
         Matrix Q = hessResult.getQ();
         

@@ -2,8 +2,8 @@ package net.faulj.decomposition.qr;
 
 import net.faulj.decomposition.result.QRResult;
 import net.faulj.matrix.Matrix;
-import net.faulj.compute.DispatchPolicy;
 import net.faulj.kernels.gemm.Gemm;
+import net.faulj.nativeblas.NativeFactorizationSupport;
 import jdk.incubator.vector.*;
 
 /**
@@ -14,12 +14,13 @@ import jdk.incubator.vector.*;
  * This enables true BLAS3-like performance through SIMD vectorization.
  */
 public final class HouseholderQR {
-    private static final double EPS = 1e-12;
     private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
     private static final int LANE_SIZE = SPECIES.length();
-    private static final int BLOCK_SIZE = 64; // Optimal for L1 cache
-    private static final int TRANSPOSE_BLOCK = 32;
-    private static final int TRAILING_BLOCK = 128;
+    // Smaller panels reduce the serial Householder panel cost without materially
+    // hurting the GEMM-dominated trailing updates on the square sizes we score.
+    private static final int DEFAULT_BLOCK_SIZE = 32;
+    private static final int DEFAULT_TRANSPOSE_BLOCK = 32;
+    private static final int DEFAULT_TRAILING_BLOCK = 128;
 
     private HouseholderQR() {}
 
@@ -63,23 +64,34 @@ public final class HouseholderQR {
         final int m = A.getRowCount();
         final int n = A.getColumnCount();
         final int kMax = Math.min(m, n);
+        final int qRows = thin ? kMax : m;
+        final int rRows = thin ? kMax : m;
+
+        double[] qVendor = new double[m * qRows];
+        double[] rVendor = new double[rRows * n];
+        if (NativeFactorizationSupport.tryQr(A.getRawData(), m, n, thin, qVendor, rVendor)) {
+            return new QRResult(A, Matrix.wrap(qVendor, m, qRows), Matrix.wrap(rVendor, rRows, n));
+        }
+
+        final int transposeBlock = transposeBlock();
+        final int blockSize = blockSize();
+        final int trailingBlock = trailingBlock();
 
         // Convert to column-major (transposed) for contiguous column access
-        double[] AT = toColumnMajor(A.getRawData(), m, n);
+        double[] AT = toColumnMajor(A.getRawData(), m, n, transposeBlock);
         double[] tau = new double[kMax];
-        Workspace ws = new Workspace(m, n);
+        Workspace ws = new Workspace(m, n, blockSize, trailingBlock);
 
         // Perform blocked Householder QR factorization
         factorizeBlocked(AT, tau, m, n, kMax, ws);
 
         // Build Q in column-major, then transpose back to row-major
-        final int qRows = thin ? kMax : m;
         double[] QT = buildQ(AT, tau, m, n, qRows, kMax);
 
         // Extract R from column-major representation
         Matrix R = extractR(AT, m, n, kMax, thin);
 
-        Matrix Q = fromColumnMajor(QT, m, qRows);
+        Matrix Q = fromColumnMajor(QT, m, qRows, transposeBlock);
 
         return new QRResult(A, Q, R);
     }
@@ -90,11 +102,15 @@ public final class HouseholderQR {
 
         final int m = A.getRowCount();
         final int n = A.getColumnCount();
+        if (NativeFactorizationSupport.tryQrFactorizeOnly(A.getRawData(), m, n)) {
+            return;
+        }
         final int kMax = Math.min(m, n);
+        final int blockSize = blockSize();
 
-        double[] AT = toColumnMajor(A.getRawData(), m, n);
+        double[] AT = toColumnMajor(A.getRawData(), m, n, transposeBlock());
         double[] tau = new double[kMax];
-        Workspace ws = new Workspace(m, n);
+        Workspace ws = new Workspace(m, n, blockSize, trailingBlock());
 
         factorizeBlocked(AT, tau, m, n, kMax, ws);
     }
@@ -102,23 +118,22 @@ public final class HouseholderQR {
     /**
      * Convert row-major matrix to column-major (transposed)
      */
-    private static double[] toColumnMajor(double[] a, int rows, int cols) {
+    private static double[] toColumnMajor(double[] a, int rows, int cols, int transposeBlock) {
         double[] at = new double[rows * cols];
-        transposeBlocked(a, at, rows, cols);
+        transposeBlocked(a, at, rows, cols, transposeBlock);
         return at;
     }
 
     /**
      * Convert column-major matrix back to row-major
      */
-    private static Matrix fromColumnMajor(double[] at, int rows, int cols) {
+    private static Matrix fromColumnMajor(double[] at, int rows, int cols, int transposeBlock) {
         double[] a = new double[rows * cols];
-        transposeBlocked(at, a, cols, rows);
+        transposeBlocked(at, a, cols, rows, transposeBlock);
         return Matrix.wrap(a, rows, cols);
     }
 
-    private static void transposeBlocked(double[] src, double[] dst, int rows, int cols) {
-        int block = TRANSPOSE_BLOCK;
+    private static void transposeBlocked(double[] src, double[] dst, int rows, int cols, int block) {
         for (int i = 0; i < rows; i += block) {
             int iMax = Math.min(i + block, rows);
             for (int j = 0; j < cols; j += block) {
@@ -139,8 +154,8 @@ public final class HouseholderQR {
      */
     private static void factorizeBlocked(double[] AT, double[] tau, int m, int n, int kMax, Workspace ws) {
         // Process matrix in blocks for cache efficiency
-        for (int kStart = 0; kStart < kMax; kStart += BLOCK_SIZE) {
-            int kEnd = Math.min(kStart + BLOCK_SIZE, kMax);
+        for (int kStart = 0; kStart < kMax; kStart += ws.panelSize) {
+            int kEnd = Math.min(kStart + ws.panelSize, kMax);
             
             // 1. Compute panel factorization (current block)
             factorizePanel(AT, tau, m, n, kStart, kEnd);
@@ -175,7 +190,6 @@ public final class HouseholderQR {
                                              int kStart, int kEnd, Workspace ws) {
         int trailingCols = n - kEnd;
         int panelSizeActual = kEnd - kStart;
-        int panelSize = ws.panelSize;
 
         if (trailingCols <= 0 || panelSizeActual <= 0) {
             return;
@@ -184,12 +198,10 @@ public final class HouseholderQR {
         int rows = m;
 
         // Build packed V and V^T for compact WY representation
-        packV(AT, m, kStart, kEnd, panelSize, ws.vPack, ws.vtPack);
+        packV(AT, m, kStart, kEnd, ws.panelSize, ws.vPack, ws.vtPack);
 
         // Build T for compact WY representation
-        buildT(ws.vPack, tau, panelSizeActual, panelSize, rows, kStart, ws.t);
-
-        DispatchPolicy policy = DispatchPolicy.defaultPolicy();
+        buildT(ws.vtPack, tau, panelSizeActual, ws.panelSize, rows, kStart, ws.t);
 
         int blockCols = ws.blockCols;
         for (int colStart = 0; colStart < trailingCols; colStart += blockCols) {
@@ -197,19 +209,27 @@ public final class HouseholderQR {
 
             packTrailingBlock(AT, m, kEnd, kStart, colStart, blockColsUsed, blockCols, ws.cBlock);
 
-            Matrix Vt = Matrix.wrap(ws.vtPack, panelSize, rows);
-            Matrix Cb = Matrix.wrap(ws.cBlock, rows, blockCols);
-            Matrix Wm = Matrix.wrap(ws.w, panelSize, blockCols);
-
             // W = V^T * C
-            Gemm.gemm(Vt, Cb, Wm, 1.0, 0.0, policy);
+            Gemm.gemmStrided(
+                ws.vtPack, 0, rows,
+                ws.cBlock, 0, blockCols,
+                ws.w, 0, blockCols,
+                panelSizeActual, rows, blockColsUsed,
+                1.0, 0.0
+            );
 
-            // W = T^T * W
-            applyTTranspose(ws.t, ws.w, panelSize, blockCols, ws.temp);
+            // W = T^T * W. T is stored with the workspace panel stride, even
+            // when this is a short final panel.
+            applyTTranspose(ws.t, ws.panelSize, ws.w, panelSizeActual, blockColsUsed, blockCols, ws.temp);
 
             // C = C - V * W
-            Matrix V = Matrix.wrap(ws.vPack, rows, panelSize);
-            Gemm.gemm(V, Wm, Cb, -1.0, 1.0, policy);
+            Gemm.gemmStrided(
+                ws.vPack, 0, ws.panelSize,
+                ws.w, 0, blockCols,
+                ws.cBlock, 0, blockCols,
+                rows, panelSizeActual, blockColsUsed,
+                -1.0, 1.0
+            );
 
             unpackTrailingBlock(AT, m, kEnd, kStart, colStart, blockColsUsed, blockCols, ws.cBlock);
         }
@@ -300,19 +320,21 @@ public final class HouseholderQR {
     /**
      * Build the upper triangular T for compact WY representation
      */
-    private static void buildT(double[] vPack, double[] tau, int panelSizeActual, int panelSize,
+    private static void buildT(double[] vtPack, double[] tau, int panelSizeActual, int panelSize,
                                int rows, int kStart, double[] T) {
         java.util.Arrays.fill(T, 0.0);
         for (int i = 0; i < panelSizeActual; i++) {
             double tauK = tau[kStart + i];
             T[i * panelSize + i] = tauK;
             int rowStart = kStart + i;
+            int tailLength = rows - rowStart;
 
             for (int r = 0; r < i; r++) {
-                double dot = 0.0;
-                for (int row = rowStart; row < rows; row++) {
-                    dot += vPack[row * panelSize + r] * vPack[row * panelSize + i];
-                }
+                double dot = dotProduct(
+                    vtPack, r * rows + rowStart,
+                    vtPack, i * rows + rowStart,
+                    tailLength
+                );
                 T[r * panelSize + i] = -tauK * dot;
             }
 
@@ -329,19 +351,28 @@ public final class HouseholderQR {
     /**
      * Apply W = T^T * W for upper triangular T
      */
-    private static void applyTTranspose(double[] T, double[] W,
-                                        int panelSize, int trailingCols, double[] temp) {
+    private static void applyTTranspose(double[] T, int tStride, double[] W,
+                                        int panelSize, int trailingCols, int trailingStride, double[] temp) {
         for (int i = 0; i < panelSize; i++) {
-            for (int j = 0; j < trailingCols; j++) {
-                double sum = 0.0;
-                for (int k = 0; k <= i; k++) {
-                    sum = Math.fma(T[k * panelSize + i], W[k * trailingCols + j], sum);
+            int dstBase = i * trailingStride;
+            java.util.Arrays.fill(temp, dstBase, dstBase + trailingCols, 0.0);
+            for (int k = 0; k <= i; k++) {
+                double coeff = T[k * tStride + i];
+                if (coeff == 0.0) {
+                    continue;
                 }
-                temp[i * trailingCols + j] = sum;
+                scaledAdd(
+                    W, k * trailingStride,
+                    temp, dstBase,
+                    trailingCols, coeff
+                );
             }
         }
 
-        System.arraycopy(temp, 0, W, 0, panelSize * trailingCols);
+        for (int i = 0; i < panelSize; i++) {
+            int rowBase = i * trailingStride;
+            System.arraycopy(temp, rowBase, W, rowBase, trailingCols);
+        }
     }
 
     /**
@@ -538,10 +569,10 @@ public final class HouseholderQR {
         final int blockCols;
         final int panelSize;
 
-        Workspace(int m, int n) {
-            int maxPanel = BLOCK_SIZE;
+        Workspace(int m, int n, int panelSize, int trailingBlock) {
+            int maxPanel = panelSize;
             int maxRows = m;
-            int maxCols = Math.min(TRAILING_BLOCK, Math.max(m, n));
+            int maxCols = Math.min(trailingBlock, Math.max(m, n));
             this.blockCols = maxCols;
             this.panelSize = maxPanel;
             this.vPack = new double[maxRows * maxPanel];
@@ -576,5 +607,61 @@ public final class HouseholderQR {
         }
         
         return Matrix.wrap(R, rRows, rCols);
+    }
+
+    private static double dotProduct(double[] a, int aOffset, double[] b, int bOffset, int length) {
+        int index = 0;
+        int vectorBound = SPECIES.loopBound(length);
+        DoubleVector sum = DoubleVector.zero(SPECIES);
+        for (; index < vectorBound; index += LANE_SIZE) {
+            DoubleVector av = DoubleVector.fromArray(SPECIES, a, aOffset + index);
+            DoubleVector bv = DoubleVector.fromArray(SPECIES, b, bOffset + index);
+            sum = sum.add(av.mul(bv));
+        }
+        double dot = sum.reduceLanes(VectorOperators.ADD);
+        for (; index < length; index++) {
+            dot = Math.fma(a[aOffset + index], b[bOffset + index], dot);
+        }
+        return dot;
+    }
+
+    private static void scaledAdd(double[] src, int srcOffset,
+                                  double[] dst, int dstOffset,
+                                  int length, double scale) {
+        int index = 0;
+        int vectorBound = SPECIES.loopBound(length);
+        DoubleVector scaleVector = DoubleVector.broadcast(SPECIES, scale);
+        for (; index < vectorBound; index += LANE_SIZE) {
+            DoubleVector srcVector = DoubleVector.fromArray(SPECIES, src, srcOffset + index);
+            DoubleVector dstVector = DoubleVector.fromArray(SPECIES, dst, dstOffset + index);
+            srcVector.fma(scaleVector, dstVector).intoArray(dst, dstOffset + index);
+        }
+        for (; index < length; index++) {
+            dst[dstOffset + index] = Math.fma(scale, src[srcOffset + index], dst[dstOffset + index]);
+        }
+    }
+
+    private static int blockSize() {
+        return integerProperty("net.faulj.decomposition.qr.blockSize", DEFAULT_BLOCK_SIZE);
+    }
+
+    private static int trailingBlock() {
+        return integerProperty("net.faulj.decomposition.qr.trailingBlock", DEFAULT_TRAILING_BLOCK);
+    }
+
+    private static int transposeBlock() {
+        return integerProperty("net.faulj.decomposition.qr.transposeBlock", DEFAULT_TRANSPOSE_BLOCK);
+    }
+
+    private static int integerProperty(String key, int fallback) {
+        String value = System.getProperty(key);
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        try {
+            return Math.max(1, Integer.parseInt(value.trim()));
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
     }
 }

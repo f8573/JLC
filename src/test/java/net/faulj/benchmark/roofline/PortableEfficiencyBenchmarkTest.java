@@ -2,13 +2,18 @@ package net.faulj.benchmark.roofline;
 
 import net.faulj.compute.DispatchPolicy;
 import net.faulj.compute.GemmDispatch;
+import net.faulj.decomposition.bidiagonal.Bidiagonalization;
+import net.faulj.decomposition.cholesky.CholeskyDecomposition;
 import net.faulj.decomposition.hessenberg.HessenbergReduction;
 import net.faulj.decomposition.lu.LUDecomposition;
+import net.faulj.decomposition.polar.PolarDecomposition;
 import net.faulj.decomposition.qr.HouseholderQR;
 import net.faulj.decomposition.svd.SVDecomposition;
 import net.faulj.eigen.schur.RealSchurDecomposition;
 import net.faulj.kernels.gemm.Gemm;
 import net.faulj.matrix.Matrix;
+import net.faulj.nativeblas.NativeGemmProfile;
+import net.faulj.nativeblas.NativeProfiling;
 import org.junit.Test;
 
 import java.io.IOException;
@@ -39,6 +44,7 @@ public class PortableEfficiencyBenchmarkTest {
     private static final String GEMM_THREADS_PROPERTY = "jlc.roofline.gemm_threads";
     private static final String GEMM_MR_VALUES_PROPERTY = "jlc.roofline.gemm_mr_values";
     private static final String GEMM_NR_VALUES_PROPERTY = "jlc.roofline.gemm_nr_values";
+    private static final String SIZES_PROPERTY = "jlc.roofline.sizes";
 
     private static final int DEFAULT_GEMM_MAX_N = 2048;
     // Sweep sizes from 128 up to 2048: powers-of-two and midpoints
@@ -53,19 +59,23 @@ public class PortableEfficiencyBenchmarkTest {
     public void runPortableEfficiencyBenchmarks() throws IOException {
         BenchmarkOutputs outputs = BenchmarkOutputs.fromSystemProperties();
         RooflineSession roofline = RooflineSession.get();
+        int[] sweepSizes = sweepSizes();
         List<PesResult> results = new ArrayList<>();
         List<KernelSweepSummary> maxima = new ArrayList<>();
 
-        GemmSweepArtifacts gemmArtifacts = sweepBestGemmBySize(SWEEP_SIZES, gemmMaxEnabled(), roofline);
+        GemmSweepArtifacts gemmArtifacts = sweepBestGemmBySize(sweepSizes, gemmMaxEnabled(), roofline);
         results.addAll(gemmArtifacts.bestResults);
         maxima.add(summarizeKernel("GEMM", gemmArtifacts.bestResults, gemmArtifacts.testedSizes));
 
         if (!gemmOnlyMode()) {
-            maxima.add(sweepKernel("QR", SWEEP_SIZES, 2048, roofline, PortableEfficiencyBenchmarkTest::runQr, results, new ArrayList<>()));
-            maxima.add(sweepKernel("LU", SWEEP_SIZES, 2048, roofline, PortableEfficiencyBenchmarkTest::runLu, results, new ArrayList<>()));
-            maxima.add(sweepKernel("Hessenberg", SWEEP_SIZES, 1024, roofline, PortableEfficiencyBenchmarkTest::runHessenberg, results, new ArrayList<>()));
-            maxima.add(sweepKernel("Schur", SWEEP_SIZES, 512, roofline, PortableEfficiencyBenchmarkTest::runSchur, results, new ArrayList<>()));
-            maxima.add(sweepKernel("SVD", SWEEP_SIZES, 512, roofline, PortableEfficiencyBenchmarkTest::runSvd, results, new ArrayList<>()));
+            maxima.add(sweepKernel("QR", sweepSizes, 2048, roofline, PortableEfficiencyBenchmarkTest::runQr, results, new ArrayList<>()));
+            maxima.add(sweepKernel("LU", sweepSizes, 2048, roofline, PortableEfficiencyBenchmarkTest::runLu, results, new ArrayList<>()));
+            maxima.add(sweepKernel("Hessenberg", sweepSizes, 1024, roofline, PortableEfficiencyBenchmarkTest::runHessenberg, results, new ArrayList<>()));
+            maxima.add(sweepKernel("Bidiagonal", sweepSizes, 1024, roofline, PortableEfficiencyBenchmarkTest::runBidiagonal, results, new ArrayList<>()));
+            maxima.add(sweepKernel("Cholesky", sweepSizes, 1024, roofline, PortableEfficiencyBenchmarkTest::runCholesky, results, new ArrayList<>()));
+            maxima.add(sweepKernel("Schur", sweepSizes, 512, roofline, PortableEfficiencyBenchmarkTest::runSchur, results, new ArrayList<>()));
+            maxima.add(sweepKernel("SVD", sweepSizes, 512, roofline, PortableEfficiencyBenchmarkTest::runSvd, results, new ArrayList<>()));
+            maxima.add(sweepKernel("Polar", sweepSizes, 512, roofline, PortableEfficiencyBenchmarkTest::runPolar, results, new ArrayList<>()));
         }
 
         Files.createDirectories(outputs.outputDir);
@@ -140,15 +150,52 @@ public class PortableEfficiencyBenchmarkTest {
                 .enableStrassen(false)
                 .build();
 
-            double bestSeconds = bestOf(warmupForSize(n), measuredRunsForSize(n), () -> {
-                Gemm.gemm(a, b, c, 1.0, 0.0, policy);
-                sink += c.get(0, 0);
-            });
+            long bestNanos = Long.MAX_VALUE;
+            NativeGemmProfile bestNativeProfile = null;
+            boolean profilingEnabled = NativeProfiling.setEnabled(true);
+            try {
+                for (int i = 0; i < warmupForSize(n); i++) {
+                    Gemm.gemm(a, b, c, 1.0, 0.0, policy);
+                    sink += c.get(0, 0);
+                }
+                for (int i = 0; i < measuredRunsForSize(n); i++) {
+                    if (profilingEnabled) {
+                        NativeProfiling.reset();
+                    }
+                    long start = System.nanoTime();
+                    Gemm.gemm(a, b, c, 1.0, 0.0, policy);
+                    long elapsed = System.nanoTime() - start;
+                    sink += c.get(0, 0);
+                    if (elapsed < bestNanos) {
+                        bestNanos = elapsed;
+                        bestNativeProfile = profilingEnabled ? NativeProfiling.snapshot().orElse(NativeGemmProfile.EMPTY) : null;
+                    }
+                }
+            } finally {
+                if (profilingEnabled) {
+                    NativeProfiling.setEnabled(false);
+                    NativeProfiling.reset();
+                }
+            }
+
+            double bestSeconds = bestNanos / 1e9;
 
             GemmDispatch.BlockSizes blocks = GemmDispatch.computeBlockSizes();
             KernelProfile profile = KernelModel.gemm(n, n, n, blocks.mc, blocks.nc, blocks.kc);
             PesResult result = PesScorer.score(profile, bestSeconds, roofline);
-            return new GemmRunResult(result, threads, blocks.mr, blocks.nr, blocks.mc, blocks.nc, blocks.kc);
+            PesResult nativeCoreResult = null;
+            double nativeCoreCoverage = 0.0;
+            if (bestNativeProfile != null && bestNativeProfile.hasTimingData()) {
+                double nativeCoreSeconds = bestNativeProfile.wallSeconds();
+                if (nativeCoreSeconds > 0.0) {
+                    nativeCoreResult = PesScorer.score(profile, nativeCoreSeconds, roofline);
+                    nativeCoreCoverage = nativeCoreSeconds / Math.max(1e-12, bestSeconds);
+                }
+            }
+            return new GemmRunResult(
+                result, threads, blocks.mr, blocks.nr, blocks.mc, blocks.nc, blocks.kc,
+                bestNativeProfile, nativeCoreResult, nativeCoreCoverage
+            );
         } finally {
             restoreProperty("la.gemm.mr", oldMr);
             restoreProperty("la.gemm.nr", oldNr);
@@ -207,6 +254,24 @@ public class PortableEfficiencyBenchmarkTest {
         return PesScorer.score(KernelModel.hessenberg(n), bestSeconds, roofline);
     }
 
+    private static PesResult runBidiagonal(int n, RooflineSession roofline) {
+        Matrix a = randomSquareMatrix(n, 4501L);
+        Bidiagonalization bidiagonalization = new Bidiagonalization();
+        double bestSeconds = bestOf(Math.min(1, warmupForSize(n)), Math.max(1, measuredRunsForSize(n) - 1), () -> {
+            sink += bidiagonalization.decompose(a).getB().get(0, 0);
+        });
+        return PesScorer.score(KernelModel.bidiagonal(n), bestSeconds, roofline);
+    }
+
+    private static PesResult runCholesky(int n, RooflineSession roofline) {
+        Matrix a = randomSpdMatrix(n, 4751L);
+        CholeskyDecomposition cholesky = new CholeskyDecomposition();
+        double bestSeconds = bestOf(Math.min(1, warmupForSize(n)), Math.max(1, measuredRunsForSize(n) - 1), () -> {
+            sink += cholesky.decompose(a).getL().get(0, 0);
+        });
+        return PesScorer.score(KernelModel.cholesky(n), bestSeconds, roofline);
+    }
+
     private static PesResult runSchur(int n, RooflineSession roofline) {
         RuntimeException last = null;
         for (int attempt = 0; attempt < 3; attempt++) {
@@ -234,11 +299,40 @@ public class PortableEfficiencyBenchmarkTest {
         return PesScorer.score(KernelModel.svd(n), bestSeconds, roofline);
     }
 
+    private static PesResult runPolar(int n, RooflineSession roofline) {
+        Matrix a = randomSquareMatrix(n, 6501L);
+        PolarDecomposition polar = new PolarDecomposition();
+        double bestSeconds = bestOf(Math.min(1, warmupForSize(n)), Math.max(1, measuredRunsForSize(n) - 1), () -> {
+            sink += polar.decompose(a).getP().get(0, 0);
+        });
+        return PesScorer.score(KernelModel.polar(n), bestSeconds, roofline);
+    }
+
     private static Matrix randomSquareMatrix(int n, long seed) {
         Random rnd = new Random(seed);
         double[] data = new double[n * n];
         for (int i = 0; i < data.length; i++) {
             data[i] = rnd.nextDouble() - 0.5;
+        }
+        return Matrix.wrap(data, n, n);
+    }
+
+    private static Matrix randomSpdMatrix(int n, long seed) {
+        Random rnd = new Random(seed);
+        double[] data = new double[n * n];
+        double[] rowSums = new double[n];
+        for (int row = 0; row < n; row++) {
+            for (int col = row + 1; col < n; col++) {
+                double value = rnd.nextDouble() - 0.5;
+                data[row * n + col] = value;
+                data[col * n + row] = value;
+                double abs = Math.abs(value);
+                rowSums[row] += abs;
+                rowSums[col] += abs;
+            }
+        }
+        for (int i = 0; i < n; i++) {
+            data[i * n + i] = rowSums[i] + 1.0;
         }
         return Matrix.wrap(data, n, n);
     }
@@ -332,7 +426,7 @@ public class PortableEfficiencyBenchmarkTest {
 
     private static void writeCsv(Path output, List<PesResult> results) throws IOException {
         StringBuilder sb = new StringBuilder();
-        sb.append("kernel,m,n,k,arithmetic_intensity,traffic_model,bound_type,memory_level,")
+        sb.append("kernel,measurement_scope,m,n,k,arithmetic_intensity,traffic_model,bound_type,memory_level,")
             .append("compute_utilization,memory_utilization,algorithmic_efficiency,")
             .append("portable_efficiency_score,pes_l1,pes_l2,pes_l3,pes_dram,")
             .append("measured_gflops,compute_roof_gflops,roof_gflops,memory_roof_gbps,")
@@ -340,6 +434,7 @@ public class PortableEfficiencyBenchmarkTest {
         sb.append('\n');
         for (PesResult r : results) {
             sb.append(r.kernel).append(',')
+                .append("end_to_end").append(',')
                 .append(r.m).append(',')
                 .append(r.n).append(',')
                 .append(r.k).append(',')
@@ -386,7 +481,10 @@ public class PortableEfficiencyBenchmarkTest {
         StringBuilder sb = new StringBuilder();
         sb.append("m,n,k,threads,mr,nr,mc,nc,kc,measured_gflops,portable_efficiency_score,")
             .append("compute_roof_gflops,roof_gflops,bound_type,memory_level,elapsed_seconds,")
-            .append("arithmetic_intensity,traffic_model,confidence,flag");
+            .append("arithmetic_intensity,traffic_model,confidence,flag,measurement_scope,")
+            .append("native_core_elapsed_seconds,native_core_measured_gflops,native_core_portable_efficiency_score,")
+            .append("native_core_coverage_fraction,native_profile_calls,native_vendor_seconds,native_scale_c_seconds,")
+            .append("native_pack_a_seconds,native_pack_b_seconds,native_kernel_seconds,native_thread_seconds");
         sb.append('\n');
         for (GemmRunResult run : runs) {
             appendGemmRunCsvLine(sb, run);
@@ -398,7 +496,10 @@ public class PortableEfficiencyBenchmarkTest {
         StringBuilder sb = new StringBuilder();
         sb.append("m,n,k,threads,mr,nr,mc,nc,kc,measured_gflops,portable_efficiency_score,")
             .append("compute_roof_gflops,roof_gflops,bound_type,memory_level,elapsed_seconds,")
-            .append("arithmetic_intensity,traffic_model,confidence,flag");
+            .append("arithmetic_intensity,traffic_model,confidence,flag,measurement_scope,")
+            .append("native_core_elapsed_seconds,native_core_measured_gflops,native_core_portable_efficiency_score,")
+            .append("native_core_coverage_fraction,native_profile_calls,native_vendor_seconds,native_scale_c_seconds,")
+            .append("native_pack_a_seconds,native_pack_b_seconds,native_kernel_seconds,native_thread_seconds");
         sb.append('\n');
         for (GemmRunResult run : bestRuns) {
             appendGemmRunCsvLine(sb, run);
@@ -427,7 +528,19 @@ public class PortableEfficiencyBenchmarkTest {
             .append(format(r.arithmeticIntensity)).append(',')
             .append(r.trafficModel).append(',')
             .append(r.confidence).append(',')
-            .append(r.flag)
+            .append(r.flag).append(',')
+            .append("end_to_end").append(',')
+            .append(format(run.nativeCoreSeconds())).append(',')
+            .append(format(run.nativeCoreMeasuredGflops())).append(',')
+            .append(format(run.nativeCorePes())).append(',')
+            .append(format(run.nativeCoreCoverage)).append(',')
+            .append(run.nativeProfileCallCount()).append(',')
+            .append(format(run.nativeVendorSeconds())).append(',')
+            .append(format(run.nativeScaleCSeconds())).append(',')
+            .append(format(run.nativePackASeconds())).append(',')
+            .append(format(run.nativePackBSeconds())).append(',')
+            .append(format(run.nativeKernelSeconds())).append(',')
+            .append(format(run.nativeThreadSeconds()))
             .append('\n');
     }
 
@@ -487,8 +600,13 @@ public class PortableEfficiencyBenchmarkTest {
             sb.append("      \"mc\": ").append(run.mc).append(",\n");
             sb.append("      \"nc\": ").append(run.nc).append(",\n");
             sb.append("      \"kc\": ").append(run.kc).append(",\n");
+            sb.append("      \"measurement_scope\": \"end_to_end\",\n");
             sb.append("      \"measured_gflops\": ").append(format(r.measuredGflops)).append(",\n");
             sb.append("      \"portable_efficiency_score\": ").append(format(r.portableEfficiencyScore)).append(",\n");
+            sb.append("      \"native_core_elapsed_seconds\": ").append(format(run.nativeCoreSeconds())).append(",\n");
+            sb.append("      \"native_core_measured_gflops\": ").append(format(run.nativeCoreMeasuredGflops())).append(",\n");
+            sb.append("      \"native_core_portable_efficiency_score\": ").append(format(run.nativeCorePes())).append(",\n");
+            sb.append("      \"native_core_coverage_fraction\": ").append(format(run.nativeCoreCoverage)).append(",\n");
             sb.append("      \"roof_gflops\": ").append(format(r.roofGflops)).append(",\n");
             sb.append("      \"bound_type\": \"").append(escape(r.boundType)).append("\",\n");
             sb.append("      \"memory_level\": \"").append(escape(r.memoryLevel)).append("\"\n");
@@ -504,6 +622,7 @@ public class PortableEfficiencyBenchmarkTest {
             PesResult r = results.get(i);
             sb.append("    {\n");
             sb.append("      \"kernel\": \"").append(escape(r.kernel)).append("\",\n");
+            sb.append("      \"measurement_scope\": \"end_to_end\",\n");
             sb.append("      \"m\": ").append(r.m).append(",\n");
             sb.append("      \"n\": ").append(r.n).append(",\n");
             sb.append("      \"k\": ").append(r.k).append(",\n");
@@ -578,9 +697,17 @@ public class PortableEfficiencyBenchmarkTest {
         System.out.println("--- GEMM best-by-size ---");
         for (GemmRunResult run : gemmBestRuns) {
             PesResult r = run.result;
-            System.out.printf(Locale.ROOT,
-                "GEMM n=%d measured_gflops=%.4f pes=%.4f threads=%d mr=%d nr=%d bound=%s level=%s%n",
-                r.n, r.measuredGflops, r.portableEfficiencyScore, run.threads, run.mr, run.nr, r.boundType, r.memoryLevel);
+            if (run.nativeCoreResult != null) {
+                System.out.printf(Locale.ROOT,
+                    "GEMM n=%d measured_gflops=%.4f pes=%.4f core_gflops=%.4f core_pes=%.4f coverage=%.4f threads=%d mr=%d nr=%d bound=%s level=%s%n",
+                    r.n, r.measuredGflops, r.portableEfficiencyScore,
+                    run.nativeCoreResult.measuredGflops, run.nativeCoreResult.portableEfficiencyScore, run.nativeCoreCoverage,
+                    run.threads, run.mr, run.nr, r.boundType, r.memoryLevel);
+            } else {
+                System.out.printf(Locale.ROOT,
+                    "GEMM n=%d measured_gflops=%.4f pes=%.4f threads=%d mr=%d nr=%d bound=%s level=%s%n",
+                    r.n, r.measuredGflops, r.portableEfficiencyScore, run.threads, run.mr, run.nr, r.boundType, r.memoryLevel);
+            }
         }
         System.out.println("--- Per-kernel results ---");
         for (PesResult r : results) {
@@ -686,6 +813,10 @@ public class PortableEfficiencyBenchmarkTest {
         }
     }
 
+    private static int[] sweepSizes() {
+        return parsePositiveIntList(System.getProperty(SIZES_PROPERTY), SWEEP_SIZES);
+    }
+
     private static String readPropertyOrEnv(String propertyKey, String alternatePropertyKey, String envKey, String fallback) {
         String byProperty = System.getProperty(propertyKey);
         if (byProperty != null && !byProperty.isBlank()) {
@@ -788,8 +919,12 @@ public class PortableEfficiencyBenchmarkTest {
         final int mc;
         final int nc;
         final int kc;
+        final NativeGemmProfile nativeProfile;
+        final PesResult nativeCoreResult;
+        final double nativeCoreCoverage;
 
-        GemmRunResult(PesResult result, int threads, int mr, int nr, int mc, int nc, int kc) {
+        GemmRunResult(PesResult result, int threads, int mr, int nr, int mc, int nc, int kc,
+                      NativeGemmProfile nativeProfile, PesResult nativeCoreResult, double nativeCoreCoverage) {
             this.result = result;
             this.threads = threads;
             this.mr = mr;
@@ -797,6 +932,49 @@ public class PortableEfficiencyBenchmarkTest {
             this.mc = mc;
             this.nc = nc;
             this.kc = kc;
+            this.nativeProfile = nativeProfile == null ? NativeGemmProfile.EMPTY : nativeProfile;
+            this.nativeCoreResult = nativeCoreResult;
+            this.nativeCoreCoverage = nativeCoreCoverage;
+        }
+
+        double nativeCoreSeconds() {
+            return nativeCoreResult == null ? 0.0 : nativeCoreResult.elapsedSeconds;
+        }
+
+        double nativeCoreMeasuredGflops() {
+            return nativeCoreResult == null ? 0.0 : nativeCoreResult.measuredGflops;
+        }
+
+        double nativeCorePes() {
+            return nativeCoreResult == null ? 0.0 : nativeCoreResult.portableEfficiencyScore;
+        }
+
+        long nativeProfileCallCount() {
+            return nativeProfile.calls();
+        }
+
+        double nativeVendorSeconds() {
+            return nativeProfile.vendorNanos() / 1e9;
+        }
+
+        double nativeScaleCSeconds() {
+            return nativeProfile.scaleCNanos() / 1e9;
+        }
+
+        double nativePackASeconds() {
+            return nativeProfile.packANanos() / 1e9;
+        }
+
+        double nativePackBSeconds() {
+            return nativeProfile.packBNanos() / 1e9;
+        }
+
+        double nativeKernelSeconds() {
+            return nativeProfile.nativeKernelNanos() / 1e9;
+        }
+
+        double nativeThreadSeconds() {
+            return nativeProfile.nativeThreadingNanos() / 1e9;
         }
     }
 

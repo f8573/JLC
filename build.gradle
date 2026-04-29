@@ -1,6 +1,6 @@
 plugins {
-    id 'org.springframework.boot' version '3.1.4'
-    id 'io.spring.dependency-management' version '1.1.3'
+    id 'org.springframework.boot' version '3.2.10'
+    id 'io.spring.dependency-management' version '1.1.7'
     id 'java'
     id 'application'
 }
@@ -32,16 +32,46 @@ tasks.withType(JavaCompile).configureEach {
     ]
 }
 
+def forwardRuntimeSystemProperties = { task ->
+    System.properties.findAll { key, value ->
+        key.startsWith('jlc.') || key.startsWith('faulj.') || key.startsWith('net.faulj.') || key.startsWith('la.')
+    }.each { key, value ->
+        task.systemProperty key, value
+    }
+}
+
+def nativeBuildDirProvider = layout.buildDirectory.dir("native-backend")
+def nativeLibraryFileProvider = providers.provider {
+    new File(nativeBuildDirProvider.get().asFile, "lib/${System.mapLibraryName('jlc_native')}")
+}
+def nativeSweepExecutableProvider = providers.provider {
+    File buildDir = nativeBuildDirProvider.get().asFile
+    String executableName = getOsString() == 'windows' ? 'jlc_native_gemm_sweep.exe' : 'jlc_native_gemm_sweep'
+    new File(buildDir, "lib/${executableName}")
+}
+def nativeJavaLauncher = javaToolchains.launcherFor {
+    languageVersion = JavaLanguageVersion.of(21)
+}
+
+def configureNativeLibraryProperty = { task ->
+    task.doFirst {
+        if (task.systemProperties.containsKey('jlc.native.lib.path')) {
+            return
+        }
+        File nativeLibrary = nativeLibraryFileProvider.get()
+        if (nativeLibrary.exists()) {
+            task.systemProperty 'jlc.native.lib.path', nativeLibrary.absolutePath
+        }
+    }
+}
+
 tasks.withType(Test).configureEach {
     jvmArgs += [
-            '--add-modules=jdk.incubator.vector',
-            '--enable-preview'
+        '--add-modules=jdk.incubator.vector',
+        '--enable-preview'
     ]
-    System.properties.findAll { key, value ->
-        key.startsWith('jlc.') || key.startsWith('la.')
-    }.each { key, value ->
-        systemProperty key, value
-    }
+    forwardRuntimeSystemProperties(it)
+    configureNativeLibraryProperty(it)
 }
 
 tasks.withType(JavaExec).configureEach {
@@ -49,6 +79,8 @@ tasks.withType(JavaExec).configureEach {
             '--add-modules=jdk.incubator.vector',
             '--enable-preview'
     ]
+    forwardRuntimeSystemProperties(it)
+    configureNativeLibraryProperty(it)
 }
 
 
@@ -79,6 +111,65 @@ def static getArchString() {
     if (osArch.startsWith("arm")) return "arm"
 
     return "unknown"
+}
+
+def static firstNonBlank(String... values) {
+    for (String value : values) {
+        if (value != null && !value.isBlank()) {
+            return value.trim()
+        }
+    }
+    return null
+}
+
+def static getNativeCmakeExecutable() {
+    return firstNonBlank(
+        System.getProperty("jlc.native.cmake"),
+        System.getenv("JLC_NATIVE_CMAKE"),
+        "cmake"
+    )
+}
+
+def static getNativeCmakeGenerator() {
+    String configured = firstNonBlank(
+        System.getProperty("jlc.native.cmake.generator"),
+        System.getenv("JLC_NATIVE_CMAKE_GENERATOR")
+    )
+    if (configured != null) {
+        return configured
+    }
+    return getOsString() == "windows" ? "MinGW Makefiles" : "Unix Makefiles"
+}
+
+def static getNativeBuildType() {
+    return firstNonBlank(
+        System.getProperty("jlc.native.build.type"),
+        System.getenv("JLC_NATIVE_BUILD_TYPE"),
+        "Release"
+    )
+}
+
+def static isSingleConfigCmakeGenerator(String generator) {
+    String normalized = generator == null ? "" : generator.toLowerCase(Locale.ENGLISH)
+    return !(normalized.contains("visual studio") || normalized.contains("xcode") || normalized.contains("multi-config"))
+}
+
+def static getNativeCxxCompiler() {
+    return firstNonBlank(
+        System.getProperty("jlc.native.cxx.compiler"),
+        System.getenv("JLC_NATIVE_CXX_COMPILER")
+    )
+}
+
+def static getNativeMakeProgram() {
+    return firstNonBlank(
+        System.getProperty("jlc.native.make.program"),
+        System.getenv("JLC_NATIVE_MAKE_PROGRAM")
+    )
+}
+
+def static getNativeCmakeOption(String propertyName, String envName) {
+    return firstNonBlank(System.getProperty(propertyName), System.getenv(envName))
 }
 
 //
@@ -139,6 +230,117 @@ test {
     testLogging {
         showStandardStreams = true
     }
+}
+
+tasks.register('configureNativeBackend') {
+    group = 'native'
+    description = 'Configure the JNI C++ backend with CMake'
+    inputs.dir(file('native-backend'))
+    inputs.property('cmakeExecutable', providers.provider { getNativeCmakeExecutable() })
+    inputs.property('cmakeGenerator', providers.provider { getNativeCmakeGenerator() })
+    inputs.property('buildType', providers.provider { getNativeBuildType() })
+    inputs.property('cxxCompiler', providers.provider { getNativeCxxCompiler() ?: '' })
+    inputs.property('makeProgram', providers.provider { getNativeMakeProgram() ?: '' })
+    inputs.property('vendorBlas', providers.provider { getNativeCmakeOption('jlc.native.vendor.blas', 'JLC_NATIVE_VENDOR_BLAS') ?: '' })
+    inputs.property('enableVendorBlas', providers.provider { getNativeCmakeOption('jlc.native.enable.vendor.blas', 'JLC_NATIVE_ENABLE_VENDOR_BLAS') ?: '' })
+    inputs.property('enableMarchNative', providers.provider { getNativeCmakeOption('jlc.native.enable.march.native', 'JLC_NATIVE_ENABLE_MARCH_NATIVE') ?: '' })
+    outputs.dir(nativeBuildDirProvider)
+
+    doLast {
+        File buildDir = nativeBuildDirProvider.get().asFile
+        buildDir.mkdirs()
+        String javaHome = nativeJavaLauncher.get().metadata.installationPath.asFile.absolutePath
+        String generator = getNativeCmakeGenerator()
+        String buildType = getNativeBuildType()
+        List<String> args = [
+            getNativeCmakeExecutable(),
+            '-S', file('native-backend').absolutePath,
+            '-B', buildDir.absolutePath,
+            '-G', generator,
+            "-DJLC_JAVA_HOME=${javaHome}"
+        ]
+        if (isSingleConfigCmakeGenerator(generator)) {
+            args += ["-DCMAKE_BUILD_TYPE=${buildType}"]
+        }
+        String vendorBlas = getNativeCmakeOption('jlc.native.vendor.blas', 'JLC_NATIVE_VENDOR_BLAS')
+        if (vendorBlas) {
+            args += ["-DJLC_NATIVE_VENDOR_BLAS=${vendorBlas.trim().toUpperCase(Locale.ENGLISH)}"]
+        }
+        String enableVendorBlas = getNativeCmakeOption('jlc.native.enable.vendor.blas', 'JLC_NATIVE_ENABLE_VENDOR_BLAS')
+        if (enableVendorBlas) {
+            args += ["-DJLC_NATIVE_ENABLE_VENDOR_BLAS=${enableVendorBlas.trim()}"]
+        }
+        String enableMarchNative = getNativeCmakeOption('jlc.native.enable.march.native', 'JLC_NATIVE_ENABLE_MARCH_NATIVE')
+        if (enableMarchNative) {
+            args += ["-DJLC_NATIVE_ENABLE_MARCH_NATIVE=${enableMarchNative.trim()}"]
+        }
+        String cxxCompiler = getNativeCxxCompiler()
+        String makeProgram = getNativeMakeProgram()
+        if (cxxCompiler) {
+            args += ["-DCMAKE_CXX_COMPILER=${cxxCompiler}"]
+        }
+        if (makeProgram) {
+            args += ["-DCMAKE_MAKE_PROGRAM=${makeProgram}"]
+        }
+        if (getOsString() == 'windows' && generator.equalsIgnoreCase('MinGW Makefiles')) {
+            if (!cxxCompiler) {
+                args += ['-DCMAKE_CXX_COMPILER=g++.exe']
+            }
+            if (!makeProgram) {
+                args += ['-DCMAKE_MAKE_PROGRAM=mingw32-make.exe']
+            }
+            args += ['-DCMAKE_SH=CMAKE_SH-NOTFOUND']
+        }
+        exec {
+            commandLine args
+        }
+    }
+}
+
+tasks.register('buildNativeBackend') {
+    group = 'native'
+    description = 'Build the JNI C++ backend shared library'
+    dependsOn 'configureNativeBackend'
+    inputs.dir(file('native-backend'))
+    outputs.file(nativeLibraryFileProvider)
+
+    doLast {
+        List<String> args = [
+            getNativeCmakeExecutable(),
+            '--build', nativeBuildDirProvider.get().asFile.absolutePath,
+            '--config', getNativeBuildType()
+        ]
+        exec {
+            commandLine args
+        }
+        File nativeLibrary = nativeLibraryFileProvider.get()
+        if (!nativeLibrary.exists()) {
+            throw new GradleException("Expected native library was not produced: ${nativeLibrary}")
+        }
+    }
+}
+
+tasks.register('cleanNativeBackend') {
+    group = 'native'
+    description = 'Delete the native backend build directory'
+    doLast {
+        delete(nativeBuildDirProvider)
+    }
+}
+
+tasks.named('clean') {
+    dependsOn 'cleanNativeBackend'
+}
+
+tasks.register('testNativeBackend', Test) {
+    group = 'verification'
+    description = 'Run native backend integration tests against the built JNI library'
+    dependsOn 'buildNativeBackend'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    systemProperty 'jlc.backend', 'native'
+    systemProperty 'jlc.native.lib.path', nativeLibraryFileProvider.get().absolutePath
+    include 'net/faulj/nativeblas/**'
 }
 
 // Run test main benchmark class from test sources
@@ -215,6 +417,76 @@ tasks.register('runGemm512Benchmark', JavaExec) {
         '-Dfaulj.cuda.enabled=false'
     ]
     main = 'net.faulj.bench.Gemm512BenchmarkRunner'
+    standardInput = System.in
+}
+
+tasks.register('runNativeGemm512Benchmark', JavaExec) {
+    group = 'benchmark'
+    description = 'Run the 512x512 GEMM benchmark with the JNI native backend'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.backend', 'native'
+    systemProperty 'jlc.native.lib.path', nativeLibraryFileProvider.get().absolutePath
+    main = 'net.faulj.bench.Gemm512BenchmarkRunner'
+    standardInput = System.in
+}
+
+tasks.register('runNativeJniGemmSweep', JavaExec) {
+    group = 'benchmark'
+    description = 'Run a square-size GEMM sweep through the JNI native backend'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.backend', 'native'
+    systemProperty 'jlc.native.lib.path', nativeLibraryFileProvider.get().absolutePath
+    main = 'net.faulj.bench.NativeGemmSweepRunner'
+    standardInput = System.in
+}
+
+tasks.register('runNativeCppGemmSweep', Exec) {
+    group = 'benchmark'
+    description = 'Run the standalone native C++ GEMM sweep executable'
+    dependsOn 'buildNativeBackend'
+
+    doFirst {
+        File executable = nativeSweepExecutableProvider.get()
+        if (!executable.exists()) {
+            throw new GradleException("Expected native sweep executable was not produced: ${executable}")
+        }
+        commandLine executable.absolutePath
+        if (project.hasProperty('nativeSweepArgs')) {
+            commandLine += project.property('nativeSweepArgs').toString().split('\\s+').findAll { !it.isBlank() }
+        }
+    }
+}
+
+tasks.register('runGemmBackendComparison', JavaExec) {
+    group = 'benchmark'
+    description = 'Compare Java and JNI native GEMM performance in one run'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.native.lib.path', nativeLibraryFileProvider.get().absolutePath
+    main = 'net.faulj.bench.GemmBackendComparisonRunner'
+    standardInput = System.in
+}
+
+tasks.register('runQrBackendComparison', JavaExec) {
+    group = 'benchmark'
+    description = 'Compare Java and JNI native QR performance across a size sweep'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    main = 'net.faulj.bench.QrBackendComparisonRunner'
     standardInput = System.in
 }
 

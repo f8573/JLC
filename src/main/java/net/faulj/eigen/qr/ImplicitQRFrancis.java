@@ -1,5 +1,6 @@
 package net.faulj.eigen.qr;
 
+import net.faulj.decomposition.hessenberg.HessenbergReduction;
 import net.faulj.decomposition.result.HessenbergResult;
 import net.faulj.decomposition.result.SchurResult;
 import net.faulj.eigen.schur.SchurEigenExtractor;
@@ -22,7 +23,7 @@ import net.faulj.matrix.Matrix;
  *
  * <h2>Algorithm:</h2>
  * <ol>
- * <li>Reduce to Hessenberg form using {@link BlockedHessenbergQR}.</li>
+ * <li>Reduce to Hessenberg form using {@link HessenbergReduction}.</li>
  * <li>Apply size-appropriate QR iteration strategy.</li>
  * <li>Deflate as subdiagonal elements become negligible.</li>
  * </ol>
@@ -70,7 +71,7 @@ public class ImplicitQRFrancis {
         // less accurate results (notably for ill-conditioned or nearly singular
         // matrices). Always reduce to Hessenberg and run the implicit algorithm
         // which includes more careful deflation and shift strategies.
-        HessenbergResult hessResult = BlockedHessenbergQR.decompose(A);
+        HessenbergResult hessResult = HessenbergReduction.decompose(A);
         return decomposeFromHessenbergInternal(hessResult, A, true);
     }
 

@@ -17,9 +17,13 @@ public final class WorkspaceManager {
     public final int panelAOffset;
     public final int yCombinedOffset;
     public final int tCombinedOffset;
+    public final int rows;
+    public final int panelWidth;
 
     public WorkspaceManager(int m, int b, int p, int alignmentBytes) {
         this.alignmentBytes = alignmentBytes;
+        this.rows = m;
+        this.panelWidth = b;
         this.totalDoubles = computeWorkspaceDoubles(m, b, p);
         int totalBytes = totalDoubles * Double.BYTES;
         this.rawBuffer = ByteBuffer.allocateDirect(totalBytes + alignmentBytes);

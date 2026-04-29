@@ -1,23 +1,64 @@
 package net.faulj.decomposition.qr.caqr;
 
+import net.faulj.decomposition.result.QRResult;
 import net.faulj.kernels.gemm.Gemm;
+import net.faulj.matrix.Matrix;
 import net.faulj.util.PerfTimers;
+
 import java.nio.DoubleBuffer;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * Communication-Avoiding QR (CAQR) scaffolding.
- *
- * This class contains high-level skeleton methods. Implementations are added in later steps.
+ * Communication-Avoiding QR (CAQR) using a two-level TSQR reduction.
  */
 public final class CommunicationAvoidingQR {
 
     private CommunicationAvoidingQR() {}
 
     public static CAQRPanelResult factorPanel(double[] A, int aOffset, int m, int b, int lda, QRConfig cfg) {
-        // skeleton: allocate workspace and return a placeholder
-        WorkspaceManager ws = new WorkspaceManager(m, b, Math.max(1, cfg.p == 0 ? Runtime.getRuntime().availableProcessors() : cfg.p), cfg.alignmentBytes);
+        cfg = cfg == null ? QRConfig.defaultConfig() : cfg;
+        if (A == null) {
+            throw new IllegalArgumentException("Panel must not be null");
+        }
+        if (m < 0 || b < 0 || lda < Math.max(1, m) || aOffset < 0) {
+            throw new IllegalArgumentException("Invalid CAQR panel dimensions");
+        }
+        if (b > m) {
+            throw new IllegalArgumentException("CAQR panel width must not exceed row count");
+        }
+        int required = aOffset + (b == 0 ? 0 : (b - 1) * lda + m);
+        if (required > A.length) {
+            throw new IllegalArgumentException("Panel storage is smaller than requested dimensions");
+        }
+
+        int workers = Math.max(1, cfg.p == 0 ? Runtime.getRuntime().availableProcessors() : cfg.p);
+        WorkspaceManager ws = new WorkspaceManager(m, b, workers, cfg.alignmentBytes);
         double[] rTop = new double[b * b];
-        // TODO: implement TSQR leaf factorization, merges and WY aggregation
+        if (m == 0 || b == 0) {
+            return new CAQRPanelResult(rTop, ws.yCombinedOffset, ws.tCombinedOffset, ws);
+        }
+
+        double[] panel = copyColumnMajorPanel(A, aOffset, m, b, lda);
+        double[] tau = new double[b];
+        factorizePanel(panel, tau, m, b);
+
+        for (int row = 0; row < b; row++) {
+            for (int col = row; col < b; col++) {
+                rTop[row * b + col] = panel[col * m + row];
+            }
+        }
+
+        double[] y = buildY(panel, m, b);
+        double[] t = buildT(y, tau, m, b);
+        DoubleBuffer db = ws.doubleBuffer();
+        synchronized (db) {
+            DoubleBuffer view = db.duplicate();
+            view.position(ws.yCombinedOffset);
+            view.put(y);
+            view.position(ws.tCombinedOffset);
+            view.put(t);
+        }
         return new CAQRPanelResult(rTop, ws.yCombinedOffset, ws.tCombinedOffset, ws);
     }
 
@@ -27,43 +68,39 @@ public final class CommunicationAvoidingQR {
         long tApply = PerfTimers.start();
 
         DoubleBuffer db = workspace.doubleBuffer();
+        int b = workspace.panelWidth;
+        if (b <= 0) return;
 
-        int b = Math.max(1, (int)Math.sqrt(workspace.tCombinedOffset - workspace.yCombinedOffset));
-        // defensive clamp
-        if (b <= 0) b = Math.min(m, 64);
-
-        // Read Y (m x b) and T (b x b) from workspace into heap arrays
         double[] Y = new double[m * b];
         double[] T = new double[b * b];
         synchronized (db) {
-            db.position(workspace.yCombinedOffset);
-            db.get(Y, 0, Math.min(db.remaining(), Y.length));
-            db.position(workspace.tCombinedOffset);
-            db.get(T, 0, Math.min(db.remaining(), T.length));
+            DoubleBuffer view = db.duplicate();
+            view.position(workspace.yCombinedOffset);
+            view.get(Y, 0, Y.length);
+            view.position(workspace.tCombinedOffset);
+            view.get(T, 0, T.length);
         }
 
-        // Compute Z = Y^T * A  (Z: b x n) using optimized strided gemm with transpose flag
         double[] Z = new double[b * n];
         long tZ = PerfTimers.start();
         Gemm.gemmStrided(true,
                        Y, 0, b,
                        A, aOffset, lda,
                        Z, 0, n,
-                       b, m, n,
+                       m, b, n,
                        1.0, 0.0);
         PerfTimers.record("CAQR.applyWY.Z", tZ);
 
-        // Compute W = T * Z (b x n)
         double[] W = new double[b * n];
         long tW = PerfTimers.start();
-        Gemm.gemmStrided(T, 0, b,
+        Gemm.gemmStrided(true,
+                       T, 0, b,
                        Z, 0, n,
                        W, 0, n,
                        b, b, n,
                        1.0, 0.0);
         PerfTimers.record("CAQR.applyWY.W", tW);
 
-        // A := A - Y * W  => use gemmStrided with alpha = -1, beta = 1
         long tUpd = PerfTimers.start();
         Gemm.gemmStrided(Y, 0, b,
                        W, 0, n,
@@ -76,83 +113,177 @@ public final class CommunicationAvoidingQR {
     }
 
     /**
-     * High-level factor for full matrix (stub). Returns Householder result when CAQR not implemented.
+     * Factor a tall-or-square matrix with a two-level TSQR reduction.
      */
-    public static net.faulj.decomposition.result.QRResult factor(net.faulj.matrix.Matrix A, boolean thin, QRConfig cfg) {
-        // Implement a TSQR-based CAQR for tall-or-square matrices (m >= n).
+    public static QRResult factor(Matrix A, boolean thin, QRConfig cfg) {
+        cfg = cfg == null ? QRConfig.defaultConfig() : cfg;
         if (A == null) throw new IllegalArgumentException("Matrix must not be null");
         if (!A.isReal()) throw new UnsupportedOperationException("CAQR requires real matrix");
 
         final int m = A.getRowCount();
         final int n = A.getColumnCount();
 
-        // Fallback to Householder for wide matrices or trivial cases
-        if (m < n || n == 0) {
+        if (!thin || m < n || n == 0) {
             return net.faulj.decomposition.qr.HouseholderQR.decomposeHouseholder(A, thin);
         }
 
-        int p = cfg.p > 0 ? cfg.p : Math.min(cfg.numThreads, m);
-        p = Math.min(p, m); // cannot have more partitions than rows
+        int p = cfg.p > 0 ? cfg.p : Math.min(Math.max(1, cfg.numThreads), m);
+        p = Math.min(p, m);
+        int maxLeaves = Math.max(1, m / n);
+        p = Math.min(p, maxLeaves);
 
-        // Ensure each leaf has at least n rows where possible. TSQR requires
-        // local blocks with >= n rows to produce full n×n R factors. Clamp
-        // p to at most floor(m / n) (but at least 1). This avoids short-leaf
-        // dimensions that would break later cropping and stacking logic.
-        if (n > 0) {
-            int maxLeaves = Math.max(1, m / n);
-            p = Math.min(p, Math.max(1, maxLeaves));
-        }
-
-        // Partition rows into p blocks
         int base = m / p;
         int rem = m % p;
-        net.faulj.matrix.Matrix[] Qs = new net.faulj.matrix.Matrix[p];
-        net.faulj.matrix.Matrix[] Rs = new net.faulj.matrix.Matrix[p];
+        List<Matrix> qBlocks = new ArrayList<>(p);
+        List<Matrix> rBlocks = new ArrayList<>(p);
         int rowStart = 0;
         for (int i = 0; i < p; i++) {
             int rows = base + (i < rem ? 1 : 0);
-            net.faulj.matrix.Matrix Ai = A.crop(rowStart, rowStart + rows - 1, 0, n - 1);
-            // thin QR on Ai
-            net.faulj.decomposition.result.QRResult res = net.faulj.decomposition.qr.HouseholderQR.decomposeHouseholder(Ai, true);
-            Qs[i] = res.getQ();
-            Rs[i] = res.getR().crop(0, n - 1, 0, n - 1); // ensure n x n
+            Matrix Ai = A.crop(rowStart, rowStart + rows - 1, 0, n - 1);
+            QRResult res = net.faulj.decomposition.qr.HouseholderQR.decomposeHouseholder(Ai, true);
+            qBlocks.add(res.getQ());
+            rBlocks.add(res.getR().crop(0, n - 1, 0, n - 1));
             rowStart += rows;
         }
 
-        // Stack R_i vertically into S (p*n x n)
-        net.faulj.matrix.Matrix S = new net.faulj.matrix.Matrix(p * n, n);
+        Matrix stackedR = new Matrix(p * n, n);
         for (int i = 0; i < p; i++) {
-            // copy Rs[i] (n x n) into S rows [i*n .. (i+1)*n-1]
+            Matrix rBlock = rBlocks.get(i);
             for (int r = 0; r < n; r++) {
                 for (int c = 0; c < n; c++) {
-                    S.set(i * n + r, c, Rs[i].get(r, c));
+                    stackedR.set(i * n + r, c, rBlock.get(r, c));
                 }
             }
         }
 
-        // QR on S (thin)
-        net.faulj.decomposition.result.QRResult resS = net.faulj.decomposition.qr.HouseholderQR.decomposeHouseholder(S, true);
-        net.faulj.matrix.Matrix QsStack = resS.getQ(); // (p*n x n)
-        net.faulj.matrix.Matrix Rfinal = resS.getR(); // (n x n)
+        QRResult root = net.faulj.decomposition.qr.HouseholderQR.decomposeHouseholder(stackedR, true);
+        Matrix stackedQ = root.getQ();
+        Matrix finalR = root.getR();
 
-        // Partition QsStack into p blocks of size n x n and compute final Qi = Qi_local * Qs_block
-        net.faulj.matrix.Matrix Qfinal = new net.faulj.matrix.Matrix(m, n);
+        Matrix finalQ = new Matrix(m, n);
         rowStart = 0;
         for (int i = 0; i < p; i++) {
-            // extract Qs_block
-            net.faulj.matrix.Matrix Qblock = QsStack.crop(i * n, (i + 1) * n - 1, 0, n - 1);
-            // multiply Qi_local (m_i x n) by Qblock (n x n)
-            net.faulj.matrix.Matrix Qi_final = Qs[i].multiply(Qblock);
-            // copy Qi_final into Qfinal at rows [rowStart .. rowStart+mi-1]
-            for (int r = 0; r < Qi_final.getRowCount(); r++) {
+            Matrix rootBlock = stackedQ.crop(i * n, (i + 1) * n - 1, 0, n - 1);
+            Matrix qBlock = qBlocks.get(i).multiply(rootBlock);
+            for (int r = 0; r < qBlock.getRowCount(); r++) {
                 for (int c = 0; c < n; c++) {
-                    Qfinal.set(rowStart + r, c, Qi_final.get(r, c));
+                    finalQ.set(rowStart + r, c, qBlock.get(r, c));
                 }
             }
-            rowStart += Qs[i].getRowCount();
+            rowStart += qBlock.getRowCount();
         }
 
-        // Build result and return (thin Q)
-        return new net.faulj.decomposition.result.QRResult(A, Qfinal, Rfinal);
+        return new QRResult(A, finalQ, finalR);
+    }
+
+    private static double[] copyColumnMajorPanel(double[] source, int offset, int rows, int cols, int lda) {
+        double[] panel = new double[rows * cols];
+        for (int col = 0; col < cols; col++) {
+            System.arraycopy(source, offset + col * lda, panel, col * rows, rows);
+        }
+        return panel;
+    }
+
+    private static void factorizePanel(double[] panel, double[] tau, int rows, int cols) {
+        for (int k = 0; k < cols; k++) {
+            computeHouseholder(panel, tau, rows, k);
+            for (int col = k + 1; col < cols; col++) {
+                applyHouseholder(panel, tau[k], rows, k, col);
+            }
+        }
+    }
+
+    private static void computeHouseholder(double[] panel, double[] tau, int rows, int col) {
+        int base = col * rows;
+        int len = rows - col;
+        if (len <= 1) {
+            tau[col] = 0.0;
+            return;
+        }
+
+        double max = 0.0;
+        for (int row = col; row < rows; row++) {
+            max = Math.max(max, Math.abs(panel[base + row]));
+        }
+        if (max < Double.MIN_NORMAL) {
+            tau[col] = 0.0;
+            return;
+        }
+
+        double invMax = 1.0 / max;
+        double x0 = panel[base + col] * invMax;
+        double sigma = 0.0;
+        for (int row = col + 1; row < rows; row++) {
+            double value = panel[base + row] * invMax;
+            sigma = Math.fma(value, value, sigma);
+        }
+
+        double xnorm = Math.sqrt(sigma);
+        if (xnorm == 0.0) {
+            if (x0 >= 0.0) {
+                tau[col] = 0.0;
+            } else {
+                tau[col] = 2.0;
+                panel[base + col] = -panel[base + col];
+            }
+            return;
+        }
+
+        double normBeta = -Math.copySign(Math.hypot(x0, xnorm), x0);
+        tau[col] = (normBeta - x0) / normBeta;
+        double invV0 = 1.0 / ((x0 - normBeta) * max);
+        for (int row = col + 1; row < rows; row++) {
+            panel[base + row] *= invV0;
+        }
+        panel[base + col] = normBeta * max;
+    }
+
+    private static void applyHouseholder(double[] panel, double tau, int rows, int reflectorCol, int targetCol) {
+        if (tau == 0.0) {
+            return;
+        }
+        int reflectorBase = reflectorCol * rows;
+        int targetBase = targetCol * rows;
+        double dot = panel[targetBase + reflectorCol];
+        for (int row = reflectorCol + 1; row < rows; row++) {
+            dot = Math.fma(panel[reflectorBase + row], panel[targetBase + row], dot);
+        }
+        dot *= tau;
+        panel[targetBase + reflectorCol] -= dot;
+        for (int row = reflectorCol + 1; row < rows; row++) {
+            panel[targetBase + row] -= dot * panel[reflectorBase + row];
+        }
+    }
+
+    private static double[] buildY(double[] panel, int rows, int cols) {
+        double[] y = new double[rows * cols];
+        for (int col = 0; col < cols; col++) {
+            for (int row = col; row < rows; row++) {
+                y[row * cols + col] = row == col ? 1.0 : panel[col * rows + row];
+            }
+        }
+        return y;
+    }
+
+    private static double[] buildT(double[] y, double[] tau, int rows, int cols) {
+        double[] t = new double[cols * cols];
+        for (int i = 0; i < cols; i++) {
+            t[i * cols + i] = tau[i];
+            for (int r = 0; r < i; r++) {
+                double dot = 0.0;
+                for (int row = i; row < rows; row++) {
+                    dot = Math.fma(y[row * cols + r], y[row * cols + i], dot);
+                }
+                t[r * cols + i] = -tau[i] * dot;
+            }
+            for (int r = 0; r < i; r++) {
+                double sum = 0.0;
+                for (int c = r; c < i; c++) {
+                    sum += t[r * cols + c] * t[c * cols + i];
+                }
+                t[r * cols + i] = sum;
+            }
+        }
+        return t;
     }
 }

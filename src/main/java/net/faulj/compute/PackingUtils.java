@@ -56,6 +56,28 @@ public final class PackingUtils {
     }
 
     /**
+     * Pack A panel from a row-major source with a base element offset.
+     */
+    public static void packAStrided(double[] a, int aOffset, int lda, int rowStart, int rows,
+                                    int colStart, int kBlock, double alpha, double[] aPack) {
+        int dst = 0;
+        if (alpha == 1.0) {
+            for (int r = 0; r < rows; r++) {
+                int src = aOffset + (rowStart + r) * lda + colStart;
+                System.arraycopy(a, src, aPack, dst, kBlock);
+                dst += kBlock;
+            }
+        } else {
+            for (int r = 0; r < rows; r++) {
+                int src = aOffset + (rowStart + r) * lda + colStart;
+                for (int k = 0; k < kBlock; k++) {
+                    aPack[dst++] = a[src + k] * alpha;
+                }
+            }
+        }
+    }
+
+    /**
      * Pack A panel from column-major source.
      */
     public static void packAColMajor(double[] a, int lda, int rowStart, int rows,
@@ -125,6 +147,22 @@ public final class PackingUtils {
             int src = (rowStart + k) * ldb + colStart;
             System.arraycopy(b, src, bPack, dst, cols);
             // Zero padding
+            if (packedCols > cols) {
+                java.util.Arrays.fill(bPack, dst + cols, dst + packedCols, 0.0);
+            }
+            dst += packedCols;
+        }
+    }
+
+    /**
+     * Pack B panel from a row-major source with a base element offset.
+     */
+    public static void packBStrided(double[] b, int bOffset, int ldb, int rowStart, int kBlock,
+                                    int colStart, int cols, int packedCols, double[] bPack) {
+        int dst = 0;
+        for (int k = 0; k < kBlock; k++) {
+            int src = bOffset + (rowStart + k) * ldb + colStart;
+            System.arraycopy(b, src, bPack, dst, cols);
             if (packedCols > cols) {
                 java.util.Arrays.fill(bPack, dst + cols, dst + packedCols, 0.0);
             }

@@ -3,7 +3,11 @@ package net.faulj.decomposition.lu;
 import net.faulj.core.PermutationVector;
 import net.faulj.core.Tolerance;
 import net.faulj.decomposition.result.LUResult;
+import net.faulj.kernels.gemm.Gemm;
 import net.faulj.matrix.Matrix;
+import net.faulj.nativeblas.NativeFactorizationSupport;
+import jdk.incubator.vector.DoubleVector;
+import jdk.incubator.vector.VectorSpecies;
 
 /**
  * Computes the LU decomposition of a square matrix with partial or full pivoting.
@@ -148,6 +152,11 @@ import net.faulj.matrix.Matrix;
  * @see net.faulj.decomposition.cholesky.CholeskyDecomposition
  */
 public class LUDecomposition {
+    // Small and medium matrices do better with the simpler unblocked path.
+    // Once the trailing update dominates, narrower panels feed GEMM more efficiently.
+    private static final int DEFAULT_BLOCK_THRESHOLD = 384;
+    private static final int DEFAULT_BLOCK_SIZE = 32;
+    private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
     
     private final PivotPolicy pivotPolicy;
     
@@ -176,51 +185,247 @@ public class LUDecomposition {
         if (!A.isSquare()) {
             throw new IllegalArgumentException("LU decomposition requires a square matrix");
         }
-        
+
         int n = A.getRowCount();
+        if (pivotPolicy == PivotPolicy.PARTIAL) {
+            Matrix vendorPacked = A.copy();
+            int[] pivots = new int[n];
+            if (NativeFactorizationSupport.tryLu(vendorPacked.getRawData(), n, pivots)) {
+                return buildVendorResult(A, vendorPacked.getRawData(), n, pivots);
+            }
+        }
+        if (n >= blockThreshold()) {
+            return decomposeBlocked(A, n);
+        }
+
+        return decomposeUnblocked(A, n);
+    }
+
+    private LUResult decomposeUnblocked(Matrix A, int n) {
         Matrix U = A.copy();
         Matrix L = Matrix.Identity(n);
+        double[] ud = U.getRawData();
+        double[] ld = L.getRawData();
         PermutationVector P = new PermutationVector(n);
         boolean singular = false;
-        
+
         for (int k = 0; k < n - 1; k++) {
-            // Select pivot
-            int pivotRow = pivotPolicy.selectPivotRow(U, k, k);
-            
-            // Exchange rows if necessary
+            int pivotRow = selectPivotRow(U, ud, n, k);
             if (pivotRow != k) {
-                U.exchangeRows(k, pivotRow);
+                swapRows(ud, n, k, pivotRow, 0, n);
                 P.exchange(k, pivotRow);
-                // Also exchange already-computed L entries
-                for (int j = 0; j < k; j++) {
-                    double temp = L.get(k, j);
-                    L.set(k, j, L.get(pivotRow, j));
-                    L.set(pivotRow, j, temp);
-                }
+                swapRows(ld, n, k, pivotRow, 0, k);
             }
-            
-            double pivot = U.get(k, k);
+
+            int pivotOffset = k * n;
+            double pivot = ud[pivotOffset + k];
             if (Tolerance.isZero(pivot)) {
                 singular = true;
                 continue;
             }
-            
-            // Eliminate below pivot
+
             for (int i = k + 1; i < n; i++) {
-                double factor = U.get(i, k) / pivot;
-                L.set(i, k, factor);
-                U.set(i, k, 0.0);
+                int rowOffset = i * n;
+                double factor = ud[rowOffset + k] / pivot;
+                ld[rowOffset + k] = factor;
+                ud[rowOffset + k] = 0.0;
                 for (int j = k + 1; j < n; j++) {
-                    U.set(i, j, U.get(i, j) - factor * U.get(k, j));
+                    ud[rowOffset + j] -= factor * ud[pivotOffset + j];
                 }
             }
         }
-        
-        // Check last diagonal element
-        if (Tolerance.isZero(U.get(n - 1, n - 1))) {
+
+        if (Tolerance.isZero(ud[(n - 1) * n + (n - 1)])) {
             singular = true;
         }
-        
+
         return new LUResult(A, L, U, P, singular);
+    }
+
+    private static LUResult buildVendorResult(Matrix original, double[] packedLu, int n, int[] pivots) {
+        Matrix L = Matrix.Identity(n);
+        Matrix U = new Matrix(n, n);
+        double[] ld = L.getRawData();
+        double[] ud = U.getRawData();
+        boolean singular = false;
+
+        for (int row = 0; row < n; row++) {
+            int rowOffset = row * n;
+            for (int col = 0; col < n; col++) {
+                double value = packedLu[rowOffset + col];
+                if (row > col) {
+                    ld[rowOffset + col] = value;
+                    ud[rowOffset + col] = 0.0;
+                } else {
+                    ud[rowOffset + col] = value;
+                    if (row < col) {
+                        ld[rowOffset + col] = 0.0;
+                    }
+                }
+            }
+            singular |= Tolerance.isZero(ud[rowOffset + row]);
+        }
+
+        PermutationVector permutation = new PermutationVector(n);
+        for (int i = 0; i < n; i++) {
+            int pivotRow = pivots[i];
+            if (pivotRow >= 0 && pivotRow < n && pivotRow != i) {
+                permutation.exchange(i, pivotRow);
+            }
+        }
+        return new LUResult(original, L, U, permutation, singular);
+    }
+
+    private LUResult decomposeBlocked(Matrix A, int n) {
+        Matrix U = A.copy();
+        Matrix L = Matrix.Identity(n);
+        PermutationVector P = new PermutationVector(n);
+        double[] ud = U.getRawData();
+        double[] ld = L.getRawData();
+        boolean singular = false;
+
+        int blockSize = Math.min(blockSize(), n);
+        for (int kStart = 0; kStart < n; kStart += blockSize) {
+            int kEnd = Math.min(kStart + blockSize, n);
+
+            for (int k = kStart; k < kEnd; k++) {
+                int pivotRow = selectPivotRow(U, ud, n, k);
+                if (pivotRow != k) {
+                    swapRows(ud, n, k, pivotRow, 0, n);
+                    P.exchange(k, pivotRow);
+                    swapRows(ld, n, k, pivotRow, 0, k);
+                }
+
+                int pivotOffset = k * n;
+                double pivot = ud[pivotOffset + k];
+                if (Tolerance.isZero(pivot)) {
+                    singular = true;
+                    continue;
+                }
+
+                for (int i = k + 1; i < n; i++) {
+                    int rowOffset = i * n;
+                    double factor = ud[rowOffset + k] / pivot;
+                    ld[rowOffset + k] = factor;
+                    ud[rowOffset + k] = 0.0;
+                    for (int j = k + 1; j < kEnd; j++) {
+                        ud[rowOffset + j] -= factor * ud[pivotOffset + j];
+                    }
+                }
+            }
+
+            if (kEnd >= n) {
+                continue;
+            }
+
+            solveUpperPanel(ld, ud, n, kStart, kEnd);
+
+            int trailing = n - kEnd;
+            int panelWidth = kEnd - kStart;
+            if (panelWidth > 0 && trailing > 0) {
+                Gemm.gemmStrided(
+                    ld, kEnd * n + kStart, n,
+                    ud, kStart * n + kEnd, n,
+                    ud, kEnd * n + kEnd, n,
+                    trailing, panelWidth, trailing,
+                    -1.0, 1.0, panelWidth
+                );
+            }
+        }
+
+        if (Tolerance.isZero(ud[(n - 1) * n + (n - 1)])) {
+            singular = true;
+        }
+
+        return new LUResult(A, L, U, P, singular);
+    }
+
+    private static void solveUpperPanel(double[] l, double[] u, int n, int kStart, int kEnd) {
+        for (int row = kStart + 1; row < kEnd; row++) {
+            int rowOffset = row * n;
+            for (int prev = kStart; prev < row; prev++) {
+                double factor = l[rowOffset + prev];
+                if (factor == 0.0) {
+                    continue;
+                }
+                int prevOffset = prev * n;
+                subtractScaledRowSegment(u, rowOffset, prevOffset, kEnd, n, factor);
+            }
+        }
+    }
+
+    private int selectPivotRow(Matrix matrix, double[] data, int n, int k) {
+        if (pivotPolicy == PivotPolicy.NONE) {
+            return k;
+        }
+        if (pivotPolicy == PivotPolicy.PARTIAL) {
+            int maxRow = k;
+            double maxAbs = Math.abs(data[k * n + k]);
+            for (int row = k + 1; row < n; row++) {
+                double abs = Math.abs(data[row * n + k]);
+                if (abs > maxAbs) {
+                    maxAbs = abs;
+                    maxRow = row;
+                }
+            }
+            return maxRow;
+        }
+        return pivotPolicy.selectPivotRow(matrix, k, k);
+    }
+
+    private static void subtractScaledRowSegment(double[] data, int rowOffset, int prevOffset,
+                                                 int colStart, int colEnd, double factor) {
+        int width = colEnd - colStart;
+        if (width <= 0) {
+            return;
+        }
+
+        int index = 0;
+        int vectorBound = SPECIES.loopBound(width);
+        DoubleVector factorVector = DoubleVector.broadcast(SPECIES, factor);
+        for (; index < vectorBound; index += SPECIES.length()) {
+            int target = rowOffset + colStart + index;
+            int source = prevOffset + colStart + index;
+            DoubleVector rowVector = DoubleVector.fromArray(SPECIES, data, target);
+            DoubleVector prevVector = DoubleVector.fromArray(SPECIES, data, source);
+            prevVector.mul(factorVector).neg().add(rowVector).intoArray(data, target);
+        }
+        for (; index < width; index++) {
+            int col = colStart + index;
+            data[rowOffset + col] = Math.fma(-factor, data[prevOffset + col], data[rowOffset + col]);
+        }
+    }
+
+    private static void swapRows(double[] data, int ld, int rowA, int rowB, int colStart, int colEnd) {
+        if (rowA == rowB || colStart >= colEnd) {
+            return;
+        }
+        int offsetA = rowA * ld;
+        int offsetB = rowB * ld;
+        for (int col = colStart; col < colEnd; col++) {
+            double temp = data[offsetA + col];
+            data[offsetA + col] = data[offsetB + col];
+            data[offsetB + col] = temp;
+        }
+    }
+
+    private static int blockThreshold() {
+        return integerProperty("net.faulj.decomposition.lu.blockThreshold", DEFAULT_BLOCK_THRESHOLD);
+    }
+
+    private static int blockSize() {
+        return integerProperty("net.faulj.decomposition.lu.blockSize", DEFAULT_BLOCK_SIZE);
+    }
+
+    private static int integerProperty(String key, int fallback) {
+        String value = System.getProperty(key);
+        if (value == null || value.isBlank()) {
+            return fallback;
+        }
+        try {
+            return Math.max(1, Integer.parseInt(value.trim()));
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
     }
 }
