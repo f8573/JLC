@@ -12,6 +12,15 @@ public final class SpecializedKernels {
 
     private SpecializedKernels() {}
 
+    private enum TinyKernel {
+        DOT,
+        MATVEC,
+        SQUARE_2,
+        SQUARE_3,
+        SQUARE_4,
+        GENERIC
+    }
+
     /**
      * Matrix-vector multiplication: y = alpha * A * x + beta * y.
      * Optimized for n=1 case with SIMD dot products.
@@ -107,53 +116,107 @@ public final class SpecializedKernels {
     public static void tinyGemm(double[] a, int lda, double[] b, int ldb,
                                double[] c, int ldc, int m, int k, int n,
                                double alpha, double beta) {
-        if (m == 1 && n == 1) {
-            // Dot product
-            double sum = 0.0;
-            for (int kk = 0; kk < k; kk++) {
-                sum = Math.fma(a[kk], b[kk * ldb], sum);
-            }
-            c[0] = Math.fma(alpha, sum, beta * c[0]);
-            return;
-        }
-
-        if (n == 1) {
-            // Matrix-vector
-            double[] y = new double[m];
-            if (beta != 0.0) {
-                for (int i = 0; i < m; i++) {
-                    y[i] = c[i * ldc] * beta;
-                }
-            }
-            for (int i = 0; i < m; i++) {
+        TinyKernel kernel = selectTinyKernel(a, lda, b, ldb, c, ldc, m, k, n);
+        switch (kernel) {
+            case DOT: {
                 double sum = 0.0;
                 for (int kk = 0; kk < k; kk++) {
-                    sum = Math.fma(a[i * lda + kk], b[kk * ldb], sum);
+                    sum = Math.fma(a[kk], b[kk * ldb], sum);
                 }
-                y[i] += alpha * sum;
+                c[0] = Math.fma(alpha, sum, beta * c[0]);
+                return;
             }
-            for (int i = 0; i < m; i++) {
-                c[i * ldc] = y[i];
+
+            case MATVEC: {
+                double[] y = new double[m];
+                if (beta != 0.0) {
+                    for (int i = 0; i < m; i++) {
+                        y[i] = c[i * ldc] * beta;
+                    }
+                }
+                for (int i = 0; i < m; i++) {
+                    double sum = 0.0;
+                    for (int kk = 0; kk < k; kk++) {
+                        sum = Math.fma(a[i * lda + kk], b[kk * ldb], sum);
+                    }
+                    y[i] += alpha * sum;
+                }
+                for (int i = 0; i < m; i++) {
+                    c[i * ldc] = y[i];
+                }
+                return;
             }
-            return;
-        }
 
-        // Specialized kernels for square small matrices with matching strides
-        if (m == 2 && k == 2 && n == 2 && lda == 2 && ldb == 2 && ldc == 2) {
-            gemm2x2(a, b, c, alpha, beta);
-            return;
-        }
-        if (m == 3 && k == 3 && n == 3 && lda == 3 && ldb == 3 && ldc == 3) {
-            gemm3x3(a, b, c, alpha, beta);
-            return;
-        }
-        if (m == 4 && k == 4 && n == 4 && lda == 4 && ldb == 4 && ldc == 4) {
-            gemm4x4(a, b, c, alpha, beta);
-            return;
-        }
+            case SQUARE_2:
+                gemm2x2(a, b, c, alpha, beta);
+                return;
 
-        // General tiny case
-        smallGemm(a, lda, b, ldb, c, ldc, m, k, n, alpha, beta);
+            case SQUARE_3:
+                gemm3x3(a, b, c, alpha, beta);
+                return;
+
+            case SQUARE_4:
+                gemm4x4(a, b, c, alpha, beta);
+                return;
+
+            case GENERIC:
+            default:
+                smallGemm(a, lda, b, ldb, c, ldc, m, k, n, alpha, beta);
+        }
+    }
+
+    private static TinyKernel selectTinyKernel(double[] a, int lda, double[] b, int ldb,
+                                               double[] c, int ldc, int m, int k, int n) {
+        validateTinyInputs(a, lda, b, ldb, c, ldc, m, k, n);
+        if (m == 1 && n == 1) {
+            return TinyKernel.DOT;
+        }
+        if (n == 1) {
+            return TinyKernel.MATVEC;
+        }
+        if (!isCompactSquare(a, lda, b, ldb, c, ldc, m, k, n)) {
+            return TinyKernel.GENERIC;
+        }
+        return switch (m) {
+            case 2 -> TinyKernel.SQUARE_2;
+            case 3 -> TinyKernel.SQUARE_3;
+            case 4 -> TinyKernel.SQUARE_4;
+            default -> TinyKernel.GENERIC;
+        };
+    }
+
+    private static void validateTinyInputs(double[] a, int lda, double[] b, int ldb,
+                                           double[] c, int ldc, int m, int k, int n) {
+        if (a == null || b == null || c == null) {
+            throw new IllegalArgumentException("GEMM arrays must not be null");
+        }
+        if (m < 0 || k < 0 || n < 0) {
+            throw new IllegalArgumentException("GEMM dimensions must be non-negative");
+        }
+        if (lda < Math.max(1, k) || ldb < Math.max(1, n) || ldc < Math.max(1, n)) {
+            throw new IllegalArgumentException("GEMM leading dimensions are too small");
+        }
+        if (!hasMatrixStorage(a, lda, m, k) || !hasMatrixStorage(b, ldb, k, n)
+            || !hasMatrixStorage(c, ldc, m, n)) {
+            throw new IllegalArgumentException("GEMM backing array is smaller than the requested strided matrix");
+        }
+    }
+
+    private static boolean hasMatrixStorage(double[] data, int ld, int rows, int cols) {
+        if (rows == 0 || cols == 0) {
+            return true;
+        }
+        long lastIndex = (long) (rows - 1) * ld + (cols - 1);
+        return lastIndex >= 0 && lastIndex < data.length;
+    }
+
+    private static boolean isCompactSquare(double[] a, int lda, double[] b, int ldb,
+                                           double[] c, int ldc, int m, int k, int n) {
+        return m == k && k == n
+            && lda == n && ldb == n && ldc == n
+            && a.length >= (long) n * n
+            && b.length >= (long) n * n
+            && c.length >= (long) n * n;
     }
 
     /**
@@ -237,8 +300,8 @@ public final class SpecializedKernels {
                               double alpha, double beta) {
         int vecLen = SPECIES.length();
 
-        // For AVX2 (vecLen=4), each row of C fits in one vector
-        if (vecLen >= 4) {
+        // The fixed row offsets below are valid only when one vector is exactly one 4-column row.
+        if (vecLen == 4) {
             DoubleVector betaVec = DoubleVector.broadcast(SPECIES, beta);
 
             // Load C rows
@@ -263,8 +326,24 @@ public final class SpecializedKernels {
             c2.intoArray(c, 8);
             c3.intoArray(c, 12);
         } else {
-            // Fall back to scalar for non-AVX2
-            smallGemm(a, 4, b, 4, c, 4, 4, 4, 4, alpha, beta);
+            gemm4x4Scalar(a, b, c, alpha, beta);
+        }
+    }
+
+    private static void gemm4x4Scalar(double[] a, double[] b, double[] c,
+                                      double alpha, double beta) {
+        for (int i = 0; i < 4; i++) {
+            int row = i * 4;
+            double a0 = a[row] * alpha;
+            double a1 = a[row + 1] * alpha;
+            double a2 = a[row + 2] * alpha;
+            double a3 = a[row + 3] * alpha;
+            for (int j = 0; j < 4; j++) {
+                c[row + j] = Math.fma(a0, b[j],
+                    Math.fma(a1, b[4 + j],
+                    Math.fma(a2, b[8 + j],
+                    Math.fma(a3, b[12 + j], beta * c[row + j]))));
+            }
         }
     }
 

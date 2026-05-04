@@ -110,7 +110,7 @@ target_compile_definitions(jlc_native_kernel PRIVATE
 
 function(jlc_native_apply_optimization target_name)
   if(MSVC)
-    target_compile_options(${target_name} PRIVATE /O2)
+    target_compile_options(${target_name} PRIVATE /O2 /arch:AVX2)
   else()
     target_compile_options(${target_name} PRIVATE -O3 -DNDEBUG -ffast-math)
     if(JLC_NATIVE_ENABLE_MARCH_NATIVE)

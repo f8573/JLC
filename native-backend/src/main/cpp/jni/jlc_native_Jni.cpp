@@ -257,6 +257,26 @@ Java_net_faulj_nativeblas_NativeBindings_nativeProfileReset(JNIEnv*, jclass) {
     jlc_native_profile_reset();
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_net_faulj_nativeblas_NativeBindings_nativeQrProfileSetEnabled(JNIEnv*, jclass, jboolean enabled) {
+    jlc_native_qr_profile_set_enabled(enabled == JNI_TRUE);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_net_faulj_nativeblas_NativeBindings_nativeQrProfileReset(JNIEnv*, jclass) {
+    jlc_native_qr_profile_reset();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_net_faulj_nativeblas_NativeBindings_nativeQrSetBlockSizeOverride(JNIEnv*, jclass, jint block_size) {
+    jlc_native_qr_set_block_size_override(block_size);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_net_faulj_nativeblas_NativeBindings_nativeQrSetGemmThreadsOverride(JNIEnv*, jclass, jint threads) {
+    jlc_native_qr_set_gemm_threads_override(threads);
+}
+
 extern "C" JNIEXPORT jlong JNICALL
 Java_net_faulj_nativeblas_NativeBindings_nativeMatrixCreate(JNIEnv* env, jclass,
                                                             jint rows, jint cols, jint order,
@@ -701,6 +721,38 @@ Java_net_faulj_nativeblas_NativeBindings_nativeProfileSnapshot(JNIEnv* env, jcla
     values[20] = static_cast<jlong>(profile.last_nc);
     values[21] = static_cast<jlong>(profile.last_mr);
     values[22] = static_cast<jlong>(profile.last_nr);
+
+    jlongArray out = env->NewLongArray(field_count);
+    if (out == nullptr) {
+        return nullptr;
+    }
+    env->SetLongArrayRegion(out, 0, field_count, values);
+    return out;
+}
+
+extern "C" JNIEXPORT jlongArray JNICALL
+Java_net_faulj_nativeblas_NativeBindings_nativeQrProfileSnapshot(JNIEnv* env, jclass) {
+    constexpr jsize field_count = 16;
+    jlong values[field_count];
+    jlc_qr_profile profile{};
+    jlc_native_qr_profile_snapshot(&profile);
+
+    values[0] = static_cast<jlong>(profile.calls);
+    values[1] = static_cast<jlong>(profile.wall_ns);
+    values[2] = static_cast<jlong>(profile.factorize_ns);
+    values[3] = static_cast<jlong>(profile.input_transpose_ns);
+    values[4] = static_cast<jlong>(profile.panel_ns);
+    values[5] = static_cast<jlong>(profile.reflector_pack_ns);
+    values[6] = static_cast<jlong>(profile.t_build_ns);
+    values[7] = static_cast<jlong>(profile.trailing_pack_ns);
+    values[8] = static_cast<jlong>(profile.trailing_unpack_ns);
+    values[9] = static_cast<jlong>(profile.trailing_gemm_ns);
+    values[10] = static_cast<jlong>(profile.trailing_t_apply_ns);
+    values[11] = static_cast<jlong>(profile.r_extract_ns);
+    values[12] = static_cast<jlong>(profile.q_init_ns);
+    values[13] = static_cast<jlong>(profile.q_build_ns);
+    values[14] = static_cast<jlong>(profile.q_gemm_ns);
+    values[15] = static_cast<jlong>(profile.q_t_apply_ns);
 
     jlongArray out = env->NewLongArray(field_count);
     if (out == nullptr) {

@@ -24,14 +24,12 @@ public class NativePhase2DecompositionIntegrationTest {
     @After
     public void cleanup() {
         System.clearProperty("jlc.backend");
-        System.clearProperty("jlc.native.lu.provider");
-        System.clearProperty("jlc.native.lu.minSize");
-        System.clearProperty("jlc.native.qr.provider");
-        System.clearProperty("jlc.native.qr.minSize");
-        System.clearProperty("jlc.native.cholesky.provider");
-        System.clearProperty("jlc.native.cholesky.minSize");
         System.clearProperty("jlc.native.hessenberg.provider");
-        System.clearProperty("jlc.native.hessenberg.minSize");
+        System.clearProperty("jlc.algorithm.lu.backend");
+        System.clearProperty("jlc.algorithm.qr.backend");
+        System.clearProperty("jlc.algorithm.cholesky.backend");
+        System.clearProperty("jlc.algorithm.hessenberg.backend");
+        System.clearProperty("jlc.algorithm.calibration.path");
         System.clearProperty("net.faulj.decomposition.lu.blockThreshold");
         System.clearProperty("net.faulj.decomposition.lu.blockSize");
         System.clearProperty("net.faulj.decomposition.hessenberg.blockSize");
@@ -71,22 +69,21 @@ public class NativePhase2DecompositionIntegrationTest {
     }
 
     @Test
-    public void vendorLapackHessenbergMatchesJavaWhenAvailable() {
+    public void publicLapackSelectionNoLongerRoutesHessenberg() {
         assumeNativeBackendReady();
-        Assume.assumeTrue("Vendor LAPACK unavailable", NativeBindings.nativeVendorLapackAvailable());
 
         Matrix a = randomMatrix(72, 91L);
 
-        System.setProperty("jlc.native.hessenberg.provider", "java");
+        System.setProperty("jlc.algorithm.hessenberg.backend", "java");
         HessenbergResult javaResult = HessenbergReduction.decompose(a);
 
         System.setProperty("jlc.native.hessenberg.provider", "vendor");
-        System.setProperty("jlc.native.hessenberg.minSize", "1");
-        HessenbergResult vendorResult = HessenbergReduction.decompose(a);
+        HessenbergResult ignoredLegacyProviderResult = HessenbergReduction.decompose(a);
 
-        assertTrue("Vendor Hessenberg residual too large: " + vendorResult.residualNorm(), vendorResult.residualNorm() < 1e-8);
-        assertTrue("Hessenberg H mismatch too large", relativeDifference(javaResult.getH(), vendorResult.getH()) < 1e-10);
-        assertTrue("Hessenberg Q mismatch too large", relativeDifference(javaResult.getQ(), vendorResult.getQ()) < 1e-10);
+        assertTrue("Hessenberg residual too large: " + ignoredLegacyProviderResult.residualNorm(),
+            ignoredLegacyProviderResult.residualNorm() < 1e-8);
+        assertTrue("Hessenberg H mismatch too large", relativeDifference(javaResult.getH(), ignoredLegacyProviderResult.getH()) < 1e-10);
+        assertTrue("Hessenberg Q mismatch too large", relativeDifference(javaResult.getQ(), ignoredLegacyProviderResult.getQ()) < 1e-10);
     }
 
     @Test
@@ -95,11 +92,10 @@ public class NativePhase2DecompositionIntegrationTest {
 
         Matrix a = randomDiagonallyDominant(72, 121L);
 
-        System.setProperty("jlc.native.lu.provider", "java");
+        System.setProperty("jlc.algorithm.lu.backend", "java");
         LUResult javaResult = new LUDecomposition().decompose(a);
 
-        System.setProperty("jlc.native.lu.provider", "builtin");
-        System.setProperty("jlc.native.lu.minSize", "1");
+        System.setProperty("jlc.algorithm.lu.backend", "cpp");
         LUResult nativeResult = new LUDecomposition().decompose(a);
 
         assertFalse(nativeResult.isSingular());
@@ -117,11 +113,10 @@ public class NativePhase2DecompositionIntegrationTest {
 
         Matrix a = randomRectangularMatrix(96, 64, 157L);
 
-        System.setProperty("jlc.native.qr.provider", "java");
+        System.setProperty("jlc.algorithm.qr.backend", "java");
         QRResult javaResult = HouseholderQR.decompose(a);
 
-        System.setProperty("jlc.native.qr.provider", "builtin");
-        System.setProperty("jlc.native.qr.minSize", "1");
+        System.setProperty("jlc.algorithm.qr.backend", "cpp");
         QRResult nativeResult = HouseholderQR.decompose(a);
 
         assertTrue("Native QR residual too large: " + nativeResult.residualNorm(), nativeResult.residualNorm() < 1e-10);
@@ -131,16 +126,47 @@ public class NativePhase2DecompositionIntegrationTest {
     }
 
     @Test
+    public void nativeBuiltinQrThinAndFullSupportCoreShapes() {
+        assumeNativeBackendReady();
+        System.setProperty("jlc.algorithm.qr.backend", "cpp");
+
+        validateQr(HouseholderQR.decomposeThin(randomRectangularMatrix(96, 48, 301L)), 96, 48, 48, 48);
+        validateQr(HouseholderQR.decompose(randomRectangularMatrix(96, 48, 302L)), 96, 48, 96, 96);
+        validateQr(HouseholderQR.decomposeThin(randomRectangularMatrix(48, 96, 303L)), 48, 96, 48, 48);
+        validateQr(HouseholderQR.decompose(randomRectangularMatrix(64, 64, 304L)), 64, 64, 64, 64);
+    }
+
+    @Test
+    public void nativeBuiltinQrHandlesNearSingularAndIllConditionedInputs() {
+        assumeNativeBackendReady();
+        System.setProperty("jlc.algorithm.qr.backend", "cpp");
+
+        validateQr(HouseholderQR.decompose(nearSingularMatrix(64)), 64, 64, 64, 64);
+        validateQr(HouseholderQR.decomposeThin(illConditionedTallMatrix(96, 48)), 96, 48, 48, 48);
+    }
+
+    @Test
+    public void qrFallsBackToJavaWhenNativeBackendIsDisabled() {
+        System.setProperty("jlc.backend", "java");
+        System.setProperty("jlc.algorithm.qr.backend", "cpp");
+        BackendRegistry.resetForTests();
+
+        QRResult result = HouseholderQR.decomposeThin(randomRectangularMatrix(40, 24, 401L));
+
+        validateQr(result, 40, 24, 24, 24);
+        assertEquals("java", BackendRegistry.snapshot().activeBackend());
+    }
+
+    @Test
     public void nativeBuiltinCholeskyMatchesJava() {
         assumeNativeBackendReady();
 
         Matrix a = randomPositiveDefinite(72, 211L);
 
-        System.setProperty("jlc.native.cholesky.provider", "java");
+        System.setProperty("jlc.algorithm.cholesky.backend", "java");
         CholeskyResult javaResult = new CholeskyDecomposition().decompose(a);
 
-        System.setProperty("jlc.native.cholesky.provider", "builtin");
-        System.setProperty("jlc.native.cholesky.minSize", "1");
+        System.setProperty("jlc.algorithm.cholesky.backend", "cpp");
         CholeskyResult nativeResult = new CholeskyDecomposition().decompose(a);
 
         assertTrue("Native Cholesky residual too large: " + nativeResult.residualNorm(), nativeResult.residualNorm() < 1e-10);
@@ -200,6 +226,35 @@ public class NativePhase2DecompositionIntegrationTest {
             data[i * n + i] += n;
         }
         return Matrix.wrap(data, n, n);
+    }
+
+    private static Matrix nearSingularMatrix(int n) {
+        double[] data = randomMatrix(n, 501L).getRawData().clone();
+        for (int col = 0; col < n; col++) {
+            data[(n - 1) * n + col] = data[(n - 2) * n + col] * (1.0 + 1e-12);
+        }
+        return Matrix.wrap(data, n, n);
+    }
+
+    private static Matrix illConditionedTallMatrix(int rows, int cols) {
+        double[] data = randomRectangularMatrix(rows, cols, 601L).getRawData().clone();
+        for (int col = 0; col < cols; col++) {
+            double scale = Math.pow(10.0, -8.0 * col / Math.max(1, cols - 1));
+            for (int row = 0; row < rows; row++) {
+                data[row * cols + col] *= scale;
+            }
+        }
+        return Matrix.wrap(data, rows, cols);
+    }
+
+    private static void validateQr(QRResult result, int rows, int cols, int qCols, int rRows) {
+        assertEquals("Q row count", rows, result.getQ().getRowCount());
+        assertEquals("Q column count", qCols, result.getQ().getColumnCount());
+        assertEquals("R row count", rRows, result.getR().getRowCount());
+        assertEquals("R column count", cols, result.getR().getColumnCount());
+        assertTrue("QR residual too large: " + result.residualNorm(), result.residualNorm() < 1e-8);
+        assertTrue("Q orthogonality too large: " + result.verifyOrthogonality(result.getQ())[0],
+            result.verifyOrthogonality(result.getQ())[0] < 1e-8);
     }
 
     private static double relativeDifference(Matrix a, Matrix b) {

@@ -42,12 +42,20 @@ def forwardRuntimeSystemProperties = { task ->
 
 def nativeBuildDirProvider = layout.buildDirectory.dir("native-backend")
 def nativeLibraryFileProvider = providers.provider {
-    new File(nativeBuildDirProvider.get().asFile, "lib/${System.mapLibraryName('jlc_native')}")
+    File buildDir = nativeBuildDirProvider.get().asFile
+    String libName = System.mapLibraryName('jlc_native')
+    if (isSingleConfigCmakeGenerator(getNativeCmakeGenerator())) {
+        return new File(buildDir, "lib/${libName}")
+    }
+    return new File(buildDir, "lib/${getNativeBuildType()}/${libName}")
 }
 def nativeSweepExecutableProvider = providers.provider {
     File buildDir = nativeBuildDirProvider.get().asFile
     String executableName = getOsString() == 'windows' ? 'jlc_native_gemm_sweep.exe' : 'jlc_native_gemm_sweep'
-    new File(buildDir, "lib/${executableName}")
+    if (isSingleConfigCmakeGenerator(getNativeCmakeGenerator())) {
+        return new File(buildDir, "lib/${executableName}")
+    }
+    return new File(buildDir, "lib/${getNativeBuildType()}/${executableName}")
 }
 def nativeJavaLauncher = javaToolchains.launcherFor {
     languageVersion = JavaLanguageVersion.of(21)
@@ -487,6 +495,45 @@ tasks.register('runQrBackendComparison', JavaExec) {
         languageVersion = JavaLanguageVersion.of(21)
     }
     main = 'net.faulj.bench.QrBackendComparisonRunner'
+    standardInput = System.in
+}
+
+tasks.register('runQrBlockSizeSweep', JavaExec) {
+    group = 'benchmark'
+    description = 'Sweep native blocked QR modes, shapes, and block sizes'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.native.lib.path', nativeLibraryFileProvider.get().absolutePath
+    main = 'net.faulj.nativeblas.QrBlockSizeSweepRunner'
+    standardInput = System.in
+}
+
+tasks.register('runQrTrailingUpdateGemmBenchmark', JavaExec) {
+    group = 'benchmark'
+    description = 'Benchmark exact QR trailing-update GEMM shapes through JNI'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.native.lib.path', nativeLibraryFileProvider.get().absolutePath
+    main = 'net.faulj.nativeblas.QrTrailingUpdateGemmBenchmark'
+    standardInput = System.in
+}
+
+tasks.register('runQrPerformanceGuardrail', JavaExec) {
+    group = 'benchmark'
+    description = 'Print non-failing native QR performance guardrail ranges'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.native.lib.path', nativeLibraryFileProvider.get().absolutePath
+    main = 'net.faulj.nativeblas.QrPerformanceGuardrailRunner'
     standardInput = System.in
 }
 

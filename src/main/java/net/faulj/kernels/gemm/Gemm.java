@@ -50,7 +50,8 @@ public final class Gemm {
      */
     public static void gemm(Matrix a, Matrix b, Matrix c,
                             double alpha, double beta, DispatchPolicy policy) {
-        BackendRegistry.gemmBackend().gemm(a, b, c, alpha, beta, policy);
+        BackendRegistry.gemmBackend(c.getRowCount(), c.getColumnCount(), threadCount(policy))
+            .gemm(a, b, c, alpha, beta, policy);
     }
 
     /**
@@ -61,7 +62,8 @@ public final class Gemm {
                                    double[] c, int cOffset, int ldc,
                                    int m, int k, int n,
                                    double alpha, double beta) {
-        BackendRegistry.gemmBackend().gemmStrided(a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta);
+        BackendRegistry.gemmBackend("strided", m, n, threadCount(null))
+            .gemmStrided(a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta);
     }
 
     /**
@@ -73,7 +75,8 @@ public final class Gemm {
                                    double[] c, int cOffset, int ldc,
                                    int m, int k, int n,
                                    double alpha, double beta) {
-        BackendRegistry.gemmBackend().gemmStrided(transposeA, a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta);
+        BackendRegistry.gemmBackend("strided", m, n, threadCount(null))
+            .gemmStrided(transposeA, a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta);
     }
 
     /**
@@ -84,7 +87,8 @@ public final class Gemm {
                                    double[] cd, int cOff, int ldc,
                                    int m, int k, int n,
                                    double alpha, double beta, int blockSize) {
-        BackendRegistry.gemmBackend().gemmStrided(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
+        BackendRegistry.gemmBackend("strided", m, n, threadCount(null))
+            .gemmStrided(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
     }
 
     /**
@@ -95,7 +99,8 @@ public final class Gemm {
                                          double[] cd, int cOff, int ldc,
                                          int m, int k, int n,
                                          double alpha, double beta, int blockSize) {
-        BackendRegistry.gemmBackend().gemmStridedTransA(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
+        BackendRegistry.gemmBackend("strided_trans_a", k, n, threadCount(null))
+            .gemmStridedTransA(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
     }
 
     /**
@@ -106,7 +111,8 @@ public final class Gemm {
                                             double[] cd, int cOff, int ldc,
                                             int m, int k, int n,
                                             double alpha, double beta, int blockSize) {
-        BackendRegistry.gemmBackend().gemmStridedColMajorA(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
+        BackendRegistry.gemmBackend("strided_col_major_a", m, n, threadCount(null))
+            .gemmStridedColMajorA(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
     }
 
     /**
@@ -117,7 +123,8 @@ public final class Gemm {
                                             double[] cd, int cOff, int ldc,
                                             int m, int k, int n,
                                             double alpha, double beta, int blockSize) {
-        BackendRegistry.gemmBackend().gemmStridedColMajorB(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
+        BackendRegistry.gemmBackend("strided_col_major_b", m, n, threadCount(null))
+            .gemmStridedColMajorB(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
     }
 
     /**
@@ -129,9 +136,14 @@ public final class Gemm {
                                           int m, int k, int n,
                                           int batchCount,
                                           double alpha, double beta) {
-        BackendRegistry.gemmBackend().gemmStridedBatched(a, aOffset, lda, aStride,
+        BackendRegistry.gemmBackend("strided_batched", m, n, threadCount(null)).gemmStridedBatched(a, aOffset, lda, aStride,
             b, bOffset, ldb, bStride,
             c, cOffset, ldc, cStride,
             m, k, n, batchCount, alpha, beta);
+    }
+
+    private static int threadCount(DispatchPolicy policy) {
+        DispatchPolicy resolved = policy == null ? DispatchPolicy.defaultPolicy() : policy;
+        return resolved.isParallelEnabled() ? resolved.getParallelism() : 1;
     }
 }

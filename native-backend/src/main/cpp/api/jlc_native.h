@@ -49,6 +49,25 @@ struct jlc_gemm_profile {
     std::uint64_t last_nr;
 };
 
+struct jlc_qr_profile {
+    std::uint64_t calls;
+    std::uint64_t wall_ns;
+    std::uint64_t factorize_ns;
+    std::uint64_t input_transpose_ns;
+    std::uint64_t panel_ns;
+    std::uint64_t reflector_pack_ns;
+    std::uint64_t t_build_ns;
+    std::uint64_t trailing_pack_ns;
+    std::uint64_t trailing_unpack_ns;
+    std::uint64_t trailing_gemm_ns;
+    std::uint64_t trailing_t_apply_ns;
+    std::uint64_t r_extract_ns;
+    std::uint64_t q_init_ns;
+    std::uint64_t q_build_ns;
+    std::uint64_t q_gemm_ns;
+    std::uint64_t q_t_apply_ns;
+};
+
 bool jlc_native_is_available();
 bool jlc_native_vendor_lapack_available();
 const char* jlc_native_runtime_description();
@@ -58,6 +77,11 @@ void jlc_native_context_destroy(jlc_context_handle handle);
 void jlc_native_profile_set_enabled(bool enabled);
 void jlc_native_profile_reset();
 void jlc_native_profile_snapshot(jlc_gemm_profile* out_profile);
+void jlc_native_qr_profile_set_enabled(bool enabled);
+void jlc_native_qr_profile_reset();
+void jlc_native_qr_profile_snapshot(jlc_qr_profile* out_profile);
+void jlc_native_qr_set_block_size_override(int block_size);
+void jlc_native_qr_set_gemm_threads_override(int threads);
 jlc_matrix_handle jlc_native_matrix_create(int rows, int cols, int order, int alignment_bytes);
 void jlc_native_matrix_destroy(jlc_matrix_handle handle);
 double* jlc_native_matrix_data(jlc_matrix_handle handle);

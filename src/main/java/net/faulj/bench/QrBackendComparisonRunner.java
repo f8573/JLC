@@ -12,7 +12,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Random;
-import java.util.TreeMap;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -21,7 +20,7 @@ import java.nio.file.Path;
 import java.time.OffsetDateTime;
 
 /**
- * Compare Java and native QR backends across a size sweep and print a suggested auto-band config.
+ * Compare Java and C++ QR backends across a size sweep and write calibrated dispatch buckets.
  */
 public final class QrBackendComparisonRunner {
     private QrBackendComparisonRunner() {
@@ -36,7 +35,7 @@ public final class QrBackendComparisonRunner {
         };
         int warmupRuns = 2;
         int measuredRuns = 3;
-        String mode = "decompose";
+        Mode mode = Mode.FULL;
         Path calibrationOut = null;
 
         for (String arg : args) {
@@ -52,61 +51,36 @@ public final class QrBackendComparisonRunner {
             } else if (arg.startsWith("--runs=")) {
                 measuredRuns = parsePositiveInt(arg.substring("--runs=".length()), measuredRuns);
             } else if (arg.startsWith("--mode=")) {
-                mode = arg.substring("--mode=".length()).trim().toLowerCase(Locale.ROOT);
+                mode = Mode.parse(arg.substring("--mode=".length()));
             } else if (arg.startsWith("--calibrationOut=")) {
                 calibrationOut = parseCalibrationOut(arg.substring("--calibrationOut=".length()).trim());
             }
         }
 
-        boolean factorizeOnly = "factorize".equals(mode);
         System.out.println("QR_BACKEND_COMPARISON");
-        System.out.println("mode=" + mode);
+        System.out.println("mode=" + mode.cliName);
         System.out.println("warmupRuns=" + warmupRuns);
         System.out.println("measuredRuns=" + measuredRuns);
 
-        List<Winner> winners = new ArrayList<>();
+        Map<String, String> suggestedProperties = new java.util.LinkedHashMap<>();
         for (Shape shape : shapes) {
             Matrix a = randomMatrix(shape.rows, shape.cols, 1000L + shape.rows * 100_000L + shape.cols);
-            Result javaResult = runBackend("java", a, factorizeOnly, warmupRuns, measuredRuns);
-            Result nativeResult = runBackend("native", a, factorizeOnly, warmupRuns, measuredRuns);
-            String winner = javaResult.bestSeconds <= nativeResult.bestSeconds ? "java" : "native";
-            winners.add(new Winner(shape, winner));
+            Result javaResult = runBackend("java", a, mode, warmupRuns, measuredRuns);
+            Result cppResult = runBackend("cpp", a, mode, warmupRuns, measuredRuns);
+            String winner = javaResult.bestSeconds <= cppResult.bestSeconds ? "java" : "cpp";
+            addCalibrationProperties(suggestedProperties, shape, mode, javaResult, cppResult, measuredRuns);
 
             System.out.printf(Locale.ROOT, "shape=%dx%d family=%s bandMetric=%d%n",
                 shape.rows, shape.cols, shape.family().propertyKey(), shape.bandMetric());
             printResult("java", javaResult);
-            printResult("native", nativeResult);
+            printResult("cpp", cppResult);
             System.out.println("winner=" + winner);
-        }
-
-        Map<String, String> suggestedProperties = new TreeMap<>();
-        for (QrShapeFamily family : QrShapeFamily.values()) {
-            String suggestedGrid = buildSuggestedGrid(winners, family);
-            if (!suggestedGrid.isEmpty()) {
-                System.out.println("suggested_" + family.propertyKey() + "_grid=" + suggestedGrid);
-                if (factorizeOnly) {
-                    String propertyKey = "jlc.native.qr." + family.propertyKey() + ".factorizeGrid";
-                    System.out.println("suggested_property=" + propertyKey + "=" + suggestedGrid);
-                    suggestedProperties.put(propertyKey, suggestedGrid);
-                } else {
-                    String propertyKey = "jlc.native.qr." + family.propertyKey() + ".decomposeGrid";
-                    System.out.println("suggested_property=" + propertyKey + "=" + suggestedGrid);
-                    suggestedProperties.put(propertyKey, suggestedGrid);
-                }
+            System.out.println("cpp_correctness=" + (cppResult.correctnessPass ? "PASS" : "FAIL"));
+            if (Double.isFinite(cppResult.residual)) {
+                System.out.printf(Locale.ROOT, "cpp_residual=%.6e%n", cppResult.residual);
             }
-            String suggestedBands = buildSuggestedBands(winners, family);
-            if (suggestedBands.isEmpty()) {
-                continue;
-            }
-            System.out.println("suggested_" + family.propertyKey() + "_bands=" + suggestedBands);
-            if (factorizeOnly) {
-                String propertyKey = "jlc.native.qr." + family.propertyKey() + ".factorizeBands";
-                System.out.println("suggested_property=" + propertyKey + "=" + suggestedBands);
-                suggestedProperties.put(propertyKey, suggestedBands);
-            } else {
-                String propertyKey = "jlc.native.qr." + family.propertyKey() + ".decomposeBands";
-                System.out.println("suggested_property=" + propertyKey + "=" + suggestedBands);
-                suggestedProperties.put(propertyKey, suggestedBands);
+            if (Double.isFinite(cppResult.orthogonality)) {
+                System.out.printf(Locale.ROOT, "cpp_orthogonality=%.6e%n", cppResult.orthogonality);
             }
         }
 
@@ -116,13 +90,12 @@ public final class QrBackendComparisonRunner {
         }
     }
 
-    private static Result runBackend(String backend, Matrix a, boolean factorizeOnly, int warmupRuns, int measuredRuns) {
-        System.setProperty("jlc.backend", "native".equals(backend) ? "native" : "java");
-        System.setProperty("jlc.native.qr.provider", "native".equals(backend) ? "builtin" : "java");
-        System.setProperty("jlc.native.qr.minSize", "1");
+    private static Result runBackend(String backend, Matrix a, Mode mode, int warmupRuns, int measuredRuns) {
+        System.setProperty("jlc.backend", "cpp".equals(backend) ? "native" : "java");
+        System.setProperty("jlc.algorithm.qr.backend", "cpp".equals(backend) ? "cpp" : "java");
 
         for (int i = 0; i < warmupRuns; i++) {
-            execute(a, factorizeOnly);
+            execute(a, mode);
         }
 
         double flops = (4.0 / 3.0) * a.getRowCount() * (double) a.getColumnCount() * a.getColumnCount();
@@ -130,22 +103,24 @@ public final class QrBackendComparisonRunner {
         double total = 0.0;
         for (int i = 0; i < measuredRuns; i++) {
             long start = System.nanoTime();
-            execute(a, factorizeOnly);
+            execute(a, mode);
             double seconds = (System.nanoTime() - start) / 1e9;
             best = Math.min(best, seconds);
             total += seconds;
         }
 
         BackendSnapshot snapshot = BackendRegistry.snapshot();
-        return new Result(snapshot, best, total / measuredRuns, flops);
+        Correctness correctness = "cpp".equals(backend) ? validateCpp(a, mode) : Correctness.passed();
+        return new Result(snapshot, best, total / measuredRuns, flops,
+            correctness.pass, correctness.residual, correctness.orthogonality);
     }
 
-    private static void execute(Matrix a, boolean factorizeOnly) {
-        if (factorizeOnly) {
+    private static void execute(Matrix a, Mode mode) {
+        if (mode == Mode.FACTORIZE) {
             HouseholderQR.factorize(a);
             return;
         }
-        QRResult result = HouseholderQR.decompose(a);
+        QRResult result = mode == Mode.THIN ? HouseholderQR.decomposeThin(a) : HouseholderQR.decompose(a);
         if (result.getR().getRowCount() == 0) {
             throw new IllegalStateException("Unexpected empty QR result");
         }
@@ -160,78 +135,81 @@ public final class QrBackendComparisonRunner {
         System.out.printf(Locale.ROOT, "%s_mean_gflops=%.6f%n", label, result.flops / result.meanSeconds / 1e9);
     }
 
-    private static String buildSuggestedBands(List<Winner> winners, QrShapeFamily family) {
-        TreeMap<Integer, String> winnersByMetric = new TreeMap<>();
-        for (Winner winner : winners.stream()
-            .filter(winner -> winner.shape.family() == family)
-            .sorted((left, right) -> Integer.compare(left.shape.bandMetric(), right.shape.bandMetric()))
-            .toList()) {
-            String existing = winnersByMetric.putIfAbsent(winner.shape.bandMetric(), winner.backend);
-            if (existing != null && !existing.equals(winner.backend)) {
-                return "";
-            }
+    private static Correctness validateCpp(Matrix a, Mode mode) {
+        try {
+            Mode validationMode = mode == Mode.FACTORIZE ? Mode.FULL : mode;
+            QRResult result = validationMode == Mode.THIN ? HouseholderQR.decomposeThin(a) : HouseholderQR.decompose(a);
+            int k = Math.min(a.getRowCount(), a.getColumnCount());
+            int expectedQCols = validationMode == Mode.THIN ? k : a.getRowCount();
+            int expectedRRows = expectedQCols;
+            double residual = reconstructionResidual(a, result.getQ(), result.getR());
+            double orthogonality = orthogonalityError(result.getQ());
+            boolean dimensionsPass = result.getQ().getRowCount() == a.getRowCount()
+                && result.getQ().getColumnCount() == expectedQCols
+                && result.getR().getRowCount() == expectedRRows
+                && result.getR().getColumnCount() == a.getColumnCount();
+            boolean pass = dimensionsPass && residual < 1e-8 && orthogonality < 1e-8;
+            return new Correctness(pass, residual, orthogonality);
+        } catch (RuntimeException | LinkageError ignored) {
+            return Correctness.failed();
         }
-        if (winnersByMetric.isEmpty()) {
-            return "";
-        }
-        List<String> bands = new ArrayList<>();
-        int bandStart = 1;
-        Integer previousMetric = null;
-        String current = null;
-        for (Map.Entry<Integer, String> entry : winnersByMetric.entrySet()) {
-            int metric = entry.getKey();
-            String backend = entry.getValue();
-            if (current == null) {
-                current = backend;
-            } else if (!backend.equals(current)) {
-                bands.add(bandStart + "-" + previousMetric + ":" + current);
-                bandStart = previousMetric + 1;
-                current = backend;
-            }
-            previousMetric = metric;
-        }
-        bands.add(bandStart + "+:" + current);
-        return String.join(",", bands);
     }
 
-    private static String buildSuggestedGrid(List<Winner> winners, QrShapeFamily family) {
-        Map<Integer, TreeMap<Integer, String>> winnersByShortThenLong = new TreeMap<>();
-        for (Winner winner : winners) {
-            if (winner.shape.family() != family) {
-                continue;
-            }
-            winnersByShortThenLong
-                .computeIfAbsent(winner.shape.bandMetric(), ignored -> new TreeMap<>())
-                .put(winner.shape.problemSize(), winner.backend);
-        }
-        if (winnersByShortThenLong.isEmpty()) {
-            return "";
-        }
-
-        List<String> rules = new ArrayList<>();
-        for (Map.Entry<Integer, TreeMap<Integer, String>> shortEntry : winnersByShortThenLong.entrySet()) {
-            int shortDim = shortEntry.getKey();
-            TreeMap<Integer, String> longWinners = shortEntry.getValue();
-            Integer previousLong = null;
-            int longBandStart = 1;
-            String current = null;
-            for (Map.Entry<Integer, String> longEntry : longWinners.entrySet()) {
-                int longDim = longEntry.getKey();
-                String backend = longEntry.getValue();
-                if (current == null) {
-                    current = backend;
-                } else if (!backend.equals(current)) {
-                    rules.add(shortDim + "-" + shortDim + "x" + longBandStart + "-" + previousLong + ":" + current);
-                    longBandStart = previousLong + 1;
-                    current = backend;
+    private static double reconstructionResidual(Matrix a, Matrix q, Matrix r) {
+        double[] aData = a.getRawData();
+        double[] qData = q.getRawData();
+        double[] rData = r.getRawData();
+        int rows = a.getRowCount();
+        int cols = a.getColumnCount();
+        int qCols = q.getColumnCount();
+        double diff = 0.0;
+        double norm = 0.0;
+        for (int row = 0; row < rows; row++) {
+            int aBase = row * cols;
+            int qBase = row * qCols;
+            for (int col = 0; col < cols; col++) {
+                double reconstructed = 0.0;
+                for (int mid = 0; mid < qCols; mid++) {
+                    reconstructed = Math.fma(qData[qBase + mid], rData[mid * cols + col], reconstructed);
                 }
-                previousLong = longDim;
-            }
-            if (current != null) {
-                rules.add(shortDim + "-" + shortDim + "x" + longBandStart + "+:" + current);
+                double delta = aData[aBase + col] - reconstructed;
+                diff = Math.fma(delta, delta, diff);
+                norm = Math.fma(aData[aBase + col], aData[aBase + col], norm);
             }
         }
-        return String.join(",", rules);
+        return Math.sqrt(diff) / Math.max(1.0, Math.sqrt(norm));
+    }
+
+    private static double orthogonalityError(Matrix q) {
+        double[] qData = q.getRawData();
+        int rows = q.getRowCount();
+        int cols = q.getColumnCount();
+        double diff = 0.0;
+        for (int left = 0; left < cols; left++) {
+            for (int right = 0; right < cols; right++) {
+                double dot = 0.0;
+                for (int row = 0; row < rows; row++) {
+                    dot = Math.fma(qData[row * cols + left], qData[row * cols + right], dot);
+                }
+                double expected = left == right ? 1.0 : 0.0;
+                double delta = dot - expected;
+                diff = Math.fma(delta, delta, diff);
+            }
+        }
+        return Math.sqrt(diff);
+    }
+
+    private static void addCalibrationProperties(Map<String, String> out, Shape shape, Mode mode,
+                                                 Result javaResult, Result cppResult, int measuredRuns) {
+        String prefix = "bucket.qr." + mode.dispatchMode + "." + shape.family().propertyKey() + "."
+            + shape.sizeBand() + ".1.";
+        out.put(prefix + "java.samples", Integer.toString(measuredRuns));
+        out.put(prefix + "java.meanNanos", Long.toString(Math.round(javaResult.meanSeconds * 1e9)));
+        out.put(prefix + "java.minNanos", Long.toString(Math.round(javaResult.bestSeconds * 1e9)));
+        out.put(prefix + "cpp.samples", Integer.toString(measuredRuns));
+        out.put(prefix + "cpp.meanNanos", Long.toString(Math.round(cppResult.meanSeconds * 1e9)));
+        out.put(prefix + "cpp.minNanos", Long.toString(Math.round(cppResult.bestSeconds * 1e9)));
+        out.put(prefix + "cpp.correctness", cppResult.correctnessPass ? "PASS" : "FAIL");
     }
 
     private static Matrix randomMatrix(int rows, int cols, long seed) {
@@ -323,7 +301,7 @@ public final class QrBackendComparisonRunner {
         return Path.of(value).toAbsolutePath().normalize();
     }
 
-    private static void writeCalibrationFile(Path calibrationOut, Map<String, String> suggestedProperties, String mode,
+    private static void writeCalibrationFile(Path calibrationOut, Map<String, String> suggestedProperties, Mode mode,
                                              int warmupRuns, int measuredRuns, Shape[] shapes) {
         Properties properties = new Properties();
         if (Files.exists(calibrationOut)) {
@@ -333,14 +311,15 @@ public final class QrBackendComparisonRunner {
                 properties.clear();
             }
         }
-        properties.setProperty("jlc.native.qr.calibration.generatedAt", OffsetDateTime.now().toString());
-        properties.setProperty("jlc.native.qr.calibration.mode." + mode + ".warmupRuns", Integer.toString(warmupRuns));
-        properties.setProperty("jlc.native.qr.calibration.mode." + mode + ".measuredRuns", Integer.toString(measuredRuns));
-        properties.setProperty("jlc.native.qr.calibration.mode." + mode + ".shapeCount", Integer.toString(shapes.length));
-        properties.setProperty("jlc.native.qr.calibration.os.name", System.getProperty("os.name", "unknown"));
-        properties.setProperty("jlc.native.qr.calibration.os.arch", System.getProperty("os.arch", "unknown"));
-        properties.setProperty("jlc.native.qr.calibration.java.version", System.getProperty("java.version", "unknown"));
-        properties.setProperty("jlc.native.qr.calibration.availableProcessors",
+        properties.setProperty("version", "1");
+        properties.setProperty("generatedAt", OffsetDateTime.now().toString());
+        properties.setProperty("qr.mode." + mode.cliName + ".warmupRuns", Integer.toString(warmupRuns));
+        properties.setProperty("qr.mode." + mode.cliName + ".measuredRuns", Integer.toString(measuredRuns));
+        properties.setProperty("qr.mode." + mode.cliName + ".shapeCount", Integer.toString(shapes.length));
+        properties.setProperty("os.name", System.getProperty("os.name", "unknown"));
+        properties.setProperty("os.arch", System.getProperty("os.arch", "unknown"));
+        properties.setProperty("java.version", System.getProperty("java.version", "unknown"));
+        properties.setProperty("availableProcessors",
             Integer.toString(Runtime.getRuntime().availableProcessors()));
         for (Map.Entry<String, String> entry : suggestedProperties.entrySet()) {
             properties.setProperty(entry.getKey(), entry.getValue());
@@ -351,17 +330,51 @@ public final class QrBackendComparisonRunner {
                 Files.createDirectories(parent);
             }
             try (OutputStream out = Files.newOutputStream(calibrationOut)) {
-                properties.store(out, "QR backend calibration generated by QrBackendComparisonRunner");
+                properties.store(out, "Algorithm dispatch calibration generated by QrBackendComparisonRunner");
             }
         } catch (IOException e) {
             throw new IllegalStateException("Failed to write QR calibration file: " + calibrationOut, e);
         }
     }
 
-    private record Result(BackendSnapshot snapshot, double bestSeconds, double meanSeconds, double flops) {
+    private record Result(BackendSnapshot snapshot, double bestSeconds, double meanSeconds, double flops,
+                          boolean correctnessPass, double residual, double orthogonality) {
     }
 
-    private record Winner(Shape shape, String backend) {
+    private record Correctness(boolean pass, double residual, double orthogonality) {
+        static Correctness passed() {
+            return new Correctness(true, Double.NaN, Double.NaN);
+        }
+
+        static Correctness failed() {
+            return new Correctness(false, Double.POSITIVE_INFINITY, Double.POSITIVE_INFINITY);
+        }
+    }
+
+    private enum Mode {
+        FACTORIZE("factorize", "factorize_only"),
+        THIN("thin", "decompose_thin"),
+        FULL("full", "decompose_full");
+
+        private final String cliName;
+        private final String dispatchMode;
+
+        Mode(String cliName, String dispatchMode) {
+            this.cliName = cliName;
+            this.dispatchMode = dispatchMode;
+        }
+
+        static Mode parse(String value) {
+            if (value == null) {
+                return FULL;
+            }
+            return switch (value.trim().toLowerCase(Locale.ROOT)) {
+                case "factorize", "factorize_only" -> FACTORIZE;
+                case "thin", "decompose_thin" -> THIN;
+                case "full", "decompose", "decompose_full" -> FULL;
+                default -> FULL;
+            };
+        }
     }
 
     private record Shape(int rows, int cols) {
@@ -381,6 +394,17 @@ public final class QrBackendComparisonRunner {
                 return QrShapeFamily.WIDE;
             }
             return QrShapeFamily.SQUARE;
+        }
+
+        String sizeBand() {
+            int dominant = Math.max(rows, cols);
+            if (dominant <= 128) {
+                return "small";
+            }
+            if (dominant <= 512) {
+                return "medium";
+            }
+            return "large";
         }
     }
 

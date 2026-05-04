@@ -56,4 +56,39 @@ public class NativeGemmIntegrationTest {
             209.0, 231.5
         }, c.getRawData(), 1e-9);
     }
+
+    @Test
+    public void nativeBackendUsesAvx2PackedMicrokernelOnWindowsBuild() {
+        Assume.assumeTrue("Native library path not configured", System.getProperty("jlc.native.lib.path") != null);
+        System.setProperty("jlc.backend", "native");
+        BackendRegistry.resetForTests();
+
+        BackendSnapshot snapshot = BackendRegistry.snapshot();
+        assertEquals("native", snapshot.activeBackend());
+        assertEquals("builtin only", snapshot.nativeContext().getProviderDescription());
+        assertTrue("Expected AVX2 runtime, got: " + snapshot.nativeContext().getRuntimeDescription(),
+            snapshot.nativeContext().getRuntimeDescription() != null
+                && snapshot.nativeContext().getRuntimeDescription().contains("AVX2"));
+
+        NativeProfiling.setEnabled(true);
+        NativeProfiling.reset();
+        double[] a = sequence(10 * 16, 0.01);
+        double[] b = sequence(16 * 8, -0.02);
+        double[] c = new double[10 * 8];
+        NativeBindings.nativeGemm(a, 10, 16, b, 16, 8, c, 10, 8, 1.0, 0.0, 1, NativeFlags.FORCE_BUILTIN);
+        NativeGemmProfile profile = NativeProfiling.snapshot().orElse(NativeGemmProfile.EMPTY);
+        NativeProfiling.setEnabled(false);
+
+        assertEquals("AVX2 MR regression", 5L, profile.lastMr());
+        assertEquals("AVX2 NR regression", 4L, profile.lastNr());
+        assertTrue("Expected packed microkernel calls", profile.microtileCalls() > 0);
+    }
+
+    private static double[] sequence(int length, double scale) {
+        double[] out = new double[length];
+        for (int i = 0; i < length; i++) {
+            out[i] = scale * (i + 1);
+        }
+        return out;
+    }
 }

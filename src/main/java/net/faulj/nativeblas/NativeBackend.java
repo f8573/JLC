@@ -162,13 +162,17 @@ public final class NativeBackend implements ComputeBackend {
             return;
         }
         int threads = resolveThreadCount(policy == null ? DispatchPolicy.defaultPolicy() : policy);
-        NativeBindings.nativeGemm(
-            a.getRawData(), a.getRowCount(), a.getColumnCount(),
-            b.getRawData(), b.getRowCount(), b.getColumnCount(),
-            c.getRawData(), c.getRowCount(), c.getColumnCount(),
-            alpha, beta,
-            threads, nativeExecutionFlags()
-        );
+        try {
+            NativeBindings.nativeGemm(
+                a.getRawData(), a.getRowCount(), a.getColumnCount(),
+                b.getRawData(), b.getRowCount(), b.getColumnCount(),
+                c.getRawData(), c.getRowCount(), c.getColumnCount(),
+                alpha, beta,
+                threads, nativeExecutionFlags()
+            );
+        } catch (RuntimeException | UnsatisfiedLinkError ex) {
+            javaFallback.gemm(a, b, c, alpha, beta, policy);
+        }
     }
 
     @Override
@@ -181,13 +185,17 @@ public final class NativeBackend implements ComputeBackend {
             javaFallback.gemmStrided(a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta);
             return;
         }
-        NativeBindings.nativeGemmStrided(
-            a, aOffset, lda, m, k, 0,
-            b, bOffset, ldb, k, n, 0,
-            c, cOffset, ldc, m, n, 0,
-            alpha, beta,
-            resolveDefaultThreadCount(), nativeExecutionFlags()
-        );
+        try {
+            NativeBindings.nativeGemmStrided(
+                a, aOffset, lda, m, k, 0,
+                b, bOffset, ldb, k, n, 0,
+                c, cOffset, ldc, m, n, 0,
+                alpha, beta,
+                resolveDefaultThreadCount(), nativeExecutionFlags()
+            );
+        } catch (RuntimeException | UnsatisfiedLinkError ex) {
+            javaFallback.gemmStrided(a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta);
+        }
     }
 
     @Override
@@ -204,13 +212,17 @@ public final class NativeBackend implements ComputeBackend {
         int aFlags = transposeA ? NativeFlags.A_TRANSPOSE : 0;
         int bRows = transposeA ? m : k;
         int cRows = transposeA ? k : m;
-        NativeBindings.nativeGemmStrided(
-            a, aOffset, lda, m, k, aFlags,
-            b, bOffset, ldb, bRows, n, 0,
-            c, cOffset, ldc, cRows, n, 0,
-            alpha, beta,
-            resolveDefaultThreadCount(), nativeExecutionFlags()
-        );
+        try {
+            NativeBindings.nativeGemmStrided(
+                a, aOffset, lda, m, k, aFlags,
+                b, bOffset, ldb, bRows, n, 0,
+                c, cOffset, ldc, cRows, n, 0,
+                alpha, beta,
+                resolveDefaultThreadCount(), nativeExecutionFlags()
+            );
+        } catch (RuntimeException | UnsatisfiedLinkError ex) {
+            javaFallback.gemmStrided(transposeA, a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta);
+        }
     }
 
     @Override
@@ -223,13 +235,17 @@ public final class NativeBackend implements ComputeBackend {
             javaFallback.gemmStrided(a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta, blockSize);
             return;
         }
-        NativeBindings.nativeGemmStrided(
-            a, aOffset, lda, m, k, 0,
-            b, bOffset, ldb, k, n, 0,
-            c, cOffset, ldc, m, n, 0,
-            alpha, beta,
-            resolveDefaultThreadCount(), nativeExecutionFlags()
-        );
+        try {
+            NativeBindings.nativeGemmStrided(
+                a, aOffset, lda, m, k, 0,
+                b, bOffset, ldb, k, n, 0,
+                c, cOffset, ldc, m, n, 0,
+                alpha, beta,
+                resolveDefaultThreadCount(), nativeExecutionFlags()
+            );
+        } catch (RuntimeException | UnsatisfiedLinkError ex) {
+            javaFallback.gemmStrided(a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta, blockSize);
+        }
     }
 
     @Override
@@ -242,13 +258,17 @@ public final class NativeBackend implements ComputeBackend {
             javaFallback.gemmStridedTransA(a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta, blockSize);
             return;
         }
-        NativeBindings.nativeGemmStrided(
-            a, aOffset, lda, m, k, NativeFlags.A_TRANSPOSE,
-            b, bOffset, ldb, m, n, 0,
-            c, cOffset, ldc, k, n, 0,
-            alpha, beta,
-            resolveDefaultThreadCount(), nativeExecutionFlags()
-        );
+        try {
+            NativeBindings.nativeGemmStrided(
+                a, aOffset, lda, m, k, NativeFlags.A_TRANSPOSE,
+                b, bOffset, ldb, m, n, 0,
+                c, cOffset, ldc, k, n, 0,
+                alpha, beta,
+                resolveDefaultThreadCount(), nativeExecutionFlags()
+            );
+        } catch (RuntimeException | UnsatisfiedLinkError ex) {
+            javaFallback.gemmStridedTransA(a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta, blockSize);
+        }
     }
 
     @Override
@@ -261,13 +281,17 @@ public final class NativeBackend implements ComputeBackend {
             javaFallback.gemmStridedColMajorA(a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta, blockSize);
             return;
         }
-        NativeBindings.nativeGemmStrided(
-            a, aOffset, lda, m, k, NativeFlags.A_COL_MAJOR,
-            b, bOffset, ldb, k, n, 0,
-            c, cOffset, ldc, m, n, 0,
-            alpha, beta,
-            resolveDefaultThreadCount(), nativeExecutionFlags()
-        );
+        try {
+            NativeBindings.nativeGemmStrided(
+                a, aOffset, lda, m, k, NativeFlags.A_COL_MAJOR,
+                b, bOffset, ldb, k, n, 0,
+                c, cOffset, ldc, m, n, 0,
+                alpha, beta,
+                resolveDefaultThreadCount(), nativeExecutionFlags()
+            );
+        } catch (RuntimeException | UnsatisfiedLinkError ex) {
+            javaFallback.gemmStridedColMajorA(a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta, blockSize);
+        }
     }
 
     @Override
@@ -280,13 +304,17 @@ public final class NativeBackend implements ComputeBackend {
             javaFallback.gemmStridedColMajorB(a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta, blockSize);
             return;
         }
-        NativeBindings.nativeGemmStrided(
-            a, aOffset, lda, m, k, 0,
-            b, bOffset, ldb, k, n, NativeFlags.B_COL_MAJOR,
-            c, cOffset, ldc, m, n, 0,
-            alpha, beta,
-            resolveDefaultThreadCount(), nativeExecutionFlags()
-        );
+        try {
+            NativeBindings.nativeGemmStrided(
+                a, aOffset, lda, m, k, 0,
+                b, bOffset, ldb, k, n, NativeFlags.B_COL_MAJOR,
+                c, cOffset, ldc, m, n, 0,
+                alpha, beta,
+                resolveDefaultThreadCount(), nativeExecutionFlags()
+            );
+        } catch (RuntimeException | UnsatisfiedLinkError ex) {
+            javaFallback.gemmStridedColMajorB(a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta, blockSize);
+        }
     }
 
     @Override
@@ -303,14 +331,21 @@ public final class NativeBackend implements ComputeBackend {
                 m, k, n, batchCount, alpha, beta);
             return;
         }
-        NativeBindings.nativeGemmStridedBatched(
-            a, aOffset, lda, m, k, 0, aStride,
-            b, bOffset, ldb, k, n, 0, bStride,
-            c, cOffset, ldc, m, n, 0, cStride,
-            alpha, beta,
-            batchCount,
-            resolveDefaultThreadCount(), nativeExecutionFlags()
-        );
+        try {
+            NativeBindings.nativeGemmStridedBatched(
+                a, aOffset, lda, m, k, 0, aStride,
+                b, bOffset, ldb, k, n, 0, bStride,
+                c, cOffset, ldc, m, n, 0, cStride,
+                alpha, beta,
+                batchCount,
+                resolveDefaultThreadCount(), nativeExecutionFlags()
+            );
+        } catch (RuntimeException | UnsatisfiedLinkError ex) {
+            javaFallback.gemmStridedBatched(a, aOffset, lda, aStride,
+                b, bOffset, ldb, bStride,
+                c, cOffset, ldc, cStride,
+                m, k, n, batchCount, alpha, beta);
+        }
     }
 
     static void resetForTests() {
@@ -351,14 +386,18 @@ public final class NativeBackend implements ComputeBackend {
         }
 
         int threads = resolveThreadCount(policy == null ? DispatchPolicy.defaultPolicy() : policy);
-        NativeBindings.nativeGemmDirect(
-            a.segment().asByteBuffer(), a.offsetBytes(), (int) a.ld(), a.rows(), a.cols(), nativeMatrixFlags(a, NativeMatrixRole.A),
-            b.segment().asByteBuffer(), b.offsetBytes(), (int) b.ld(), b.rows(), b.cols(), nativeMatrixFlags(b, NativeMatrixRole.B),
-            c.segment().asByteBuffer(), c.offsetBytes(), (int) c.ld(), c.rows(), c.cols(), nativeMatrixFlags(c, NativeMatrixRole.C),
-            alpha, beta,
-            threads, nativeExecutionFlags()
-        );
-        c.syncFromOffHeap();
+        try {
+            NativeBindings.nativeGemmDirect(
+                a.segment().asByteBuffer(), a.offsetBytes(), (int) a.ld(), a.rows(), a.cols(), nativeMatrixFlags(a, NativeMatrixRole.A),
+                b.segment().asByteBuffer(), b.offsetBytes(), (int) b.ld(), b.rows(), b.cols(), nativeMatrixFlags(b, NativeMatrixRole.B),
+                c.segment().asByteBuffer(), c.offsetBytes(), (int) c.ld(), c.rows(), c.cols(), nativeMatrixFlags(c, NativeMatrixRole.C),
+                alpha, beta,
+                threads, nativeExecutionFlags()
+            );
+            c.syncFromOffHeap();
+        } catch (RuntimeException | UnsatisfiedLinkError ex) {
+            javaFallback.gemm(a, b, c, alpha, beta, policy);
+        }
     }
 
     private void gemmViaHeapMirror(Matrix a, Matrix b, Matrix c, double alpha, double beta, DispatchPolicy policy) {
@@ -368,14 +407,18 @@ public final class NativeBackend implements ComputeBackend {
             syncFromOffHeap(c);
         }
         int threads = resolveThreadCount(policy == null ? DispatchPolicy.defaultPolicy() : policy);
-        NativeBindings.nativeGemm(
-            a.getRawData(), a.getRowCount(), a.getColumnCount(),
-            b.getRawData(), b.getRowCount(), b.getColumnCount(),
-            c.getRawData(), c.getRowCount(), c.getColumnCount(),
-            alpha, beta,
-            threads, nativeExecutionFlags()
-        );
-        syncToOffHeap(c);
+        try {
+            NativeBindings.nativeGemm(
+                a.getRawData(), a.getRowCount(), a.getColumnCount(),
+                b.getRawData(), b.getRowCount(), b.getColumnCount(),
+                c.getRawData(), c.getRowCount(), c.getColumnCount(),
+                alpha, beta,
+                threads, nativeExecutionFlags()
+            );
+            syncToOffHeap(c);
+        } catch (RuntimeException | UnsatisfiedLinkError ex) {
+            javaFallback.gemm(a, b, c, alpha, beta, policy);
+        }
     }
 
     private static void syncFromOffHeap(Matrix matrix) {
@@ -435,18 +478,6 @@ public final class NativeBackend implements ComputeBackend {
     }
 
     private static int nativeExecutionFlags() {
-        String configured = System.getProperty("jlc.native.gemm.provider");
-        if (configured == null || configured.isBlank()) {
-            configured = System.getProperty("jlc.native.provider");
-        }
-        if (configured == null || configured.isBlank()) {
-            return 0;
-        }
-        return switch (configured.trim().toLowerCase()) {
-            case "vendor", "blas", "mkl", "openblas" -> NativeFlags.FORCE_VENDOR;
-            case "auto" -> NativeFlags.PREFER_VENDOR;
-            case "builtin", "native", "kernel" -> NativeFlags.FORCE_BUILTIN;
-            default -> 0;
-        };
+        return NativeFlags.FORCE_BUILTIN;
     }
 }

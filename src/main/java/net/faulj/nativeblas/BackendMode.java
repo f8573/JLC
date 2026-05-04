@@ -22,7 +22,7 @@ public enum BackendMode {
 
     public static BackendMode fromConfiguredValue(String value) {
         if (value == null || value.isBlank()) {
-            return JAVA;
+            return AUTO;
         }
         String normalized = value.trim().toLowerCase(Locale.ROOT);
         return switch (normalized) {

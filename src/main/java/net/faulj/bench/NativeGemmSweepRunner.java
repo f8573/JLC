@@ -44,8 +44,8 @@ public final class NativeGemmSweepRunner {
         }
 
         System.setProperty("jlc.backend", "native");
-        if (System.getProperty("jlc.native.gemm.provider") == null) {
-            System.setProperty("jlc.native.gemm.provider", "auto");
+        if (System.getProperty("jlc.algorithm.gemm.backend") == null) {
+            System.setProperty("jlc.algorithm.gemm.backend", "cpp");
         }
 
         DispatchPolicy policy = DispatchPolicy.builder()
@@ -61,7 +61,7 @@ public final class NativeGemmSweepRunner {
         System.out.println("warmupRuns=" + warmupRuns);
         System.out.println("measuredRuns=" + measuredRuns);
         System.out.println("threads=" + threads);
-        System.out.println("providerMode=" + System.getProperty("jlc.native.gemm.provider"));
+        System.out.println("algorithmBackend=" + System.getProperty("jlc.algorithm.gemm.backend"));
         System.out.println("csv=size,best_ms,mean_ms,best_gflops,mean_gflops,active_backend,native_status,native_provider,workspace_handle");
 
         for (int size : sizes) {

@@ -134,35 +134,44 @@ Example:
 
 ## Backend Selection
 
-The JNI rollout provides an optional native backend for the hot dense-linear-algebra paths while keeping the Java API and Java fallback path intact.
+JLC routes dense linear algebra through calibrated algorithm dispatch. Java is the correctness baseline. C++ is the performance backend only when the dispatch policy or an explicit `cpp` override selects it for the matching calibration bucket.
 
-- `jlc.backend=java`: keep the existing Java/CUDA dispatch path active
-- `jlc.backend=native`: load `jlc_native` and route compatible GEMM calls through JNI; unsupported cases still fall back to Java
-- `jlc.backend=auto`: prefer native when the shared library is available, otherwise fall back to Java
+- `jlc.algorithm.backend=auto|java|cpp`: global algorithm-dispatch mode; default is `auto`
+- `jlc.algorithm.<name>.backend=auto|java|cpp`: per-algorithm override, for example `jlc.algorithm.gemm.backend=cpp`
+- `jlc.backend=auto`: default native-library probe mode; algorithm dispatch still decides Java vs C++
+- `jlc.backend=java`: disables JNI probing and keeps Java implementations active
+- `jlc.backend=native`: probes `jlc_native`, but still routes through the calibrated algorithm policy
 
-Current native scope:
+Current calibrated native scope:
 
-- Native GEMM coverage: real heap-backed `Matrix` GEMM, compatible strided GEMM variants, and direct/off-heap GEMM for supported layouts
-- Native decomposition coverage: builtin C++ QR, LU, and Cholesky hooks selected by `jlc.native.*` provider/min-size properties
-- Optional vendor coverage: BLAS/LAPACK-backed GEMM, QR, LU, Cholesky, and Hessenberg paths when CMake finds compatible libraries
-- Java fallback: complex matrices, unsupported direct/off-heap layouts, unavailable native libraries, unavailable vendor LAPACK, and paths explicitly configured for `java`
+- GEMM coverage: heap-backed `Matrix` GEMM, compatible strided GEMM variants, and supported direct/off-heap layouts
+- Decomposition coverage: C++ LU, QR, and Cholesky hooks routed by algorithm dispatch
+- Hessenberg, SVD, Schur, and Polar stay on Java unless future calibrated native implementations pass correctness and threshold rules
+- Java fallback: unsupported shapes/layouts, unavailable native libraries, failed native calls, failed validation, and numerically sensitive or uncalibrated paths
 - Diagnostics: `/api/status` and benchmark responses expose requested/effective backend and native load status
 
-QR backend selection is now shape-aware when `jlc.backend=native` and `jlc.native.qr.provider=auto`:
+Public LAPACK/provider selection is no longer part of runtime routing. Optional vendor linkage may remain a build-time/native implementation detail, but runtime users select only `auto`, `java`, or `cpp`.
 
-- `jlc.native.qr.square.decomposeBands` / `factorizeBands`
-- `jlc.native.qr.wide.decomposeBands` / `factorizeBands`
-- `jlc.native.qr.tall.decomposeBands` / `factorizeBands`
-- `jlc.native.qr.tall.factorizeGrid`
-- `jlc.native.qr.calibration.path`
+Calibration profiles are versioned Java properties files. Bucket keys use:
 
-`factorizeGrid` uses `short-dimension x long-dimension` rectangular rules, for example:
-
-```powershell
-"-Djlc.native.qr.tall.factorizeGrid=1-32x1+:native,33-64x1-1024:native,33-64x1025+:java,65+x1+:java"
+```text
+{algorithm, mode, shape-family, size-band, thread-count}
 ```
 
-Use the comparison runner to calibrate those settings on a target machine:
+Shape families are `square`, `tall`, and `wide`; size bands are `small`, `medium`, and `large`. A bucket stores Java/C++ timing summaries, sample counts, and C++ correctness status, for example:
+
+```properties
+version=1
+bucket.gemm.multiply.square.medium.1.java.samples=5
+bucket.gemm.multiply.square.medium.1.java.meanNanos=1100000
+bucket.gemm.multiply.square.medium.1.cpp.samples=5
+bucket.gemm.multiply.square.medium.1.cpp.meanNanos=850000
+bucket.gemm.multiply.square.medium.1.cpp.correctness=PASS
+```
+
+In `auto`, C++ is selected only when correctness is `PASS`, the C++ sample count meets `jlc.algorithm.calibration.minSamples` (default `5`), and speedup clears `jlc.algorithm.speedupThreshold` (default `1.10`). SVD, Schur, and Polar use `jlc.algorithm.sensitive.speedupThreshold` (default `1.25`) and default to Java on cold start.
+
+Use the QR comparison runner to seed calibration data on a target machine:
 
 ```powershell
 .\gradlew.bat runQrBackendComparison --args="--mode=decompose --shapes=512x128,1024x128,2048x256"
@@ -179,14 +188,15 @@ To persist measured crossover data into a reusable profile:
 Then point runtime at that file:
 
 ```powershell
-.\gradlew.bat bootRun "-Djlc.backend=native" "-Djlc.native.qr.provider=auto" "-Djlc.native.qr.calibration.path=build/reports/qr_backend_calibration.properties"
+.\gradlew.bat bootRun "-Djlc.backend=auto" "-Djlc.algorithm.calibration.path=build/reports/qr_backend_calibration.properties"
 ```
 
 Precedence is:
 
-1. explicit `-Djlc.native.qr.*` system properties
-2. file-backed calibration values from `jlc.native.qr.calibration.path`
-3. built-in fallback heuristics
+1. `jlc.algorithm.<name>.backend`
+2. `jlc.algorithm.backend`
+3. matching calibration bucket from `jlc.algorithm.calibration.path`
+4. conservative cold-start policy
 
 Gradle run/test tasks auto-wire `jlc.native.lib.path` after `buildNativeBackend`. Outside Gradle, point Java at the built shared library explicitly:
 
@@ -205,7 +215,7 @@ Native build knobs for CI or alternate local toolchains:
 - `jlc.native.enable.vendor.blas` / `JLC_NATIVE_ENABLE_VENDOR_BLAS`
 - `jlc.native.vendor.blas` / `JLC_NATIVE_VENDOR_BLAS` (`AUTO`, `NONE`, `OPENBLAS`, `MKL`)
 
-`AUTO` keeps the builtin backend available when CMake cannot find BLAS/LAPACK. Explicit `OPENBLAS` or `MKL` requests fail configuration if the requested vendor stack is not found.
+`AUTO` keeps the C++ backend available when CMake cannot find BLAS/LAPACK. Explicit `OPENBLAS` or `MKL` requests fail configuration if the requested vendor stack is not found. These build knobs do not create public runtime provider selection.
 
 When passing `-D...` values through PowerShell, quote each argument as shown below so the Gradle wrapper receives it intact.
 

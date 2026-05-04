@@ -34,4 +34,30 @@ public final class NativeProfiling {
             return Optional.empty();
         }
     }
+
+    public static boolean setQrEnabled(boolean enabled) {
+        try {
+            NativeBindings.nativeQrProfileSetEnabled(enabled);
+            return true;
+        } catch (UnsatisfiedLinkError ignored) {
+            return false;
+        }
+    }
+
+    public static boolean resetQr() {
+        try {
+            NativeBindings.nativeQrProfileReset();
+            return true;
+        } catch (UnsatisfiedLinkError ignored) {
+            return false;
+        }
+    }
+
+    public static Optional<NativeQrProfile> qrSnapshot() {
+        try {
+            return Optional.of(NativeQrProfile.fromSnapshot(NativeBindings.nativeQrProfileSnapshot()));
+        } catch (UnsatisfiedLinkError ignored) {
+            return Optional.empty();
+        }
+    }
 }

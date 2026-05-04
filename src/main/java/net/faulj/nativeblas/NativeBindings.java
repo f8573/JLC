@@ -27,6 +27,16 @@ final class NativeBindings {
 
     static native long[] nativeProfileSnapshot();
 
+    static native void nativeQrProfileSetEnabled(boolean enabled);
+
+    static native void nativeQrProfileReset();
+
+    static native long[] nativeQrProfileSnapshot();
+
+    static native void nativeQrSetBlockSizeOverride(int blockSize);
+
+    static native void nativeQrSetGemmThreadsOverride(int threads);
+
     static native long nativeMatrixCreate(int rows, int cols, int order, int alignmentBytes);
 
     static native void nativeMatrixDestroy(long handle);

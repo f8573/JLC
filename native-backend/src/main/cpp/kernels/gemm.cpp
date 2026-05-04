@@ -239,6 +239,23 @@ int parse_env_positive_int(const char* name, int fallback) {
     return static_cast<int>(parsed);
 }
 
+inline bool parse_env_bool(const char* name, bool fallback) {
+    const char* value = std::getenv(name);
+    if (value == nullptr || *value == '\0') {
+        return fallback;
+    }
+    if (value[0] == '0' || value[0] == 'f' || value[0] == 'F'
+        || value[0] == 'n' || value[0] == 'N') {
+        return false;
+    }
+    return value[0] == '1' || value[0] == 't' || value[0] == 'T'
+        || value[0] == 'y' || value[0] == 'Y';
+}
+
+inline bool small_k_update_gemm_enabled() {
+    return parse_env_bool("JLC_NATIVE_SMALL_K_UPDATE_GEMM", false);
+}
+
 inline int logical_rows(const MatrixDescriptor& desc) {
     return desc.transpose ? desc.cols : desc.rows;
 }
@@ -579,6 +596,131 @@ inline void compute_microtile(const BlockSizes& blocks,
     microkernel_scalar(m_block, k_block, n_block, packed_n, a_pack, b_pack, c, ldc);
 }
 
+inline bool supports_small_k_update_gemm(const MatrixDescriptor& a, const MatrixDescriptor& b,
+                                         const MatrixDescriptor& c, int m, int k, int n) {
+    if (!small_k_update_gemm_enabled()) {
+        return false;
+    }
+    if (c.col_major || c.transpose || b.col_major || b.transpose || a.col_major) {
+        return false;
+    }
+    if (k <= 0 || k > 64 || m < 128 || n < 32 || n > 128) {
+        return false;
+    }
+    return true;
+}
+
+inline double load_small_k_a(const MatrixDescriptor& a, const double* base, int row, int p) {
+    return a.transpose
+        ? base[p * a.ld + row]
+        : base[row * a.ld + p];
+}
+
+#if defined(__AVX2__)
+inline void small_k_update_tile_4x4_avx2(const MatrixDescriptor& a, const double* a_base,
+                                         const double* b_base, double* c_base,
+                                         int row, int col, int k, double alpha,
+                                         int b_ld, int c_ld) {
+    __m256d c0 = _mm256_loadu_pd(c_base + row * c_ld + col);
+    __m256d c1 = _mm256_loadu_pd(c_base + (row + 1) * c_ld + col);
+    __m256d c2 = _mm256_loadu_pd(c_base + (row + 2) * c_ld + col);
+    __m256d c3 = _mm256_loadu_pd(c_base + (row + 3) * c_ld + col);
+
+    for (int p = 0; p < k; ++p) {
+        const __m256d b_vec = _mm256_loadu_pd(b_base + p * b_ld + col);
+        c0 = _mm256_fmadd_pd(_mm256_set1_pd(alpha * load_small_k_a(a, a_base, row, p)), b_vec, c0);
+        c1 = _mm256_fmadd_pd(_mm256_set1_pd(alpha * load_small_k_a(a, a_base, row + 1, p)), b_vec, c1);
+        c2 = _mm256_fmadd_pd(_mm256_set1_pd(alpha * load_small_k_a(a, a_base, row + 2, p)), b_vec, c2);
+        c3 = _mm256_fmadd_pd(_mm256_set1_pd(alpha * load_small_k_a(a, a_base, row + 3, p)), b_vec, c3);
+    }
+
+    _mm256_storeu_pd(c_base + row * c_ld + col, c0);
+    _mm256_storeu_pd(c_base + (row + 1) * c_ld + col, c1);
+    _mm256_storeu_pd(c_base + (row + 2) * c_ld + col, c2);
+    _mm256_storeu_pd(c_base + (row + 3) * c_ld + col, c3);
+}
+#endif
+
+#if defined(__AVX512F__)
+inline void small_k_update_tile_4x8_avx512(const MatrixDescriptor& a, const double* a_base,
+                                           const double* b_base, double* c_base,
+                                           int row, int col, int k, double alpha,
+                                           int b_ld, int c_ld) {
+    __m512d c0 = _mm512_loadu_pd(c_base + row * c_ld + col);
+    __m512d c1 = _mm512_loadu_pd(c_base + (row + 1) * c_ld + col);
+    __m512d c2 = _mm512_loadu_pd(c_base + (row + 2) * c_ld + col);
+    __m512d c3 = _mm512_loadu_pd(c_base + (row + 3) * c_ld + col);
+
+    for (int p = 0; p < k; ++p) {
+        const __m512d b_vec = _mm512_loadu_pd(b_base + p * b_ld + col);
+        c0 = _mm512_fmadd_pd(_mm512_set1_pd(alpha * load_small_k_a(a, a_base, row, p)), b_vec, c0);
+        c1 = _mm512_fmadd_pd(_mm512_set1_pd(alpha * load_small_k_a(a, a_base, row + 1, p)), b_vec, c1);
+        c2 = _mm512_fmadd_pd(_mm512_set1_pd(alpha * load_small_k_a(a, a_base, row + 2, p)), b_vec, c2);
+        c3 = _mm512_fmadd_pd(_mm512_set1_pd(alpha * load_small_k_a(a, a_base, row + 3, p)), b_vec, c3);
+    }
+
+    _mm512_storeu_pd(c_base + row * c_ld + col, c0);
+    _mm512_storeu_pd(c_base + (row + 1) * c_ld + col, c1);
+    _mm512_storeu_pd(c_base + (row + 2) * c_ld + col, c2);
+    _mm512_storeu_pd(c_base + (row + 3) * c_ld + col, c3);
+}
+#endif
+
+void small_k_update_gemm(const MatrixDescriptor& a, const MatrixDescriptor& b, const MatrixDescriptor& c,
+                         int m, int k, int n, double alpha, bool profile_enabled,
+                         ProfileAccumulator& profile) {
+    const double* a_base = data_ptr(a);
+    const double* b_base = data_ptr(b);
+    double* c_base = mutable_data_ptr(c);
+    const ProfileClock::time_point kernel_start = profile_enabled ? ProfileClock::now() : ProfileClock::time_point{};
+
+    int row = 0;
+    for (; row + 4 <= m; row += 4) {
+        int col = 0;
+#if defined(__AVX512F__)
+        for (; col + 8 <= n; col += 8) {
+            small_k_update_tile_4x8_avx512(a, a_base, b_base, c_base, row, col, k, alpha, b.ld, c.ld);
+            if (profile_enabled) {
+                ++profile.microtile_calls;
+            }
+        }
+#elif defined(__AVX2__)
+        for (; col + 4 <= n; col += 4) {
+            small_k_update_tile_4x4_avx2(a, a_base, b_base, c_base, row, col, k, alpha, b.ld, c.ld);
+            if (profile_enabled) {
+                ++profile.microtile_calls;
+            }
+        }
+#endif
+        for (; col < n; ++col) {
+            for (int r = 0; r < 4; ++r) {
+                double sum = 0.0;
+                for (int p = 0; p < k; ++p) {
+                    sum = std::fma(load_small_k_a(a, a_base, row + r, p), b_base[p * b.ld + col], sum);
+                }
+                c_base[(row + r) * c.ld + col] = std::fma(alpha, sum, c_base[(row + r) * c.ld + col]);
+            }
+            if (profile_enabled) {
+                ++profile.microtile_calls;
+            }
+        }
+    }
+
+    for (; row < m; ++row) {
+        for (int col = 0; col < n; ++col) {
+            double sum = 0.0;
+            for (int p = 0; p < k; ++p) {
+                sum = std::fma(load_small_k_a(a, a_base, row, p), b_base[p * b.ld + col], sum);
+            }
+            c_base[row * c.ld + col] = std::fma(alpha, sum, c_base[row * c.ld + col]);
+        }
+    }
+
+    if (profile_enabled) {
+        profile.kernel_ns += elapsed_ns(kernel_start);
+    }
+}
+
 inline void add_to_c(const MatrixDescriptor& c, int row, int col, double value) {
     double* base = mutable_data_ptr(c);
     if (c.col_major) {
@@ -634,6 +776,12 @@ struct ThreadPoolJob {
     std::vector<ProfileAccumulator>* profiles = nullptr;
 };
 
+void process_column_panels(const MatrixDescriptor& a, const MatrixDescriptor& b, const MatrixDescriptor& c,
+                           int m, int k, int n, double alpha,
+                           const BlockSizes& blocks,
+                           int panel_start, int panel_stride,
+                           Scratch& scratch, bool profile_enabled, ProfileAccumulator& profile);
+
 struct NativeWorkspace {
     int preferred_threads;
     int alignment_bytes;
@@ -651,12 +799,10 @@ struct NativeWorkspace {
     std::vector<Scratch> pool_scratch;
 };
 
-std::mutex g_workspace_guard;
-NativeWorkspace* g_default_workspace = nullptr;
+std::atomic<NativeWorkspace*> g_default_workspace{nullptr};
 
 NativeWorkspace* current_workspace() {
-    std::lock_guard<std::mutex> lock(g_workspace_guard);
-    return g_default_workspace;
+    return g_default_workspace.load(std::memory_order_acquire);
 }
 
 void pool_worker(NativeWorkspace* workspace, int worker_index) {
@@ -862,6 +1008,21 @@ jlc_status native_gemm_impl(const MatrixDescriptor& a, const MatrixDescriptor& b
         return JLC_STATUS_SUCCESS;
     }
 
+    if (supports_small_k_update_gemm(a, b, c, m, k, n)) {
+        try {
+            const BlockSizes blocks = compute_block_sizes(m, n, k);
+            NativeWorkspace* workspace = current_workspace();
+            const int requested_threads = std::max(1, threads > 0 ? threads : (workspace == nullptr ? 1 : workspace->preferred_threads));
+            record_last_profile_metadata(requested_threads, 1, 1, blocks);
+            small_k_update_gemm(a, b, c, m, k, n, alpha, profile_enabled, call_profile);
+        } catch (...) {
+            finalize_profile();
+            return JLC_STATUS_INTERNAL_ERROR;
+        }
+        finalize_profile();
+        return JLC_STATUS_SUCCESS;
+    }
+
     if (c.col_major) {
         try {
             process_generic_output(a, b, c, m, k, n, alpha);
@@ -887,14 +1048,8 @@ jlc_status native_gemm_impl(const MatrixDescriptor& a, const MatrixDescriptor& b
         if (actual_threads <= 1) {
             ProfileAccumulator local_profile;
             Scratch local_scratch;
-            if (workspace == nullptr) {
-                process_column_panels(a, b, c, m, k, n, alpha, blocks, 0, blocks.nc,
-                                      local_scratch, profile_enabled, local_profile);
-            } else {
-                std::lock_guard<std::mutex> lock(workspace->mutex);
-                process_column_panels(a, b, c, m, k, n, alpha, blocks, 0, blocks.nc,
-                                      workspace->scratch, profile_enabled, local_profile);
-            }
+            process_column_panels(a, b, c, m, k, n, alpha, blocks, 0, blocks.nc,
+                                  local_scratch, profile_enabled, local_profile);
             if (profile_enabled) {
                 merge_profile(local_profile);
             }
@@ -1008,19 +1163,14 @@ const char* jlc_native_provider_description() {
 }
 
 jlc_context_handle jlc_native_context_create(int preferred_threads, int alignment_bytes, int /*flags*/) {
-    auto* workspace = new (std::nothrow) NativeWorkspace{
-        std::max(1, preferred_threads),
-        std::max(8, alignment_bytes),
-        {},
-        {}
-    };
+    auto* workspace = new (std::nothrow) NativeWorkspace();
     if (workspace == nullptr) {
         return 0;
     }
-    std::lock_guard<std::mutex> lock(g_workspace_guard);
-    if (g_default_workspace == nullptr) {
-        g_default_workspace = workspace;
-    }
+    workspace->preferred_threads = std::max(1, preferred_threads);
+    workspace->alignment_bytes = std::max(8, alignment_bytes);
+    NativeWorkspace* expected = nullptr;
+    g_default_workspace.compare_exchange_strong(expected, workspace, std::memory_order_acq_rel);
     return reinterpret_cast<jlc_context_handle>(workspace);
 }
 
@@ -1083,14 +1233,11 @@ void jlc_native_context_destroy(jlc_context_handle handle) {
     if (workspace == nullptr) {
         return;
     }
-    shutdown_thread_pool(workspace);
-    {
-        std::lock_guard<std::mutex> lock(g_workspace_guard);
-        if (g_default_workspace == workspace) {
-            g_default_workspace = nullptr;
-        }
+    if (!workspace->pool_workers.empty()) {
+        shutdown_thread_pool(workspace);
     }
-    delete workspace;
+    NativeWorkspace* expected = workspace;
+    g_default_workspace.compare_exchange_strong(expected, nullptr, std::memory_order_acq_rel);
 }
 
 void jlc_native_profile_set_enabled(bool enabled) {

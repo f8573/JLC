@@ -20,6 +20,21 @@ public final class BackendRegistry {
         return selectBackend(true);
     }
 
+    public static ComputeBackend gemmBackend(int rows, int cols, int threadCount) {
+        return algorithmBackend(new AlgorithmDispatchRequest("gemm", "multiply", rows, cols, threadCount), true);
+    }
+
+    public static ComputeBackend gemmBackend(String mode, int rows, int cols, int threadCount) {
+        return algorithmBackend(new AlgorithmDispatchRequest("gemm", mode, rows, cols, threadCount), true);
+    }
+
+    static boolean shouldUseCppForAlgorithm(String algorithm, String mode, int rows, int cols, int threadCount) {
+        BackendMode requested = requestedBackend();
+        NativeContext nativeContext = nativeContextFor(requested);
+        return requested != BackendMode.JAVA
+            && AlgorithmDispatch.shouldUseCpp(new AlgorithmDispatchRequest(algorithm, mode, rows, cols, threadCount), nativeContext);
+    }
+
     public static BackendSnapshot snapshot() {
         BackendMode requested = requestedBackend();
         NativeContext nativeContext = nativeContextFor(requested);
@@ -39,6 +54,19 @@ public final class BackendRegistry {
             return NATIVE_BACKEND;
         }
         if (logFallback && requested == BackendMode.NATIVE && FALLBACK_LOGGED.compareAndSet(false, true)) {
+            LOGGER.log(Level.INFO, "jlc.backend=native requested, falling back to java backend: {0}", nativeContext.getMessage());
+        }
+        return JAVA_BACKEND;
+    }
+
+    private static ComputeBackend algorithmBackend(AlgorithmDispatchRequest request, boolean logFallback) {
+        BackendMode requested = requestedBackend();
+        NativeContext nativeContext = nativeContextFor(requested);
+        if (requested != BackendMode.JAVA && AlgorithmDispatch.shouldUseCpp(request, nativeContext)) {
+            return NATIVE_BACKEND;
+        }
+        if (logFallback && requested == BackendMode.NATIVE && !nativeContext.isAvailable()
+            && FALLBACK_LOGGED.compareAndSet(false, true)) {
             LOGGER.log(Level.INFO, "jlc.backend=native requested, falling back to java backend: {0}", nativeContext.getMessage());
         }
         return JAVA_BACKEND;
@@ -70,6 +98,7 @@ public final class BackendRegistry {
 
     static void resetForTests() {
         FALLBACK_LOGGED.set(false);
+        AlgorithmDispatch.resetForTests();
         NativeBackend.resetForTests();
     }
 }

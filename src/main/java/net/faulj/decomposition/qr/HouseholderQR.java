@@ -195,26 +195,27 @@ public final class HouseholderQR {
             return;
         }
 
-        int rows = m;
+        int activeRowStart = kStart;
+        int activeRows = m - activeRowStart;
 
         // Build packed V and V^T for compact WY representation
-        packV(AT, m, kStart, kEnd, ws.panelSize, ws.vPack, ws.vtPack);
+        packV(AT, m, kStart, kEnd, activeRows, ws.panelSize, ws.vPack, ws.vtPack);
 
         // Build T for compact WY representation
-        buildT(ws.vtPack, tau, panelSizeActual, ws.panelSize, rows, kStart, ws.t);
+        buildT(ws.vtPack, tau, panelSizeActual, ws.panelSize, activeRows, kStart, ws.t);
 
         int blockCols = ws.blockCols;
         for (int colStart = 0; colStart < trailingCols; colStart += blockCols) {
             int blockColsUsed = Math.min(blockCols, trailingCols - colStart);
 
-            packTrailingBlock(AT, m, kEnd, kStart, colStart, blockColsUsed, blockCols, ws.cBlock);
+            packTrailingBlock(AT, m, activeRowStart, activeRows, kEnd, colStart, blockColsUsed, blockCols, ws.cBlock);
 
             // W = V^T * C
             Gemm.gemmStrided(
-                ws.vtPack, 0, rows,
+                ws.vtPack, 0, activeRows,
                 ws.cBlock, 0, blockCols,
                 ws.w, 0, blockCols,
-                panelSizeActual, rows, blockColsUsed,
+                panelSizeActual, activeRows, blockColsUsed,
                 1.0, 0.0
             );
 
@@ -227,11 +228,11 @@ public final class HouseholderQR {
                 ws.vPack, 0, ws.panelSize,
                 ws.w, 0, blockCols,
                 ws.cBlock, 0, blockCols,
-                rows, panelSizeActual, blockColsUsed,
+                activeRows, panelSizeActual, blockColsUsed,
                 -1.0, 1.0
             );
 
-            unpackTrailingBlock(AT, m, kEnd, kStart, colStart, blockColsUsed, blockCols, ws.cBlock);
+            unpackTrailingBlock(AT, m, activeRowStart, activeRows, kEnd, colStart, blockColsUsed, blockCols, ws.cBlock);
         }
     }
 
@@ -326,7 +327,7 @@ public final class HouseholderQR {
         for (int i = 0; i < panelSizeActual; i++) {
             double tauK = tau[kStart + i];
             T[i * panelSize + i] = tauK;
-            int rowStart = kStart + i;
+            int rowStart = i;
             int tailLength = rows - rowStart;
 
             for (int r = 0; r < i; r++) {
@@ -481,42 +482,37 @@ public final class HouseholderQR {
         return QT;
     }
 
-    private static void packV(double[] AT, int m, int kStart, int kEnd, int panelSize,
+    private static void packV(double[] AT, int m, int kStart, int kEnd, int activeRows, int panelSize,
                               double[] vPack, double[] vtPack) {
         int panelSizeActual = kEnd - kStart;
 
         for (int i = 0; i < panelSize; i++) {
             int k = kStart + i;
-            for (int row = 0; row < m; row++) {
+            for (int row = 0; row < activeRows; row++) {
                 double val;
                 if (i >= panelSizeActual) {
                     val = 0.0;
-                } else if (row < kStart) {
+                } else if (row < i) {
                     val = 0.0;
+                } else if (row == i) {
+                    val = 1.0;
                 } else {
-                    int r = row - kStart;
-                    if (r < i) {
-                        val = 0.0;
-                    } else if (r == i) {
-                        val = 1.0;
-                    } else {
-                        val = AT[(k * m) + row];
-                    }
+                    val = AT[(k * m) + (kStart + row)];
                 }
                 vPack[row * panelSize + i] = val;
-                vtPack[i * m + row] = val;
+                vtPack[i * activeRows + row] = val;
             }
         }
     }
 
-    private static void packTrailingBlock(double[] AT, int m, int kEnd, int kStart,
-                                          int colStart, int blockColsUsed, int blockCols, double[] cBlock) {
+    private static void packTrailingBlock(double[] AT, int m, int activeRowStart, int activeRows, int kEnd,
+                                           int colStart, int blockColsUsed, int blockCols, double[] cBlock) {
         int trailingStart = kEnd + colStart;
-        for (int row = 0; row < m; row++) {
+        for (int row = 0; row < activeRows; row++) {
             for (int j = 0; j < blockCols; j++) {
                 if (j < blockColsUsed) {
                     int col = trailingStart + j;
-                    cBlock[row * blockCols + j] = AT[col * m + row];
+                    cBlock[row * blockCols + j] = AT[col * m + activeRowStart + row];
                 } else {
                     cBlock[row * blockCols + j] = 0.0;
                 }
@@ -524,13 +520,13 @@ public final class HouseholderQR {
         }
     }
 
-    private static void unpackTrailingBlock(double[] AT, int m, int kEnd, int kStart,
-                                            int colStart, int blockColsUsed, int blockCols, double[] cBlock) {
+    private static void unpackTrailingBlock(double[] AT, int m, int activeRowStart, int activeRows, int kEnd,
+                                             int colStart, int blockColsUsed, int blockCols, double[] cBlock) {
         int trailingStart = kEnd + colStart;
-        for (int row = 0; row < m; row++) {
+        for (int row = 0; row < activeRows; row++) {
             for (int j = 0; j < blockColsUsed; j++) {
                 int col = trailingStart + j;
-                AT[col * m + row] = cBlock[row * blockCols + j];
+                AT[col * m + activeRowStart + row] = cBlock[row * blockCols + j];
             }
         }
     }

@@ -3,7 +3,7 @@ package net.faulj.decomposition.hessenberg;
 import net.faulj.decomposition.result.HessenbergResult;
 import net.faulj.kernels.gemm.Gemm;
 import net.faulj.matrix.Matrix;
-import net.faulj.nativeblas.NativeLapackHessenbergSupport;
+import net.faulj.nativeblas.NativeHessenbergSupport;
 
 import java.util.Arrays;
 import java.util.stream.IntStream;
@@ -80,7 +80,7 @@ public class HessenbergReduction {
 
         Matrix nativeH = A.copy();
         double[] nativeQ = new double[n * n];
-        if (NativeLapackHessenbergSupport.tryDecompose(nativeH.getRawData(), n, nativeQ)) {
+        if (NativeHessenbergSupport.tryDecompose(nativeH.getRawData(), n, nativeQ)) {
             zeroBelowSubdiagonal(nativeH.getRawData(), n);
             return new HessenbergResult(A, nativeH, Matrix.wrap(nativeQ, n, n));
         }
@@ -105,7 +105,7 @@ public class HessenbergReduction {
         }
 
         Matrix nativeH = A.copy();
-        if (NativeLapackHessenbergSupport.tryReduce(nativeH.getRawData(), nativeH.getRowCount())) {
+        if (NativeHessenbergSupport.tryReduce(nativeH.getRawData(), nativeH.getRowCount())) {
             zeroBelowSubdiagonal(nativeH.getRawData(), nativeH.getRowCount());
             return nativeH;
         }
