@@ -27,11 +27,30 @@ final class NativeBindings {
 
     static native long[] nativeProfileSnapshot();
 
+    static native void nativeJniGemmArrayProfileSetEnabled(boolean enabled);
+
+    static native void nativeJniGemmArrayProfileReset();
+
+    static native long[] nativeJniGemmArrayProfileSnapshot();
+
+    static native void nativeGemmClearRuntimeOverrides();
+
+    static native void nativeGemmSetRuntimeOverrides(int mc, int kc, int nc,
+                                                     int mr, int nr,
+                                                     boolean disableSquareTuning,
+                                                     int loopOrder);
+
     static native void nativeQrProfileSetEnabled(boolean enabled);
 
     static native void nativeQrProfileReset();
 
     static native long[] nativeQrProfileSnapshot();
+
+    static native void nativeLuProfileSetEnabled(boolean enabled);
+
+    static native void nativeLuProfileReset();
+
+    static native long[] nativeLuProfileSnapshot();
 
     static native void nativeQrSetBlockSizeOverride(int blockSize);
 
@@ -50,6 +69,8 @@ final class NativeBindings {
     static native void nativeLuFactor(double[] packedLu, int n, int[] pivots);
 
     static native void nativeLuFactorVendor(double[] packedLu, int n, int[] pivots);
+
+    static native void nativeLuFactorDebug(double[] packedLu, int n, int[] pivots, boolean copyBack);
 
     static native void nativeQrFactorizeOnly(double[] a, int m, int n);
 

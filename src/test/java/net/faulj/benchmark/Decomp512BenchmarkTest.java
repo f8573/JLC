@@ -11,8 +11,10 @@ import net.faulj.decomposition.cholesky.CholeskyDecomposition;
 import net.faulj.decomposition.result.HessenbergResult;
 import net.faulj.eigen.qr.ImplicitQRFrancis;
 import net.faulj.eigen.schur.RealSchurDecomposition;
+import org.junit.Ignore;
 import org.junit.Test;
 
+@Ignore("Benchmark harness; excluded from default test so large decomposition timing runs stay on explicit benchmark tasks.")
 public class Decomp512BenchmarkTest {
 
     private static long measureMillis(Runnable r) {

@@ -26,11 +26,20 @@ public record NativeGemmProfile(
     long lastKc,
     long lastNc,
     long lastMr,
-    long lastNr
+    long lastNr,
+    long allocNanos,
+    long jcLoopNanos,
+    long pcLoopNanos,
+    long icLoopNanos,
+    long edgeNanos,
+    long jcPanels,
+    long pcPanels,
+    long icBlocks
 ) {
-    private static final int SNAPSHOT_FIELDS = 23;
+    private static final int SNAPSHOT_FIELDS = 31;
     public static final NativeGemmProfile EMPTY = new NativeGemmProfile(
-        0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L
+        0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L,
+        0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L
     );
 
     static NativeGemmProfile fromSnapshot(long[] snapshot) {
@@ -60,7 +69,15 @@ public record NativeGemmProfile(
             snapshot[19],
             snapshot[20],
             snapshot[21],
-            snapshot[22]
+            snapshot[22],
+            snapshot[23],
+            snapshot[24],
+            snapshot[25],
+            snapshot[26],
+            snapshot[27],
+            snapshot[28],
+            snapshot[29],
+            snapshot[30]
         );
     }
 

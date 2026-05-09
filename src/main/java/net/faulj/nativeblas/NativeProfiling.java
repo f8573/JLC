@@ -35,6 +35,32 @@ public final class NativeProfiling {
         }
     }
 
+    public static boolean setJniGemmArrayEnabled(boolean enabled) {
+        try {
+            NativeBindings.nativeJniGemmArrayProfileSetEnabled(enabled);
+            return true;
+        } catch (UnsatisfiedLinkError ignored) {
+            return false;
+        }
+    }
+
+    public static boolean resetJniGemmArray() {
+        try {
+            NativeBindings.nativeJniGemmArrayProfileReset();
+            return true;
+        } catch (UnsatisfiedLinkError ignored) {
+            return false;
+        }
+    }
+
+    public static Optional<NativeJniGemmArrayProfile> jniGemmArraySnapshot() {
+        try {
+            return Optional.of(NativeJniGemmArrayProfile.fromSnapshot(NativeBindings.nativeJniGemmArrayProfileSnapshot()));
+        } catch (UnsatisfiedLinkError ignored) {
+            return Optional.empty();
+        }
+    }
+
     public static boolean setQrEnabled(boolean enabled) {
         try {
             NativeBindings.nativeQrProfileSetEnabled(enabled);

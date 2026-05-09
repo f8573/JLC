@@ -45,6 +45,9 @@ public final class NativeFactorizationSupport {
     }
 
     public static boolean tryCholesky(double[] packedL, int n) {
+        if (!nativeCholeskyExplicitlyEnabled()) {
+            return false;
+        }
         if (!shouldUseCpp("cholesky", "decompose", n, n)) {
             return false;
         }
@@ -80,8 +83,29 @@ public final class NativeFactorizationSupport {
         return BackendRegistry.shouldUseCppForAlgorithm(algorithm, mode, rows, cols, defaultThreadCount());
     }
 
+    private static boolean nativeCholeskyExplicitlyEnabled() {
+        String configured = firstNonBlank(
+            System.getProperty("jlc.algorithm.cholesky.backend"),
+            System.getProperty("faulj.algorithm.cholesky.backend")
+        );
+        if (configured == null) {
+            return false;
+        }
+        String normalized = configured.trim().toLowerCase();
+        return "cpp".equals(normalized) || "native".equals(normalized);
+    }
+
     private static int defaultThreadCount() {
         DispatchPolicy policy = DispatchPolicy.defaultPolicy();
         return policy.isParallelEnabled() ? policy.getParallelism() : 1;
+    }
+
+    private static String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 }

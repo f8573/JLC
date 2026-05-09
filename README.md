@@ -82,6 +82,16 @@ npm run build
 .\gradlew.bat test
 ```
 
+Default `test` is intentionally limited to correctness, dispatch logic, lightweight smoke coverage, and non-crashing unit tests. Heavy benchmark and stress suites are not part of the default test task.
+
+Explicit benchmark / stress entrypoints:
+
+```powershell
+.\gradlew.bat benchmarkTest
+.\gradlew.bat stressTest
+.\gradlew.bat runComprehensivePerfBenchmark
+```
+
 If you only want a targeted API smoke test:
 
 ```powershell
@@ -197,6 +207,24 @@ Precedence is:
 2. `jlc.algorithm.backend`
 3. matching calibration bucket from `jlc.algorithm.calibration.path`
 4. conservative cold-start policy
+
+Current cold-start QR policy:
+
+- `qr.factorize_only`: native is allowed by default
+- `qr.decompose_thin` / `qr.decompose_full`:
+  - native is allowed for non-tall shapes
+  - tall shapes stay on Java unless calibration explicitly proves C++ wins
+- This policy is intentionally conservative: native QR is promoted only where measured wins are stable, while tall `thin/full` QR keeps the Java fallback
+
+Current performance status:
+
+- GEMM remains a documented known-red guardrail under the cleaned `512x512` median methodology; do not treat that guard as green unless the native JNI array-backed median path actually clears the threshold
+- QR is the strongest native subsystem today, with large stable wins for factorize-only and improved square `thin/full` performance after the native direct trailing-update promotion
+
+Default verification boundary:
+
+- `test`: correctness, dispatch, smoke coverage, and non-crashing unit tests
+- `benchmarkTest` / `stressTest` / benchmark runners: performance, stress, and large native workloads kept out of the default correctness suite
 
 Gradle run/test tasks auto-wire `jlc.native.lib.path` after `buildNativeBackend`. Outside Gradle, point Java at the built shared library explicitly:
 

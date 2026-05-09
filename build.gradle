@@ -72,6 +72,22 @@ def configureNativeLibraryProperty = { task ->
         }
     }
 }
+def nativeAlgorithmBenchExecutableProvider = providers.provider {
+    File buildDir = nativeBuildDirProvider.get().asFile
+    String executableName = getOsString() == 'windows' ? 'jlc_native_algorithm_bench.exe' : 'jlc_native_algorithm_bench'
+    if (isSingleConfigCmakeGenerator(getNativeCmakeGenerator())) {
+        return new File(buildDir, "lib/${executableName}")
+    }
+    return new File(buildDir, "lib/${getNativeBuildType()}/${executableName}")
+}
+def nativeGemmDeepDiveExecutableProvider = providers.provider {
+    File buildDir = nativeBuildDirProvider.get().asFile
+    String executableName = getOsString() == 'windows' ? 'jlc_native_gemm_deep_dive.exe' : 'jlc_native_gemm_deep_dive'
+    if (isSingleConfigCmakeGenerator(getNativeCmakeGenerator())) {
+        return new File(buildDir, "lib/${executableName}")
+    }
+    return new File(buildDir, "lib/${getNativeBuildType()}/${executableName}")
+}
 
 tasks.withType(Test).configureEach {
     jvmArgs += [
@@ -235,6 +251,12 @@ bootRun {
 
 test {
     systemProperty 'faulj.cuda.enabled', 'true'
+    // Keep default correctness tests isolated from calibrated/native performance
+    // policy so unit coverage stays deterministic and non-benchmark-oriented.
+    systemProperty 'jlc.backend', 'java'
+    exclude 'net/faulj/benchmark/**'
+    exclude 'net/faulj/bench/**'
+    exclude 'net/faulj/stress/**'
     testLogging {
         showStandardStreams = true
     }
@@ -400,6 +422,36 @@ tasks.register('runPerfTest', JavaExec) {
     standardInput = System.in
 }
 
+tasks.register('runComprehensivePerfBenchmark', JavaExec) {
+    group = 'benchmark'
+    description = 'Run the comprehensive performance benchmark outside the default test suite'
+    classpath = sourceSets.test.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    main = 'net.faulj.benchmark.ComprehensivePerfBenchmark'
+    standardInput = System.in
+}
+
+tasks.register('benchmarkTest', Test) {
+    group = 'benchmark'
+    description = 'Run benchmark-oriented test classes that are intentionally excluded from default test'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    include 'net/faulj/benchmark/**'
+    include 'net/faulj/bench/**'
+    shouldRunAfter tasks.named('test')
+}
+
+tasks.register('stressTest', Test) {
+    group = 'verification'
+    description = 'Run stress-oriented test classes that are intentionally excluded from default test'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    include 'net/faulj/stress/**'
+    shouldRunAfter tasks.named('test')
+}
+
 tasks.register('runGemmTest', JavaExec) {
     group = 'benchmark'
     description = 'Run GEMM test to exercise BLAS3Kernels instrumentation'
@@ -486,6 +538,247 @@ tasks.register('runGemmBackendComparison', JavaExec) {
     standardInput = System.in
 }
 
+tasks.register('runGemmTripleComparison', JavaExec) {
+    group = 'benchmark'
+    description = 'Compare Java, JNI C++, and standalone C++ performance across multiple algorithms'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.native.lib.path', nativeLibraryFileProvider.get().absolutePath
+    systemProperty 'jlc.native.algorithm.bench.path', nativeAlgorithmBenchExecutableProvider.get().absolutePath
+    minHeapSize = '512m'
+    maxHeapSize = '6g'
+    main = 'net.faulj.bench.RunGemmTripleComparison'
+    standardInput = System.in
+}
+
+tasks.register('runCholeskyInteropDiagnostic', JavaExec) {
+    group = 'benchmark'
+    description = 'Run the focused Java/JNI/native Cholesky smoke diagnostic'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.native.lib.path', nativeLibraryFileProvider.get().absolutePath
+    systemProperty 'jlc.native.algorithm.bench.path', nativeAlgorithmBenchExecutableProvider.get().absolutePath
+    minHeapSize = '512m'
+    maxHeapSize = '2g'
+    main = 'net.faulj.nativeblas.CholeskyInteropDiagnosticRunner'
+    standardInput = System.in
+}
+
+tasks.register('runNativeGemmRegressionDiagnostic', JavaExec) {
+    group = 'benchmark'
+    description = 'Run the focused Java/JNI/native GEMM regression diagnostic'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.native.lib.path', nativeLibraryFileProvider.get().absolutePath
+    systemProperty 'jlc.native.algorithm.bench.path', nativeAlgorithmBenchExecutableProvider.get().absolutePath
+    minHeapSize = '512m'
+    maxHeapSize = '2g'
+    main = 'net.faulj.nativeblas.NativeGemmRegressionDiagnosticRunner'
+    standardInput = System.in
+}
+
+tasks.register('runNativeRegressionGuardrail', JavaExec) {
+    group = 'benchmark'
+    description = 'Run native correctness/performance guards; the only expected red check is the documented GEMM 512 ratio'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.native.lib.path', nativeLibraryFileProvider.get().absolutePath
+    systemProperty 'jlc.native.algorithm.bench.path', nativeAlgorithmBenchExecutableProvider.get().absolutePath
+    minHeapSize = '512m'
+    maxHeapSize = '2g'
+    main = 'net.faulj.nativeblas.NativeRegressionGuardrailRunner'
+    standardInput = System.in
+}
+
+tasks.register('runNativeGemmBlockSizeSweep', JavaExec) {
+    group = 'benchmark'
+    description = 'Sweep native GEMM MC/NC/KC block sizes across representative shapes'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.native.algorithm.bench.path', nativeAlgorithmBenchExecutableProvider.get().absolutePath
+    minHeapSize = '512m'
+    maxHeapSize = '2g'
+    main = 'net.faulj.nativeblas.NativeGemmBlockSizeSweepRunner'
+    standardInput = System.in
+}
+
+tasks.register('runNativeGemmShapeOverrideGuardrail', JavaExec) {
+    group = 'benchmark'
+    description = 'Verify shape overrides beat legacy auto heuristics by a median gain threshold'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.native.algorithm.bench.path', nativeAlgorithmBenchExecutableProvider.get().absolutePath
+    minHeapSize = '512m'
+    maxHeapSize = '2g'
+    main = 'net.faulj.nativeblas.NativeGemmShapeOverrideGuardrailRunner'
+    standardInput = System.in
+}
+
+tasks.register('runNativeGemmDeepDive', JavaExec) {
+    group = 'benchmark'
+    description = 'Create a native GEMM forensic report separating microkernel, packing, and full blocked GEMM'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.native.gemm.deep.dive.path', nativeGemmDeepDiveExecutableProvider.get().absolutePath
+    minHeapSize = '512m'
+    maxHeapSize = '2g'
+    main = 'net.faulj.nativeblas.NativeGemmDeepDiveRunner'
+    standardInput = System.in
+}
+
+tasks.register('runNativeGemmMicrokernelShootout', JavaExec) {
+    group = 'benchmark'
+    description = 'Compare AVX2 GEMM microkernel candidates in isolation and in the full blocked path'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.native.gemm.deep.dive.path', nativeGemmDeepDiveExecutableProvider.get().absolutePath
+    minHeapSize = '512m'
+    maxHeapSize = '2g'
+    main = 'net.faulj.nativeblas.NativeGemmMicrokernelShootoutRunner'
+    standardInput = System.in
+}
+
+tasks.register('runNativeGemmPanelResidencySweep', JavaExec) {
+    group = 'benchmark'
+    description = 'Sweep KC/MC/NC and loop-order variants to explain the panel-walk-to-full-GEMM gap'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.native.algorithm.bench.path', nativeAlgorithmBenchExecutableProvider.get().absolutePath
+    minHeapSize = '512m'
+    maxHeapSize = '2g'
+    main = 'net.faulj.nativeblas.NativeGemmPanelResidencySweepRunner'
+    standardInput = System.in
+}
+
+tasks.register('runNativeGemmJniStandaloneReconciliation', JavaExec) {
+    group = 'benchmark'
+    description = 'Compare JNI and standalone native GEMM variants in one orchestrated run with shared seeds'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.native.lib.path', nativeLibraryFileProvider.get().absolutePath
+    systemProperty 'jlc.native.algorithm.bench.path', nativeAlgorithmBenchExecutableProvider.get().absolutePath
+    minHeapSize = '512m'
+    maxHeapSize = '2g'
+    main = 'net.faulj.nativeblas.NativeGemmJniStandaloneReconciliationRunner'
+    standardInput = System.in
+}
+
+tasks.register('runNativeGemmLowPerturbationComparator', JavaExec) {
+    group = 'benchmark'
+    description = 'Low-perturbation 512 square GEMM comparator for policy selection without profiling in timed runs'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.native.lib.path', nativeLibraryFileProvider.get().absolutePath
+    systemProperty 'jlc.native.algorithm.bench.path', nativeAlgorithmBenchExecutableProvider.get().absolutePath
+    minHeapSize = '512m'
+    maxHeapSize = '2g'
+    main = 'net.faulj.nativeblas.NativeGemmLowPerturbationComparatorRunner'
+    standardInput = System.in
+}
+
+tasks.register('runNativeGemmJniArrayAccessProbe', JavaExec) {
+    group = 'benchmark'
+    description = 'Probe JNI array acquire/native/release overhead versus direct-buffer JNI at one shape'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.native.lib.path', nativeLibraryFileProvider.get().absolutePath
+    minHeapSize = '512m'
+    maxHeapSize = '2g'
+    main = 'net.faulj.nativeblas.NativeGemmJniArrayAccessProbeRunner'
+    standardInput = System.in
+}
+
+tasks.register('runLuDiagnostic', JavaExec) {
+    group = 'benchmark'
+    description = 'Run focused LU smoke and blocked/unblocked diagnostic checks'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.native.lib.path', nativeLibraryFileProvider.get().absolutePath
+    systemProperty 'jlc.native.algorithm.bench.path', nativeAlgorithmBenchExecutableProvider.get().absolutePath
+    minHeapSize = '512m'
+    maxHeapSize = '2g'
+    main = 'net.faulj.nativeblas.LuDiagnosticRunner'
+    standardInput = System.in
+}
+
+tasks.register('runLuBlockSizeGuardrail', JavaExec) {
+    group = 'benchmark'
+    description = 'Verify LU block-size candidates beat the current default on median repeated runs'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.native.lib.path', nativeLibraryFileProvider.get().absolutePath
+    systemProperty 'jlc.native.algorithm.bench.path', nativeAlgorithmBenchExecutableProvider.get().absolutePath
+    minHeapSize = '512m'
+    maxHeapSize = '2g'
+    main = 'net.faulj.nativeblas.LuDiagnosticRunner'
+    args = [
+        '--sizes=512,1024,2048',
+        '--blockSizes=48,64,80,96,128',
+        '--warmup=1',
+        '--runs=5',
+        '--progressInterval=128',
+        '--medianGainThreshold=0.04'
+    ]
+    standardInput = System.in
+}
+
+tasks.register('runNativeLuPolicyGuardrail', JavaExec) {
+    group = 'benchmark'
+    description = 'Verify the native LU auto policy only enables blocked LU where repeated medians justify it'
+    dependsOn 'buildNativeBackend'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    systemProperty 'jlc.native.algorithm.bench.path', nativeAlgorithmBenchExecutableProvider.get().absolutePath
+    minHeapSize = '512m'
+    maxHeapSize = '2g'
+    main = 'net.faulj.nativeblas.NativeLuPolicyGuardrailRunner'
+    standardInput = System.in
+}
+
 tasks.register('runQrBackendComparison', JavaExec) {
     group = 'benchmark'
     description = 'Compare Java and JNI native QR performance across a size sweep'
@@ -534,6 +827,19 @@ tasks.register('runQrPerformanceGuardrail', JavaExec) {
     }
     systemProperty 'jlc.native.lib.path', nativeLibraryFileProvider.get().absolutePath
     main = 'net.faulj.nativeblas.QrPerformanceGuardrailRunner'
+    standardInput = System.in
+}
+
+tasks.register('runHessenbergDiagnostic', JavaExec) {
+    group = 'benchmark'
+    description = 'Run a focused Hessenberg diagnostic comparing raw and GEMM-based residual checks'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    minHeapSize = '512m'
+    maxHeapSize = '2g'
+    main = 'net.faulj.nativeblas.HessenbergDiagnosticRunner'
     standardInput = System.in
 }
 

@@ -36,7 +36,7 @@ public final class QrPerformanceGuardrailRunner {
         System.out.println("provider=" + snapshot.nativeContext().getProviderDescription());
         System.out.println("expected_runtime_contains=AVX2");
         System.out.println("expected_provider=builtin only");
-        System.out.println("expected_gemm_tile=MR5_NR4");
+        System.out.println("observed_gemm_tile=diagnostic only");
         System.out.println("csv,size,bestMs,expectedMinMs,expectedMaxMs,status,gemmMr,gemmNr,qrTrailingGemmMs,qrPanelMs,qrTBuildMs,qrTrailingPackMs,qrTrailingUnpackMs");
 
         NativeProfiling.setEnabled(true);

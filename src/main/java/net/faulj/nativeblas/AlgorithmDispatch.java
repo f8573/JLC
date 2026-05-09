@@ -62,12 +62,34 @@ final class AlgorithmDispatch {
     }
 
     private static boolean coldStartAllowsCpp(AlgorithmDispatchRequest request) {
+        if ("qr".equals(request.algorithm())) {
+            return coldStartAllowsCppForQr(request);
+        }
         if (isSensitivityCritical(request.algorithm())) {
             return false;
         }
         int dominant = Math.max(request.rows(), request.cols());
         int threshold = coldStartThreshold(request.algorithm());
         return threshold > 0 && dominant >= threshold;
+    }
+
+    private static boolean coldStartAllowsCppForQr(AlgorithmDispatchRequest request) {
+        int dominant = Math.max(request.rows(), request.cols());
+        // Conservative cold-start rule: native QR is promoted where repeated wins were
+        // stable, while tall thin/full shapes stay on Java until calibration proves
+        // otherwise on the target machine.
+        if ("factorize_only".equals(request.mode())) {
+            int threshold = parsePositiveInt("jlc.algorithm.qr.factorizeOnly.coldStartCppMinSize", 128);
+            return dominant >= threshold;
+        }
+        if (!"decompose_thin".equals(request.mode()) && !"decompose_full".equals(request.mode())) {
+            return false;
+        }
+        if (request.shapeFamily() == ShapeFamily.TALL) {
+            return false;
+        }
+        int threshold = parsePositiveInt("jlc.algorithm.qr.decompose.coldStartCppMinSize", 128);
+        return dominant >= threshold;
     }
 
     private static int minimumSamples() {

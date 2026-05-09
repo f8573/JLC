@@ -17,6 +17,7 @@ import java.io.PrintWriter;
 import java.util.*;
 
 import org.junit.Test;
+import org.junit.Ignore;
 
 /**
  * Comprehensive performance benchmark measuring theoretical peak FLOPs
@@ -53,6 +54,7 @@ public class ComprehensivePerfBenchmark {
         System.getProperty("bench.clock", "3.5"));
     private static final int FLOPS_PER_CYCLE = Integer.getInteger("bench.fpc", 8); // AVX2 FMA
 
+    @Ignore("Heavy benchmark harness; excluded from default test so correctness runs stay stable and non-performance-oriented.")
     @Test
     public void runBenchmark() {
         main(new String[0]);
