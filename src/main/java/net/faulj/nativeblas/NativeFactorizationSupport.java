@@ -3,11 +3,15 @@ package net.faulj.nativeblas;
 import net.faulj.compute.DispatchPolicy;
 
 public final class NativeFactorizationSupport {
+    private static final int DEFAULT_NATIVE_LU_MAX_SIZE = 128;
+    private static final int DEFAULT_NATIVE_CHOLESKY_MAX_SIZE = 128;
+
     private NativeFactorizationSupport() {
     }
 
     public static boolean tryLu(double[] packedLu, int n, int[] pivots) {
-        if (!shouldUseCpp("lu", "factor", n, n)) {
+        if (!shouldUseCpp("lu", "factor", n, n)
+            || !NativeValidationGuards.allowSquare("lu", n, DEFAULT_NATIVE_LU_MAX_SIZE)) {
             return false;
         }
         try {
@@ -45,7 +49,8 @@ public final class NativeFactorizationSupport {
     }
 
     public static boolean tryCholesky(double[] packedL, int n) {
-        if (!shouldUseCpp("cholesky", "decompose", n, n)) {
+        if (!shouldUseCpp("cholesky", "decompose", n, n)
+            || !NativeValidationGuards.allowSquare("cholesky", n, DEFAULT_NATIVE_CHOLESKY_MAX_SIZE)) {
             return false;
         }
         try {

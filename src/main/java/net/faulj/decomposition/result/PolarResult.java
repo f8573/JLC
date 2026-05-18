@@ -207,7 +207,7 @@ public class PolarResult {
      * @return reconstructed matrix
      */
     public Matrix reconstruct() {
-        return U.multiply(P);
+        return MatrixUtils.multiplyStable(U, P);
     }
 
     /**

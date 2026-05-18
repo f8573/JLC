@@ -394,6 +394,102 @@ Java_net_faulj_nativeblas_NativeBindings_nativeHessenbergDecomposeVendor(JNIEnv*
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_net_faulj_nativeblas_NativeBindings_nativeHessenbergReduce(JNIEnv* env, jclass,
+                                                                jdoubleArray h, jint n) {
+    if (!validate_non_negative(env, n, "Matrix dimensions must be non-negative")) {
+        return;
+    }
+    const jsize expected = static_cast<jsize>(n * n);
+    if (!validate_array_length(env, h, expected, "Array length mismatch for Hessenberg workspace")) {
+        return;
+    }
+    jdouble* h_ptr = static_cast<jdouble*>(env->GetPrimitiveArrayCritical(h, nullptr));
+    if (h_ptr == nullptr) {
+        throw_java_exception(env, "java/lang/IllegalStateException", "Failed to pin Java array for native Hessenberg");
+        return;
+    }
+    const jlc_status status = jlc_native_hessenberg_reduce(h_ptr, n);
+    env->ReleasePrimitiveArrayCritical(h, h_ptr, 0);
+    if (status != JLC_STATUS_SUCCESS) {
+        throw_status_exception(env, status);
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_net_faulj_nativeblas_NativeBindings_nativeHessenbergDecompose(JNIEnv* env, jclass,
+                                                                   jdoubleArray h, jint n,
+                                                                   jdoubleArray q) {
+    if (!validate_non_negative(env, n, "Matrix dimensions must be non-negative")) {
+        return;
+    }
+    const jsize expected = static_cast<jsize>(n * n);
+    if (!validate_array_length(env, h, expected, "Array length mismatch for Hessenberg workspace")
+        || !validate_array_length(env, q, expected, "Array length mismatch for Hessenberg Q")) {
+        return;
+    }
+    jdouble* h_ptr = static_cast<jdouble*>(env->GetPrimitiveArrayCritical(h, nullptr));
+    jdouble* q_ptr = static_cast<jdouble*>(env->GetPrimitiveArrayCritical(q, nullptr));
+    if (h_ptr == nullptr || q_ptr == nullptr) {
+        if (h_ptr != nullptr) {
+            env->ReleasePrimitiveArrayCritical(h, h_ptr, 0);
+        }
+        if (q_ptr != nullptr) {
+            env->ReleasePrimitiveArrayCritical(q, q_ptr, 0);
+        }
+        throw_java_exception(env, "java/lang/IllegalStateException", "Failed to pin Java arrays for native Hessenberg");
+        return;
+    }
+    const jlc_status status = jlc_native_hessenberg_decompose(h_ptr, n, q_ptr);
+    env->ReleasePrimitiveArrayCritical(h, h_ptr, 0);
+    env->ReleasePrimitiveArrayCritical(q, q_ptr, 0);
+    if (status != JLC_STATUS_SUCCESS) {
+        throw_status_exception(env, status);
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_net_faulj_nativeblas_NativeBindings_nativeBidiagonalDecompose(JNIEnv* env, jclass,
+                                                                   jdoubleArray a, jint m, jint n,
+                                                                   jdoubleArray u, jdoubleArray b, jdoubleArray v) {
+    if (!validate_non_negative(env, m, "Matrix dimensions must be non-negative")
+        || !validate_non_negative(env, n, "Matrix dimensions must be non-negative")) {
+        return;
+    }
+    const jsize a_expected = static_cast<jsize>(m * n);
+    const jsize u_expected = static_cast<jsize>(m * m);
+    const jsize b_expected = static_cast<jsize>(m * n);
+    const jsize v_expected = static_cast<jsize>(n * n);
+    if (!validate_array_length(env, a, a_expected, "Array length mismatch for bidiagonal input")
+        || !validate_array_length(env, u, u_expected, "Array length mismatch for bidiagonal U")
+        || !validate_array_length(env, b, b_expected, "Array length mismatch for bidiagonal B")
+        || !validate_array_length(env, v, v_expected, "Array length mismatch for bidiagonal V")) {
+        return;
+    }
+
+    jdouble* a_ptr = static_cast<jdouble*>(env->GetPrimitiveArrayCritical(a, nullptr));
+    jdouble* u_ptr = static_cast<jdouble*>(env->GetPrimitiveArrayCritical(u, nullptr));
+    jdouble* b_ptr = static_cast<jdouble*>(env->GetPrimitiveArrayCritical(b, nullptr));
+    jdouble* v_ptr = static_cast<jdouble*>(env->GetPrimitiveArrayCritical(v, nullptr));
+    if (a_ptr == nullptr || u_ptr == nullptr || b_ptr == nullptr || v_ptr == nullptr) {
+        if (a_ptr != nullptr) env->ReleasePrimitiveArrayCritical(a, a_ptr, JNI_ABORT);
+        if (u_ptr != nullptr) env->ReleasePrimitiveArrayCritical(u, u_ptr, 0);
+        if (b_ptr != nullptr) env->ReleasePrimitiveArrayCritical(b, b_ptr, 0);
+        if (v_ptr != nullptr) env->ReleasePrimitiveArrayCritical(v, v_ptr, 0);
+        throw_java_exception(env, "java/lang/IllegalStateException", "Failed to pin Java arrays for native bidiagonal");
+        return;
+    }
+
+    const jlc_status status = jlc_native_bidiagonal_decompose(a_ptr, m, n, u_ptr, b_ptr, v_ptr);
+    env->ReleasePrimitiveArrayCritical(a, a_ptr, JNI_ABORT);
+    env->ReleasePrimitiveArrayCritical(u, u_ptr, 0);
+    env->ReleasePrimitiveArrayCritical(b, b_ptr, 0);
+    env->ReleasePrimitiveArrayCritical(v, v_ptr, 0);
+    if (status != JLC_STATUS_SUCCESS) {
+        throw_status_exception(env, status);
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_net_faulj_nativeblas_NativeBindings_nativeLuFactor(JNIEnv* env, jclass,
                                                         jdoubleArray packed_lu, jint n,
                                                         jintArray pivots) {

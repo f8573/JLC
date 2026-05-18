@@ -36,6 +36,7 @@ add_library(jlc_native_kernel OBJECT
   src/main/cpp/kernels/gemm.cpp
   src/main/cpp/kernels/lapack_factorizations.cpp
   src/main/cpp/kernels/lapack_hessenberg.cpp
+  src/main/cpp/kernels/bidiagonal.cpp
 )
 
 target_include_directories(jlc_native_kernel PRIVATE

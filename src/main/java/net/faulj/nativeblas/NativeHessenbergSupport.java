@@ -1,21 +1,42 @@
 package net.faulj.nativeblas;
 
 /**
- * Placeholder for a future self-owned native Hessenberg implementation.
- *
- * <p>Public LAPACK/provider selection has been removed from algorithm dispatch.
- * Hessenberg remains on the Java path until a calibrated C++ implementation is
- * wired through the shared algorithm dispatcher.</p>
+ * Native Hessenberg routing support.
  */
 public final class NativeHessenbergSupport {
+    private static final int DEFAULT_NATIVE_HESSENBERG_MAX_SIZE = 128;
+
     private NativeHessenbergSupport() {
     }
 
     public static boolean tryReduce(double[] h, int n) {
-        return false;
+        if (!BackendRegistry.shouldUseCppForAlgorithm("hessenberg", "reduce", n, n, defaultThreadCount())
+            || !NativeValidationGuards.allowSquare("hessenberg", n, DEFAULT_NATIVE_HESSENBERG_MAX_SIZE)) {
+            return false;
+        }
+        try {
+            NativeBindings.nativeHessenbergReduce(h, n);
+            return true;
+        } catch (RuntimeException | UnsatisfiedLinkError ignored) {
+            return false;
+        }
     }
 
     public static boolean tryDecompose(double[] h, int n, double[] q) {
-        return false;
+        if (!BackendRegistry.shouldUseCppForAlgorithm("hessenberg", "decompose", n, n, defaultThreadCount())
+            || !NativeValidationGuards.allowSquare("hessenberg", n, DEFAULT_NATIVE_HESSENBERG_MAX_SIZE)) {
+            return false;
+        }
+        try {
+            NativeBindings.nativeHessenbergDecompose(h, n, q);
+            return true;
+        } catch (RuntimeException | UnsatisfiedLinkError ignored) {
+            return false;
+        }
+    }
+
+    private static int defaultThreadCount() {
+        net.faulj.compute.DispatchPolicy policy = net.faulj.compute.DispatchPolicy.defaultPolicy();
+        return policy.isParallelEnabled() ? policy.getParallelism() : 1;
     }
 }

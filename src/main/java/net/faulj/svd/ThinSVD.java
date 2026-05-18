@@ -2,6 +2,10 @@ package net.faulj.svd;
 
 import net.faulj.matrix.Matrix;
 import net.faulj.decomposition.result.SVDResult;
+import net.faulj.nativeblas.AlgorithmBackend;
+import net.faulj.nativeblas.NativeAlgorithmScope;
+
+import java.util.Map;
 
 /**
  * Computes the Thin (Economy) Singular Value Decomposition.
@@ -86,9 +90,10 @@ public class ThinSVD {
 		if (A == null) {
 			throw new IllegalArgumentException("Matrix must not be null");
 		}
-		return switch (algorithm) {
-			case GOLUB_KAHAN_QR -> new GolubKahanSVD().decomposeThin(A);
-			case DIVIDE_AND_CONQUER -> new DivideAndConquerSVD().decomposeThin(A);
-		};
+        Map<String, AlgorithmBackend> stageBackends = SVDecomposition.nativeStageBackends(A, "thin");
+        return NativeAlgorithmScope.withOverrides(stageBackends, () -> switch (algorithm) {
+            case GOLUB_KAHAN_QR -> new GolubKahanSVD().decomposeThin(A);
+            case DIVIDE_AND_CONQUER -> new DivideAndConquerSVD().decomposeThin(A);
+        });
 	}
 }

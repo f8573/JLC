@@ -47,6 +47,13 @@ final class NativeBindings {
 
     static native void nativeHessenbergDecomposeVendor(double[] h, int n, double[] q);
 
+    static native void nativeHessenbergReduce(double[] h, int n);
+
+    static native void nativeHessenbergDecompose(double[] h, int n, double[] q);
+
+    static native void nativeBidiagonalDecompose(double[] a, int m, int n,
+                                                 double[] u, double[] b, double[] v);
+
     static native void nativeLuFactor(double[] packedLu, int n, int[] pivots);
 
     static native void nativeLuFactorVendor(double[] packedLu, int n, int[] pivots);

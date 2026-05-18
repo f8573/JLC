@@ -3,6 +3,8 @@ package net.faulj.eigen.schur;
 import net.faulj.decomposition.result.SchurResult;
 import net.faulj.eigen.qr.ImplicitQRFrancis;
 import net.faulj.matrix.Matrix;
+import net.faulj.nativeblas.AlgorithmBackend;
+import net.faulj.nativeblas.NativeAlgorithmScope;
 
 /**
  * Computes the Real Schur Decomposition of a square real matrix.
@@ -104,7 +106,7 @@ public class RealSchurDecomposition {
 
         // Use ImplicitQRFrancis with EJML-style implicit double-shift QR
         // This is O(n³) vs O(n⁴) for explicit QR iteration
-        return ImplicitQRFrancis.decompose(A);
+        return decomposeInternal(A, true);
     }
 
     /**
@@ -115,7 +117,32 @@ public class RealSchurDecomposition {
      * @return The quasi-upper triangular Schur form T.
      */
     public static Matrix schurT(Matrix A) {
-        SchurResult result = decompose(A);
+        SchurResult result = decomposeInternal(A, false);
         return result.getT();
+    }
+
+    private static SchurResult decomposeInternal(Matrix A, boolean accumulateU) {
+        String mode = accumulateU ? "decompose" : "schur_form_only";
+        AlgorithmBackend hessenbergBackend = nativeHessenbergBackend(A, mode);
+        return NativeAlgorithmScope.withOverride("hessenberg", hessenbergBackend, () -> {
+            if (accumulateU) {
+                return ImplicitQRFrancis.decompose(A);
+            }
+            return ImplicitQRFrancis.decomposeSchurFormOnly(
+                net.faulj.decomposition.hessenberg.HessenbergReduction.decompose(A)
+            );
+        });
+    }
+
+    private static AlgorithmBackend nativeHessenbergBackend(Matrix A, String mode) {
+        int n = A.getRowCount();
+        int threads = defaultThreadCount();
+        boolean useCpp = net.faulj.nativeblas.BackendRegistry.shouldUseCppForAlgorithm("schur", mode, n, n, threads);
+        return useCpp ? AlgorithmBackend.CPP : AlgorithmBackend.JAVA;
+    }
+
+    private static int defaultThreadCount() {
+        net.faulj.compute.DispatchPolicy policy = net.faulj.compute.DispatchPolicy.defaultPolicy();
+        return policy.isParallelEnabled() ? policy.getParallelism() : 1;
     }
 }

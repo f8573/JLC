@@ -232,7 +232,7 @@ public class SVDResult {
      */
     public Matrix reconstruct() {
         Matrix sigma = getSigma();
-        Matrix cand1 = U.multiply(sigma).multiply(V.transpose());
+        Matrix cand1 = MatrixUtils.multiplyStable(MatrixUtils.multiplyStable(U, sigma), V.transpose());
         // Defensive: some algorithm paths may accidentally swap left/right factors.
         // Compute the alternate reconstruction only when dimensions permit, otherwise
         // fall back to the primary reconstruction. Any failure computing the
@@ -240,7 +240,7 @@ public class SVDResult {
         double err1 = MatrixUtils.relativeError(A, cand1);
         double err2 = Double.POSITIVE_INFINITY;
         try {
-            Matrix cand2 = V.multiply(sigma).multiply(U.transpose());
+            Matrix cand2 = MatrixUtils.multiplyStable(MatrixUtils.multiplyStable(V, sigma), U.transpose());
             err2 = MatrixUtils.relativeError(A, cand2);
             if (err2 < err1) {
                 return cand2;

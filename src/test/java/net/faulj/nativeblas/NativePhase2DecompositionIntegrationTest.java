@@ -1,14 +1,23 @@
 package net.faulj.nativeblas;
 
 import net.faulj.decomposition.cholesky.CholeskyDecomposition;
+import net.faulj.decomposition.bidiagonal.Bidiagonalization;
 import net.faulj.decomposition.hessenberg.HessenbergReduction;
 import net.faulj.decomposition.lu.LUDecomposition;
 import net.faulj.decomposition.qr.HouseholderQR;
+import net.faulj.decomposition.result.BidiagonalizationResult;
 import net.faulj.decomposition.result.CholeskyResult;
 import net.faulj.decomposition.result.HessenbergResult;
 import net.faulj.decomposition.result.LUResult;
+import net.faulj.decomposition.result.PolarResult;
 import net.faulj.decomposition.result.QRResult;
+import net.faulj.decomposition.result.SVDResult;
+import net.faulj.decomposition.result.SchurResult;
+import net.faulj.eigen.schur.RealSchurDecomposition;
 import net.faulj.matrix.Matrix;
+import net.faulj.polar.PolarDecomposition;
+import net.faulj.svd.SVDecomposition;
+import net.faulj.svd.ThinSVD;
 import org.junit.After;
 import org.junit.Assume;
 import org.junit.Test;
@@ -29,6 +38,10 @@ public class NativePhase2DecompositionIntegrationTest {
         System.clearProperty("jlc.algorithm.qr.backend");
         System.clearProperty("jlc.algorithm.cholesky.backend");
         System.clearProperty("jlc.algorithm.hessenberg.backend");
+        System.clearProperty("jlc.algorithm.bidiagonal.backend");
+        System.clearProperty("jlc.algorithm.svd.backend");
+        System.clearProperty("jlc.algorithm.schur.backend");
+        System.clearProperty("jlc.algorithm.polar.backend");
         System.clearProperty("jlc.algorithm.calibration.path");
         System.clearProperty("net.faulj.decomposition.lu.blockThreshold");
         System.clearProperty("net.faulj.decomposition.lu.blockSize");
@@ -171,6 +184,119 @@ public class NativePhase2DecompositionIntegrationTest {
 
         assertTrue("Native Cholesky residual too large: " + nativeResult.residualNorm(), nativeResult.residualNorm() < 1e-10);
         assertTrue("Cholesky L mismatch too large", relativeDifference(javaResult.getL(), nativeResult.getL()) < 1e-10);
+    }
+
+    @Test
+    public void nativeBuiltinBidiagonalMatchesJava() {
+        assumeNativeBackendReady();
+
+        Matrix a = randomRectangularMatrix(64, 48, 251L);
+
+        System.setProperty("jlc.algorithm.bidiagonal.backend", "java");
+        BidiagonalizationResult javaResult = new Bidiagonalization().decompose(a);
+
+        System.setProperty("jlc.algorithm.bidiagonal.backend", "cpp");
+        BidiagonalizationResult nativeResult = new Bidiagonalization().decompose(a);
+
+        assertTrue("Native bidiagonal residual too large: " + nativeResult.residualNorm(), nativeResult.residualNorm() < 1e-8);
+        assertTrue("Native bidiagonal U orthogonality too large", nativeResult.verifyOrthogonality(nativeResult.getU())[0] < 1e-8);
+        assertTrue("Native bidiagonal V orthogonality too large", nativeResult.verifyOrthogonality(nativeResult.getV())[0] < 1e-8);
+        assertTrue("Bidiagonal reconstruction mismatch too large",
+            relativeDifference(javaResult.reconstruct(), nativeResult.reconstruct()) < 1e-8);
+    }
+
+    @Test
+    public void nativeAssistedSvdMatchesJava() {
+        assumeNativeBackendReady();
+
+        Matrix a = randomRectangularMatrix(56, 40, 271L);
+
+        System.setProperty("jlc.algorithm.svd.backend", "java");
+        SVDResult javaResult = new SVDecomposition().decompose(a);
+
+        System.setProperty("jlc.algorithm.svd.backend", "cpp");
+        SVDResult nativeResult = new SVDecomposition().decompose(a);
+
+        assertTrue("Native-assisted SVD reconstruction mismatch too large",
+            relativeDifference(javaResult.reconstruct(), nativeResult.reconstruct()) < 1e-8);
+        assertTrue("Native-assisted SVD U orthogonality too large",
+            net.faulj.matrix.MatrixUtils.orthogonalityError(nativeResult.getU()) < 1e-8);
+        assertTrue("Native-assisted SVD V orthogonality too large",
+            net.faulj.matrix.MatrixUtils.orthogonalityError(nativeResult.getV()) < 1e-8);
+    }
+
+    @Test
+    public void nativeAssistedThinSvdMatchesJava() {
+        assumeNativeBackendReady();
+
+        Matrix a = randomRectangularMatrix(64, 40, 276L);
+
+        System.setProperty("jlc.algorithm.svd.backend", "java");
+        SVDResult javaResult = new ThinSVD().decompose(a);
+
+        System.setProperty("jlc.algorithm.svd.backend", "cpp");
+        SVDResult nativeResult = new ThinSVD().decompose(a);
+
+        assertTrue("Native-assisted thin SVD reconstruction mismatch too large",
+            relativeDifference(javaResult.reconstruct(), nativeResult.reconstruct()) < 1e-8);
+        assertTrue("Native-assisted thin SVD U orthogonality too large",
+            net.faulj.matrix.MatrixUtils.orthogonalityError(nativeResult.getU()) < 1e-8);
+        assertTrue("Native-assisted thin SVD V orthogonality too large",
+            net.faulj.matrix.MatrixUtils.orthogonalityError(nativeResult.getV()) < 1e-8);
+    }
+
+    @Test
+    public void nativeAssistedSchurMatchesJava() {
+        assumeNativeBackendReady();
+
+        Matrix a = randomMatrix(48, 281L);
+
+        System.setProperty("jlc.algorithm.schur.backend", "java");
+        SchurResult javaResult = RealSchurDecomposition.decompose(a);
+
+        System.setProperty("jlc.algorithm.schur.backend", "cpp");
+        SchurResult nativeResult = RealSchurDecomposition.decompose(a);
+
+        assertTrue("Native-assisted Schur T mismatch too large",
+            relativeDifference(javaResult.getT(), nativeResult.getT()) < 1e-8);
+        assertTrue("Native-assisted Schur U mismatch too large",
+            relativeDifference(javaResult.getU(), nativeResult.getU()) < 1e-8);
+    }
+
+    @Test
+    public void nativeAssistedSchurFormOnlyMatchesJava() {
+        assumeNativeBackendReady();
+
+        Matrix a = randomMatrix(48, 286L);
+
+        System.setProperty("jlc.algorithm.schur.backend", "java");
+        Matrix javaResult = RealSchurDecomposition.schurT(a);
+
+        System.setProperty("jlc.algorithm.schur.backend", "cpp");
+        Matrix nativeResult = RealSchurDecomposition.schurT(a);
+
+        assertTrue("Native-assisted Schur T-only mismatch too large",
+            relativeDifference(javaResult, nativeResult) < 1e-8);
+    }
+
+    @Test
+    public void nativeAssistedPolarMatchesJava() {
+        assumeNativeBackendReady();
+
+        Matrix a = randomRectangularMatrix(32, 24, 291L);
+
+        System.setProperty("jlc.algorithm.polar.backend", "java");
+        PolarResult javaResult = PolarDecomposition.decompose(a);
+
+        System.setProperty("jlc.algorithm.polar.backend", "cpp");
+        PolarResult nativeResult = PolarDecomposition.decompose(a);
+
+        assertTrue("Native-assisted polar reconstruction mismatch too large",
+            relativeDifference(javaResult.reconstruct(), nativeResult.reconstruct()) < 1e-8);
+        assertTrue("Native-assisted polar U mismatch too large",
+            relativeDifference(javaResult.getU(), nativeResult.getU()) < 1e-8);
+        assertTrue("Native-assisted polar P mismatch too large",
+            relativeDifference(javaResult.getP(), nativeResult.getP()) < 1e-8);
     }
 
     private static void assumeNativeBackendReady() {
