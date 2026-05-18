@@ -2,6 +2,13 @@
 
 LambdaCompute is a Java linear algebra library and web application for matrix diagnostics, decomposition, and spectral analysis.
 
+## Technology Stack
+
+- Backend: Java 21, Spring Boot 3.2, Gradle
+- Frontend: React 18, Vite 5, Tailwind CSS, KaTeX
+- Native/Performance: C++17, CMake, JNI, JCuda, optional BLAS/LAPACK integration
+- Testing/Tooling: JUnit 4, Node.js scripts, Python analysis utilities
+
 Live site: https://lambdacompute.org/
 
 ## What this project includes
