@@ -28,7 +28,7 @@ public final class BackendRegistry {
         return algorithmBackend(new AlgorithmDispatchRequest("gemm", mode, rows, cols, threadCount), true);
     }
 
-    static boolean shouldUseCppForAlgorithm(String algorithm, String mode, int rows, int cols, int threadCount) {
+    public static boolean shouldUseCppForAlgorithm(String algorithm, String mode, int rows, int cols, int threadCount) {
         BackendMode requested = requestedBackend();
         NativeContext nativeContext = nativeContextFor(requested);
         return requested != BackendMode.JAVA

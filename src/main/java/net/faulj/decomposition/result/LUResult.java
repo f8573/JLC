@@ -167,7 +167,7 @@ public class LUResult {
      * @return reconstructed matrix
      */
     public Matrix reconstruct() {
-        return L.multiply(U);
+        return MatrixUtils.multiplyStable(L, U);
     }
 
     /**
@@ -191,12 +191,11 @@ public class LUResult {
     }
     
     private Matrix permuteRows() {
-        Matrix result = A.copy();
+        Matrix result = new Matrix(A.getRowCount(), A.getColumnCount());
         for (int i = 0; i < P.size(); i++) {
-            if (P.get(i) != i) {
-                for (int j = 0; j < A.getColumnCount(); j++) {
-                    result.set(i, j, A.get(P.get(i), j));
-                }
+            int sourceRow = P.get(i);
+            for (int j = 0; j < A.getColumnCount(); j++) {
+                result.set(i, j, A.get(sourceRow, j));
             }
         }
         return result;

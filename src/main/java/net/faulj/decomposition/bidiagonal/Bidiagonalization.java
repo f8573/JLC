@@ -3,6 +3,7 @@ package net.faulj.decomposition.bidiagonal;
 import net.faulj.decomposition.result.BidiagonalizationResult;
 import net.faulj.matrix.Matrix;
 import net.faulj.matrix.MatrixUtils;
+import net.faulj.nativeblas.NativeBidiagonalSupport;
 import jdk.incubator.vector.DoubleVector;
 import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
@@ -182,6 +183,12 @@ public class Bidiagonalization {
     private BidiagonalizationResult decomposeUpper(Matrix A) {
         int m = A.getRowCount();
         int n = A.getColumnCount();
+
+        Matrix nativeInput = A.copy();
+        BidiagonalizationResult nativeResult = NativeBidiagonalSupport.tryDecompose(A, nativeInput);
+        if (nativeResult != null) {
+            return nativeResult;
+        }
 
         // Use raw arrays for faster access
         double[] b = A.copy().getRawData();

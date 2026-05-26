@@ -2,7 +2,7 @@ package net.faulj.nativeblas;
 
 import java.util.Locale;
 
-enum AlgorithmBackend {
+public enum AlgorithmBackend {
     AUTO,
     JAVA,
     CPP;

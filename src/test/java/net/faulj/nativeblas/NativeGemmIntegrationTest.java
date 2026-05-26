@@ -66,9 +66,10 @@ public class NativeGemmIntegrationTest {
         BackendSnapshot snapshot = BackendRegistry.snapshot();
         assertEquals("native", snapshot.activeBackend());
         assertEquals("builtin only", snapshot.nativeContext().getProviderDescription());
-        assertTrue("Expected AVX2 runtime, got: " + snapshot.nativeContext().getRuntimeDescription(),
-            snapshot.nativeContext().getRuntimeDescription() != null
-                && snapshot.nativeContext().getRuntimeDescription().contains("AVX2"));
+        String runtimeDescription = snapshot.nativeContext().getRuntimeDescription();
+        assertTrue("Expected packed SIMD runtime, got: " + runtimeDescription,
+            runtimeDescription != null
+                && (runtimeDescription.contains("AVX2") || runtimeDescription.contains("AVX-512")));
 
         NativeProfiling.setEnabled(true);
         NativeProfiling.reset();
@@ -79,8 +80,13 @@ public class NativeGemmIntegrationTest {
         NativeGemmProfile profile = NativeProfiling.snapshot().orElse(NativeGemmProfile.EMPTY);
         NativeProfiling.setEnabled(false);
 
-        assertEquals("AVX2 MR regression", 5L, profile.lastMr());
-        assertEquals("AVX2 NR regression", 4L, profile.lastNr());
+        if (runtimeDescription.contains("AVX-512")) {
+            assertEquals("AVX-512 MR regression", 6L, profile.lastMr());
+            assertEquals("AVX-512 NR regression", 8L, profile.lastNr());
+        } else {
+            assertEquals("AVX2 MR regression", 5L, profile.lastMr());
+            assertEquals("AVX2 NR regression", 4L, profile.lastNr());
+        }
         assertTrue("Expected packed microkernel calls", profile.microtileCalls() > 0);
     }
 

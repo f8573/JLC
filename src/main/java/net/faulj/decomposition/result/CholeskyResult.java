@@ -145,7 +145,7 @@ public class CholeskyResult {
      * @return reconstructed matrix
      */
     public Matrix reconstruct() {
-        return L.multiply(L.transpose());
+        return MatrixUtils.multiplyStable(L, L.transpose());
     }
 
     /**

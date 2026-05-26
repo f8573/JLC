@@ -3,6 +3,8 @@ package net.faulj.decomposition.cholesky;
 import net.faulj.decomposition.result.CholeskyResult;
 import net.faulj.kernels.gemm.Gemm;
 import net.faulj.matrix.Matrix;
+import net.faulj.nativeblas.AlgorithmBackend;
+import net.faulj.nativeblas.NativeAlgorithmScope;
 import net.faulj.nativeblas.NativeFactorizationSupport;
 
 /**
@@ -29,7 +31,10 @@ public class CholeskyDecomposition {
 			return new CholeskyResult(A, L);
 		}
 		if (n >= blockThreshold()) {
-			decomposeBlocked(a, n);
+			NativeAlgorithmScope.withOverride("gemm", AlgorithmBackend.JAVA, () -> {
+				decomposeBlocked(a, n);
+				return null;
+			});
 		} else {
 			factorPanel(a, n, 0, n);
 		}

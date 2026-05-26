@@ -5,7 +5,9 @@ import net.faulj.core.Tolerance;
 import net.faulj.decomposition.result.LUResult;
 import net.faulj.kernels.gemm.Gemm;
 import net.faulj.matrix.Matrix;
+import net.faulj.nativeblas.AlgorithmBackend;
 import net.faulj.nativeblas.NativeFactorizationSupport;
+import net.faulj.nativeblas.NativeAlgorithmScope;
 import jdk.incubator.vector.DoubleVector;
 import jdk.incubator.vector.VectorSpecies;
 
@@ -195,10 +197,15 @@ public class LUDecomposition {
             }
         }
         if (n >= blockThreshold()) {
-            return decomposeBlocked(A, n);
+            return runJavaBlocked(A, n);
         }
 
         return decomposeUnblocked(A, n);
+    }
+
+    private LUResult runJavaBlocked(Matrix A, int n) {
+        return NativeAlgorithmScope.withOverride("gemm", AlgorithmBackend.JAVA,
+            () -> decomposeBlocked(A, n));
     }
 
     private LUResult decomposeUnblocked(Matrix A, int n) {

@@ -98,6 +98,10 @@ jlc_status jlc_native_cholesky_decompose(double* packed_l, int n, int* out_info)
 jlc_status jlc_native_cholesky_decompose_vendor(double* packed_l, int n, int* out_info);
 jlc_status jlc_native_hessenberg_reduce_vendor(double* h, int n);
 jlc_status jlc_native_hessenberg_decompose_vendor(double* h, int n, double* q);
+jlc_status jlc_native_hessenberg_reduce(double* h, int n);
+jlc_status jlc_native_hessenberg_decompose(double* h, int n, double* q);
+jlc_status jlc_native_bidiagonal_decompose(const double* a, int m, int n,
+                                           double* u, double* b, double* v);
 jlc_status jlc_native_gemm(const double* a, int a_rows, int a_cols,
                            const double* b, int b_rows, int b_cols,
                            double* c, int c_rows, int c_cols,

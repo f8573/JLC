@@ -116,6 +116,8 @@ final class AlgorithmDispatch {
         int fallback = switch (algorithm) {
             case "gemm" -> 128;
             case "lu" -> 128;
+            case "hessenberg" -> 128;
+            case "bidiagonal" -> 128;
             case "qr" -> -1;
             default -> -1;
         };
@@ -124,6 +126,10 @@ final class AlgorithmDispatch {
 
     private static AlgorithmBackend configuredBackend(String algorithm) {
         String normalized = normalizeAlgorithm(algorithm);
+        AlgorithmBackend override = NativeAlgorithmScope.overrideFor(normalized);
+        if (override != null) {
+            return override;
+        }
         String configured = firstNonBlank(
             System.getProperty("jlc.algorithm." + normalized + ".backend"),
             System.getProperty("faulj.algorithm." + normalized + ".backend"),

@@ -166,7 +166,7 @@ public class HessenbergResult {
      * @return reconstructed matrix
      */
     public Matrix reconstruct() {
-        return Q.multiply(H).multiply(Q.transpose());
+        return MatrixUtils.multiplyStable(MatrixUtils.multiplyStable(Q, H), Q.transpose());
     }
 
     /**

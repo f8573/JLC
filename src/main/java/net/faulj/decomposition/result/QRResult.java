@@ -137,7 +137,7 @@ public class QRResult {
      * @return reconstructed matrix
      */
     public Matrix reconstruct() {
-        return Q.multiply(R);
+        return MatrixUtils.multiplyStable(Q, R);
     }
 
     /**

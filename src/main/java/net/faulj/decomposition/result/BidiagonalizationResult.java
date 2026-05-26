@@ -56,7 +56,7 @@ public class BidiagonalizationResult {
      * @return reconstructed matrix
      */
     public Matrix reconstruct() {
-        return U.multiply(B).multiply(V.transpose());
+        return MatrixUtils.multiplyStable(MatrixUtils.multiplyStable(U, B), V.transpose());
     }
 
     /**

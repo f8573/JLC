@@ -2,7 +2,11 @@ package net.faulj.matrix;
 
 import java.util.Arrays;
 
+import net.faulj.compute.DispatchPolicy;
 import net.faulj.core.Tolerance;
+import net.faulj.kernels.gemm.Gemm;
+import net.faulj.nativeblas.AlgorithmBackend;
+import net.faulj.nativeblas.NativeAlgorithmScope;
 
 /**
  * Utility methods for matrix operations and validation.
@@ -14,6 +18,13 @@ public class MatrixUtils {
 
     /** Machine epsilon for double precision */
     private static final double EPS = 2.220446049250313e-16;
+    private static final DispatchPolicy STABLE_GEMM_POLICY = DispatchPolicy.builder()
+        .enableCuda(false)
+        .enableParallel(false)
+        .parallelism(1)
+        .enableBlas3(true)
+        .enableSimd(true)
+        .build();
 
     /**
      * Compute relative Frobenius norm error: ||A - Ahat||_F / ||A||_F
@@ -27,6 +38,14 @@ public class MatrixUtils {
         if (normA < EPS) return 0.0;
         return A.subtract(Ahat).frobeniusNorm() / normA;
     }
+
+    /**
+     * Multiply matrices using a stable single-threaded GEMM policy for verification paths.
+     */
+    public static Matrix multiplyStable(Matrix left, Matrix right) {
+        return NativeAlgorithmScope.withOverride("gemm", AlgorithmBackend.JAVA,
+            () -> Gemm.multiply(left, right, STABLE_GEMM_POLICY));
+    }
     
     /**
      * Compute orthogonality error: ||Q^T*Q - I||_F
@@ -36,7 +55,7 @@ public class MatrixUtils {
      */
     public static double orthogonalityError(Matrix Q) {
         int n = Q.getColumnCount();
-        Matrix QtQ = Q.transpose().multiply(Q);
+        Matrix QtQ = multiplyStable(Q.transpose(), Q);
         Matrix I = Matrix.Identity(n);
         return QtQ.subtract(I).frobeniusNorm();
     }

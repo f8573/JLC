@@ -793,6 +793,7 @@ struct NativeWorkspace {
     bool pool_stop = false;
     bool pool_has_job = false;
     int pool_active = 0;
+    std::uint64_t pool_generation = 0;
     int pool_threads = 0;
     ThreadPoolJob pool_job{};
     std::vector<std::thread> pool_workers;
@@ -806,14 +807,18 @@ NativeWorkspace* current_workspace() {
 }
 
 void pool_worker(NativeWorkspace* workspace, int worker_index) {
+    std::uint64_t observed_generation = 0;
     while (true) {
         ThreadPoolJob job;
         {
             std::unique_lock<std::mutex> lock(workspace->pool_mutex);
-            workspace->pool_cv.wait(lock, [&]() { return workspace->pool_has_job || workspace->pool_stop; });
+            workspace->pool_cv.wait(lock, [&]() {
+                return workspace->pool_stop || workspace->pool_generation != observed_generation;
+            });
             if (workspace->pool_stop) {
                 return;
             }
+            observed_generation = workspace->pool_generation;
             job = workspace->pool_job;
         }
 
@@ -865,6 +870,7 @@ void shutdown_thread_pool(NativeWorkspace* workspace) {
     workspace->pool_stop = false;
     workspace->pool_has_job = false;
     workspace->pool_active = 0;
+    workspace->pool_generation = 0;
 }
 
 void ensure_thread_pool(NativeWorkspace* workspace, int threads) {
@@ -1081,6 +1087,7 @@ jlc_status native_gemm_impl(const MatrixDescriptor& a, const MatrixDescriptor& b
                 workspace->pool_job = job;
                 workspace->pool_active = actual_threads;
                 workspace->pool_has_job = true;
+                ++workspace->pool_generation;
                 workspace->pool_cv.notify_all();
                 if (profile_enabled) {
                     call_profile.thread_launch_ns += elapsed_ns(launch_start);
