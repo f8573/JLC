@@ -1,7 +1,43 @@
-.gradle
-.idea
-build
-frontend/node*
-.env
-frontend/.env
-frontend/.env.*
+# Java / Gradle
+.gradle/
+build/
+out/
+target/
+
+# CMake / native builds
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Node / Vite
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# IDEs / editors
+.idea/
+.vscode/
+*.iml
+
+# Logs
+*.log
+status.log
+hs_err_pid*.log
+
+# Benchmark and generated outputs
+rerun_*.out
+*_analysis.out
+*.class
+*.exe
+
+# OS junk
+.DS_Store
+Thumbs.db
+Desktop.ini
