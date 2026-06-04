@@ -1,6 +1,7 @@
 package net.faulj.compute;
 
 import jdk.incubator.vector.DoubleVector;
+import jdk.incubator.vector.VectorMask;
 import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
 
@@ -237,19 +238,20 @@ public final class SpecializedKernels {
                               double alpha, double beta) {
         int vecLen = SPECIES.length();
 
-        // For AVX2 (vecLen=4), each row of C fits in one vector
+        // Use a mask on wider species so row loads/stores stay within 4 logical columns.
         if (vecLen >= 4) {
             DoubleVector betaVec = DoubleVector.broadcast(SPECIES, beta);
+            VectorMask<Double> rowMask = vecLen == 4 ? null : SPECIES.indexInRange(0, 4);
 
             // Load C rows
-            DoubleVector c0 = DoubleVector.fromArray(SPECIES, c, 0).mul(betaVec);
-            DoubleVector c1 = DoubleVector.fromArray(SPECIES, c, 4).mul(betaVec);
-            DoubleVector c2 = DoubleVector.fromArray(SPECIES, c, 8).mul(betaVec);
-            DoubleVector c3 = DoubleVector.fromArray(SPECIES, c, 12).mul(betaVec);
+            DoubleVector c0 = loadRow(c, 0, rowMask).mul(betaVec);
+            DoubleVector c1 = loadRow(c, 4, rowMask).mul(betaVec);
+            DoubleVector c2 = loadRow(c, 8, rowMask).mul(betaVec);
+            DoubleVector c3 = loadRow(c, 12, rowMask).mul(betaVec);
 
             // For each k, load B row and broadcast A elements
             for (int kk = 0; kk < 4; kk++) {
-                DoubleVector bRow = DoubleVector.fromArray(SPECIES, b, kk * 4);
+                DoubleVector bRow = loadRow(b, kk * 4, rowMask);
 
                 c0 = bRow.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, a[kk] * alpha), c0);
                 c1 = bRow.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, a[4 + kk] * alpha), c1);
@@ -258,13 +260,27 @@ public final class SpecializedKernels {
             }
 
             // Store C rows
-            c0.intoArray(c, 0);
-            c1.intoArray(c, 4);
-            c2.intoArray(c, 8);
-            c3.intoArray(c, 12);
+            storeRow(c0, c, 0, rowMask);
+            storeRow(c1, c, 4, rowMask);
+            storeRow(c2, c, 8, rowMask);
+            storeRow(c3, c, 12, rowMask);
         } else {
             // Fall back to scalar for non-AVX2
             smallGemm(a, 4, b, 4, c, 4, 4, 4, 4, alpha, beta);
+        }
+    }
+
+    private static DoubleVector loadRow(double[] data, int offset, VectorMask<Double> mask) {
+        return mask == null
+            ? DoubleVector.fromArray(SPECIES, data, offset)
+            : DoubleVector.fromArray(SPECIES, data, offset, mask);
+    }
+
+    private static void storeRow(DoubleVector row, double[] data, int offset, VectorMask<Double> mask) {
+        if (mask == null) {
+            row.intoArray(data, offset);
+        } else {
+            row.intoArray(data, offset, mask);
         }
     }
 

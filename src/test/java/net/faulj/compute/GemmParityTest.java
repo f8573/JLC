@@ -1,7 +1,6 @@
 package net.faulj.compute;
 
 import net.faulj.matrix.Matrix;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import java.util.Arrays;
@@ -61,20 +60,17 @@ public class GemmParityTest {
                     );
 
                     Matrix optOut = Matrix.wrap(cInitial.getRawData().clone(), m, n);
-                    if (!(m == 4 && k == 4 && n == 4 && PREFERRED_VECTOR_LENGTH > 4)) {
-                        OptimizedBLAS3.gemm(a, b, optOut, alpha, beta, CPU_POLICY);
-                        GemmReference.assertParity(
-                            "OptimizedBLAS3.gemm", m, k, n, alpha, beta, seed,
-                            expected, optOut.getRawData(), 1e-12, GemmReference.cpuAbsTolerance(expected, k)
-                        );
-                    }
+                    OptimizedBLAS3.gemm(a, b, optOut, alpha, beta, CPU_POLICY);
+                    GemmReference.assertParity(
+                        "OptimizedBLAS3.gemm", m, k, n, alpha, beta, seed,
+                        expected, optOut.getRawData(), 1e-12, GemmReference.cpuAbsTolerance(expected, k)
+                    );
                 }
             }
             seed += 101;
         }
     }
 
-    @Ignore("Known bug: wide-SIMD tiny 4x4x4 path throws IndexOutOfBoundsException; fix in follow-up production change")
     @Test
     public void optimizedBlas3WideSimdTiny4x4MatchesReference() {
         if (PREFERRED_VECTOR_LENGTH <= 4) {
