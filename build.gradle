@@ -176,6 +176,7 @@ tasks.register('runDiagnostic', JavaExec) {
 tasks.register('runGemmBackendComparison', JavaExec) {
     group = 'benchmark'
     description = 'Run net.faulj.compute.GemmBackendComparison from test classes'
+    dependsOn testClasses
     classpath = sourceSets.test.runtimeClasspath
     javaLauncher = javaToolchains.launcherFor {
         languageVersion = JavaLanguageVersion.of(21)
