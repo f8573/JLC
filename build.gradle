@@ -128,7 +128,33 @@ bootRun {
 //
 
 test {
+    systemProperty 'faulj.cuda.enabled', 'false'
+    exclude '**/GemmCudaParityTest.class'
+    exclude '**/GemmLargeParityTest.class'
+    testLogging {
+        showStandardStreams = true
+    }
+}
+
+tasks.register('gemmCudaTest', Test) {
+    group = 'verification'
+    description = 'Run optional CUDA GEMM parity tests'
+    include '**/GemmCudaParityTest.class'
     systemProperty 'faulj.cuda.enabled', 'true'
+    testLogging {
+        showStandardStreams = true
+    }
+}
+
+tasks.register('gemmSlowTest', Test) {
+    group = 'verification'
+    description = 'Run slow GEMM parity tests when -Dfaulj.gemm.slow=true is set'
+    include '**/GemmLargeParityTest.class'
+    systemProperty 'faulj.cuda.enabled', 'false'
+    systemProperty 'faulj.gemm.slow', System.getProperty('faulj.gemm.slow', 'false')
+    onlyIf {
+        System.getProperty('faulj.gemm.slow', 'false').toBoolean()
+    }
     testLogging {
         showStandardStreams = true
     }
