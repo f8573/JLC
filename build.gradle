@@ -172,3 +172,17 @@ tasks.register('runDiagnostic', JavaExec) {
     main = 'net.faulj.benchmark.Diagnostic512'
     standardInput = System.in
 }
+
+tasks.register('runGemmBackendComparison', JavaExec) {
+    group = 'benchmark'
+    description = 'Run net.faulj.compute.GemmBackendComparison from test classes'
+    classpath = sourceSets.test.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    main = 'net.faulj.compute.GemmBackendComparison'
+    systemProperties System.properties.findAll { key, value ->
+        key.toString().startsWith('gemm.')
+    }
+    standardInput = System.in
+}
