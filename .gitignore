@@ -37,6 +37,10 @@ rerun_*.out
 *.class
 *.exe
 
+# Legacy benchmark outputs
+/Algorithm_FLOP_results
+/comprehensive_performance_results.csv
+
 # OS junk
 .DS_Store
 Thumbs.db
