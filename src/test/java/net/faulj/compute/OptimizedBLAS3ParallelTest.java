@@ -109,6 +109,34 @@ public class OptimizedBLAS3ParallelTest {
     }
 
     @Test
+    public void parallelDispatchReducedToOneThreadAppliesBetaOnce() {
+        int m = 256;
+        int k = 512;
+        int n = 64;
+        double alpha = -0.75;
+        double beta = 0.5;
+        GemmDispatch.BlockSizes blocks = GemmDispatch.computeBlockSizes();
+        assertEquals(GemmDispatch.Kernel.PARALLEL_MICRO, GemmDispatch.selectKernel(m, n, k, false, 2));
+        assertEquals(1, GemmDispatch.optimalParallelism(m, n, k, 2, blocks));
+
+        Matrix a = GemmReference.seededMatrix(m, k, 8_001L);
+        Matrix b = GemmReference.seededMatrix(k, n, 8_002L);
+        Matrix initialC = GemmReference.seededMatrix(m, n, 8_003L);
+        double[] expected = GemmReference.gemm(
+            a.getRawData(), b.getRawData(), initialC.getRawData(), m, k, n, alpha, beta
+        );
+        Matrix actual = Matrix.wrap(initialC.getRawData().clone(), m, n);
+
+        OptimizedBLAS3.gemm(a, b, actual, alpha, beta, TWO_THREAD_POLICY);
+
+        GemmReference.assertParity(
+            "OptimizedBLAS3 effective-single-thread GEMM", m, k, n,
+            alpha, beta, 8_000L, expected, actual.getRawData(),
+            1e-12, GemmReference.cpuAbsTolerance(expected, k)
+        );
+    }
+
+    @Test
     public void taskFailurePropagatesWithoutSequentialRetryOrSecondBetaApplication() {
         Matrix a = new Matrix(PARALLEL_M, PARALLEL_K);
         Matrix b = new Matrix(PARALLEL_K, PARALLEL_N);
