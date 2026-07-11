@@ -79,7 +79,9 @@ public class Pseudoinverse {
 		if (!A.isReal()) {
 			throw new UnsupportedOperationException("Pseudoinverse requires a real-valued matrix");
 		}
-		SVDecomposition svd = new SVDecomposition();
+		// Golub-Kahan's relative deflation handles exact and numerical rank
+		// deficiency before reciprocating the singular values.
+		SVDecomposition svd = new SVDecomposition(SVDAlgorithm.GOLUB_KAHAN_QR);
 		net.faulj.decomposition.result.SVDResult result = svd.decompose(A);
 		double tol = defaultTolerance(result.getSingularValues(), A.getRowCount(), A.getColumnCount());
 		return computeFromSvd(result, tol);
@@ -102,7 +104,7 @@ public class Pseudoinverse {
 		if (!A.isReal()) {
 			throw new UnsupportedOperationException("Pseudoinverse requires a real-valued matrix");
 		}
-		SVDecomposition svd = new SVDecomposition();
+		SVDecomposition svd = new SVDecomposition(SVDAlgorithm.GOLUB_KAHAN_QR);
 		net.faulj.decomposition.result.SVDResult result = svd.decompose(A);
 		return computeFromSvd(result, tolerance);
 	}
