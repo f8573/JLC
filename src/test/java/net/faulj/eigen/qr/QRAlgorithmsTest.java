@@ -10,6 +10,7 @@ import org.junit.Test;
 
 import net.faulj.decomposition.result.SchurResult;
 import net.faulj.matrix.Matrix;
+import net.faulj.matrix.MatrixUtils;
 
 public class QRAlgorithmsTest {
 
@@ -52,6 +53,26 @@ public class QRAlgorithmsTest {
                 assertEquals("Hessenberg fill-in at (" + i + "," + j + ")", 0.0, H.get(i, j), 1e-8);
             }
         }
+    }
+
+    @Test
+    public void testBulgeChasingPreservesOrthogonalSimilarity() {
+        int n = 8;
+        Matrix original = randomHessenberg(n, 12345L);
+        Matrix H = original.copy();
+        Matrix Q = Matrix.Identity(n);
+
+        double[] shifts = MultiShiftQR.generateShifts(H, 0, n - 1, 2);
+        BulgeChasing.performSweep(H, Q, 0, n - 1, shifts);
+
+        double orthogonalityError = MatrixUtils.orthogonalityError(Q);
+        assertTrue("Bulge-chasing transform must be orthogonal, error=" + orthogonalityError,
+                orthogonalityError < TOL);
+
+        Matrix reconstructed = Q.multiply(H).multiply(Q.transpose());
+        double reconstructionError = MatrixUtils.relativeError(original, reconstructed);
+        assertTrue("Bulge chase must preserve orthogonal similarity, error=" + reconstructionError,
+                reconstructionError < TOL);
     }
 
     @Test
