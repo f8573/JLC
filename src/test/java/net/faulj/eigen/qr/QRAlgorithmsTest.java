@@ -76,6 +76,23 @@ public class QRAlgorithmsTest {
     }
 
     @Test
+    public void testImplicitFrancisTriangularizesReal2x2Block() {
+        Matrix A = new Matrix(new double[][]{
+                {1.0, 2.0},
+                {3.0, 4.0}
+        });
+
+        SchurResult result = ImplicitQRFrancis.decompose(A);
+        Matrix T = result.getT();
+
+        assertEquals("Real 2x2 Schur block must be upper triangular",
+                0.0, T.get(1, 0), TOL);
+        Matrix reconstructed = result.getU().multiply(T).multiply(result.getU().transpose());
+        assertTrue("Real 2x2 Schur reduction must preserve similarity",
+                MatrixUtils.relativeError(A, reconstructed) < TOL);
+    }
+
+    @Test
     public void testAEDDeflationOnTinySpike() {
         int n = 6;
         double[][] a = new double[n][n];
