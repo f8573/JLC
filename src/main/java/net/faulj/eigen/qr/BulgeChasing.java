@@ -51,7 +51,7 @@ public class BulgeChasing {
             if (m - l + 1 < 3) {
                 // Not enough space for 3x3 bulge, use 2x2
                 if (m - l + 1 == 2) {
-                    performDoubleShift2x2(h, n, q, qn, l, m, s1, s2);
+                    performDoubleShift2x2(h, n, q, qn, l, m);
                 }
                 continue;
             }
@@ -148,7 +148,7 @@ public class BulgeChasing {
     /**
      * Specialized 2x2 double-shift for small blocks (LAPACK dlaqr6 approach).
      */
-    private static void performDoubleShift2x2(double[] h, int n, double[] q, int qn, int l, int m, double s1, double s2) {
+    private static void performDoubleShift2x2(double[] h, int n, double[] q, int qn, int l, int m) {
         if (m - l != 1) return;
 
         double a11 = h[l * n + l];
@@ -156,16 +156,66 @@ public class BulgeChasing {
         double a21 = h[m * n + l];
         double a22 = h[m * n + m];
 
-        double tr = a11 + a22;
-        double det = a11 * a22 - a12 * a21;
-        double shift_tr = s1 + s2;
-        double shift_det = s1 * s2;
+        double scale = Math.max(Math.max(Math.abs(a11), Math.abs(a12)),
+                Math.max(Math.abs(a21), Math.abs(a22)));
+        if (scale == 0.0) {
+            h[m * n + l] = 0.0;
+            return;
+        }
 
-        // Apply implicit shift directly to 2x2 block
-        double scale = Math.abs(a11) + Math.abs(a12) + Math.abs(a21) + Math.abs(a22);
-        if (scale > 0) {
-            // Small perturbation to break symmetry if needed
-            h[l * n + l] = a11 + EPSILON * scale * (shift_tr - tr);
+        double as = a11 / scale;
+        double bs = a12 / scale;
+        double cs = a21 / scale;
+        double ds = a22 / scale;
+        double discriminant = (as - ds) * (as - ds) + 4.0 * bs * cs;
+        double root = Math.sqrt(Math.max(0.0, discriminant));
+        double lambda1 = 0.5 * (as + ds + root);
+        double lambda2 = 0.5 * (as + ds - root);
+        double lambdaScaled = Math.abs(lambda1 - ds) <= Math.abs(lambda2 - ds)
+                ? lambda1 : lambda2;
+
+        // A real eigenvector supplies the first Schur vector. Use the better-scaled
+        // of the two equivalent null-space constructions for A - lambda I.
+        double v0a = -bs;
+        double v1a = as - lambdaScaled;
+        double v0b = ds - lambdaScaled;
+        double v1b = -cs;
+        double normA = Math.hypot(v0a, v1a);
+        double normB = Math.hypot(v0b, v1b);
+        double v0 = normA >= normB ? v0a : v0b;
+        double v1 = normA >= normB ? v1a : v1b;
+        double norm = Math.hypot(v0, v1);
+        if (norm == 0.0) {
+            return;
+        }
+
+        double cosine = v0 / norm;
+        double sine = v1 / norm;
+
+        // H <- G^T H G, where the first column of G is the eigenvector.
+        for (int j = 0; j < n; j++) {
+            double x = h[l * n + j];
+            double y = h[m * n + j];
+            h[l * n + j] = cosine * x + sine * y;
+            h[m * n + j] = -sine * x + cosine * y;
+        }
+        for (int i = 0; i < n; i++) {
+            int row = i * n;
+            double x = h[row + l];
+            double y = h[row + m];
+            h[row + l] = cosine * x + sine * y;
+            h[row + m] = -sine * x + cosine * y;
+        }
+        h[m * n + l] = 0.0;
+
+        if (q != null) {
+            for (int i = 0; i < qn; i++) {
+                int row = i * qn;
+                double x = q[row + l];
+                double y = q[row + m];
+                q[row + l] = cosine * x + sine * y;
+                q[row + m] = -sine * x + cosine * y;
+            }
         }
     }
 
