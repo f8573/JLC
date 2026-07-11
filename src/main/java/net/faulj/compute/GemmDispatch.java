@@ -20,6 +20,7 @@ import jdk.incubator.vector.VectorSpecies;
  */
 public final class GemmDispatch {
     private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
+    private static final int MAX_PARALLELISM = Math.max(1, Runtime.getRuntime().availableProcessors());
 
     // Cache size estimates (bytes)
     private static final int L1_CACHE = 32 * 1024;      // 32 KB typical L1D
@@ -181,7 +182,8 @@ public final class GemmDispatch {
      * Determine optimal parallelism level based on problem size and threads.
      */
     public static int optimalParallelism(int m, int n, int k, int maxThreads, BlockSizes blocks) {
-        if (maxThreads <= 1) {
+        int boundedMaxThreads = boundedParallelism(maxThreads);
+        if (boundedMaxThreads <= 1) {
             return 1;
         }
 
@@ -203,8 +205,12 @@ public final class GemmDispatch {
         maxUsefulThreads = Math.min(maxUsefulThreads, totalTiles);
 
         // Use power-of-2 threads for better load balance
-        int threads = Math.min(maxThreads, maxUsefulThreads);
+        int threads = Math.min(boundedMaxThreads, maxUsefulThreads);
         return Math.max(1, Integer.highestOneBit(threads));
+    }
+
+    static int boundedParallelism(int requestedParallelism) {
+        return Math.max(1, Math.min(requestedParallelism, MAX_PARALLELISM));
     }
 
     /**

@@ -8,6 +8,7 @@ import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
 import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.concurrent.RecursiveAction;
+import java.util.concurrent.TimeUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -34,11 +35,11 @@ public final class OptimizedBLAS3 {
     // Shared pools for parallel GEMM - avoids expensive pool creation per call
     private static final ConcurrentHashMap<Integer, ForkJoinPool> SHARED_POOLS = new ConcurrentHashMap<>();
     private static final AtomicInteger GEMM_WORKER_SEQUENCE = new AtomicInteger();
-    private static final ParallelTaskObserver NO_OP_TASK_OBSERVER = new ParallelTaskObserver() {};
-    private static volatile ParallelTaskObserver parallelTaskObserver = NO_OP_TASK_OBSERVER;
+    private static volatile ParallelTaskObserver parallelTaskObserver;
 
     private static ForkJoinPool getSharedPool(int threads) {
-        int parallelism = Math.max(1, threads);
+        int boundedParallelism = GemmDispatch.boundedParallelism(threads);
+        int parallelism = Math.max(1, Integer.highestOneBit(boundedParallelism));
         return SHARED_POOLS.computeIfAbsent(parallelism, OptimizedBLAS3::createGemmPool);
     }
 
@@ -46,6 +47,7 @@ public final class OptimizedBLAS3 {
         ForkJoinPool.ForkJoinWorkerThreadFactory workerFactory = pool -> {
             ForkJoinWorkerThread worker = ForkJoinPool.defaultForkJoinWorkerThreadFactory.newThread(pool);
             worker.setName("jlc-gemm-worker-p" + parallelism + "-" + GEMM_WORKER_SEQUENCE.incrementAndGet());
+            worker.setDaemon(true);
             return worker;
         };
         return new ForkJoinPool(parallelism, workerFactory, null, false);
@@ -58,7 +60,28 @@ public final class OptimizedBLAS3 {
     }
 
     static void setParallelTaskObserverForTesting(ParallelTaskObserver observer) {
-        parallelTaskObserver = observer == null ? NO_OP_TASK_OBSERVER : observer;
+        parallelTaskObserver = observer;
+    }
+
+    static void resetParallelStateForTesting() {
+        parallelTaskObserver = null;
+        List<ForkJoinPool> pools = new ArrayList<>(SHARED_POOLS.values());
+        SHARED_POOLS.clear();
+        pools.forEach(ForkJoinPool::shutdownNow);
+        for (ForkJoinPool pool : pools) {
+            try {
+                if (!pool.awaitTermination(10, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("GEMM test pool did not terminate");
+                }
+            } catch (InterruptedException failure) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("Interrupted while terminating GEMM test pool", failure);
+            }
+        }
+    }
+
+    static int sharedPoolCountForTesting() {
+        return SHARED_POOLS.size();
     }
 
     private OptimizedBLAS3() {}
@@ -337,7 +360,9 @@ public final class OptimizedBLAS3 {
                 tasks.add(new RecursiveAction() {
                     @Override
                     protected void compute() {
-                        taskObserver.beforeTask(blockRow, blockCol);
+                        if (taskObserver != null) {
+                            taskObserver.beforeTask(blockRow, blockCol);
+                        }
                         int ii = blockRow * blocks.mc;
                         int jj = blockCol * blocks.nc;
                         int rowEnd = Math.min(ii + blocks.mc, m);
@@ -348,7 +373,9 @@ public final class OptimizedBLAS3 {
                         computeTile(a, lda, b, ldb, c, ldc, k,
                                   ii, rowEnd, jj, colEnd,
                                   alpha, blocks, localWs);
-                        taskObserver.afterTask(blockRow, blockCol);
+                        if (taskObserver != null) {
+                            taskObserver.afterTask(blockRow, blockCol);
+                        }
                     }
                 });
             }

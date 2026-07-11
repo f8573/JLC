@@ -1,12 +1,13 @@
 package net.faulj.compute;
 
 import net.faulj.matrix.Matrix;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.BrokenBarrierException;
 import java.util.concurrent.ConcurrentHashMap;
@@ -15,6 +16,7 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -39,8 +41,18 @@ public class OptimizedBLAS3ParallelTest {
         .parallelism(2)
         .build();
 
+    @Before
+    public void resetParallelStateBeforeTest() {
+        OptimizedBLAS3.resetParallelStateForTesting();
+    }
+
+    @After
+    public void resetParallelStateAfterTest() {
+        OptimizedBLAS3.resetParallelStateForTesting();
+    }
+
     @Test
-    public void actualGemmTilesExecuteInConfiguredPool() throws Exception {
+    public void actualGemmTilesExecuteInConfiguredPool() {
         GemmDispatch.BlockSizes blocks = GemmDispatch.computeBlockSizes();
         assertEquals(2, GemmDispatch.optimalParallelism(PARALLEL_M, PARALLEL_N, PARALLEL_K, 2, blocks));
 
@@ -48,24 +60,22 @@ public class OptimizedBLAS3ParallelTest {
         Matrix b = GemmReference.seededMatrix(PARALLEL_K, PARALLEL_N, 102L);
         Matrix c = new Matrix(PARALLEL_M, PARALLEL_N);
         Set<String> executingThreads = Collections.synchronizedSet(new HashSet<>());
-        ExecutorService caller = Executors.newSingleThreadExecutor(runnable -> {
-            Thread thread = new Thread(runnable, "gemm-test-caller");
-            thread.setDaemon(true);
-            return thread;
+        AtomicBoolean allWorkersDaemon = new AtomicBoolean(true);
+        OptimizedBLAS3.setParallelTaskObserverForTesting(new OptimizedBLAS3.ParallelTaskObserver() {
+            @Override
+            public void afterTask(int blockRow, int blockCol) {
+                executingThreads.add(Thread.currentThread().getName());
+                allWorkersDaemon.compareAndSet(true, Thread.currentThread().isDaemon());
+            }
         });
 
         try {
-            Future<?> gemm = caller.submit(() ->
-                OptimizedBLAS3.gemm(a, b, c, 1.0, 0.0, TWO_THREAD_POLICY)
-            );
-            captureComputeTileThreadsUntilDone(gemm, executingThreads);
-            awaitSuccessful(gemm);
+            OptimizedBLAS3.gemm(a, b, c, 1.0, 0.0, TWO_THREAD_POLICY);
         } finally {
-            caller.shutdownNow();
-            assertTrue("GEMM caller did not terminate", caller.awaitTermination(10, TimeUnit.SECONDS));
+            OptimizedBLAS3.setParallelTaskObserverForTesting(null);
         }
 
-        assertFalse("No thread executing an actual GEMM tile was observed", executingThreads.isEmpty());
+        assertFalse("No completed real GEMM tile was observed", executingThreads.isEmpty());
         assertTrue(
             "Expected only configured GEMM workers but observed " + executingThreads,
             executingThreads.stream().allMatch(name -> name.startsWith(GEMM_WORKER_PREFIX))
@@ -74,16 +84,23 @@ public class OptimizedBLAS3ParallelTest {
             "Common-pool worker executed a GEMM tile: " + executingThreads,
             executingThreads.stream().noneMatch(name -> name.startsWith("ForkJoinPool.commonPool-worker-"))
         );
+        assertTrue("Cached GEMM workers must be daemon threads", allWorkersDaemon.get());
     }
 
     @Test
     public void parallelPolicyMatchesReferenceAcrossSizesAlphaAndBeta() {
-        int[] sizes = {64, 127, 512};
+        int[] sizes = {64, 137, 512};
         double[] alphas = {1.0, -0.75};
         double[] betas = {0.0, 1.0, 0.5};
         long seed = 7_000L;
+        GemmDispatch.BlockSizes blocks = GemmDispatch.computeBlockSizes();
 
         for (int size : sizes) {
+            if (size >= 137) {
+                assertEquals(GemmDispatch.Kernel.PARALLEL_MICRO,
+                    GemmDispatch.selectKernel(size, size, size, false, 2));
+                assertEquals(2, GemmDispatch.optimalParallelism(size, size, size, 2, blocks));
+            }
             for (double alpha : alphas) {
                 for (double beta : betas) {
                     Matrix a = GemmReference.seededMatrix(size, size, seed + 1);
@@ -140,6 +157,8 @@ public class OptimizedBLAS3ParallelTest {
     public void taskFailurePropagatesWithoutSequentialRetryOrSecondBetaApplication() {
         Matrix a = new Matrix(PARALLEL_M, PARALLEL_K);
         Matrix b = new Matrix(PARALLEL_K, PARALLEL_N);
+        Arrays.fill(a.getRawData(), 1.0);
+        Arrays.fill(b.getRawData(), 1.0);
         double[] initial = new double[PARALLEL_M * PARALLEL_N];
         Arrays.fill(initial, 8.0);
         Matrix c = Matrix.wrap(initial, PARALLEL_M, PARALLEL_N);
@@ -148,7 +167,7 @@ public class OptimizedBLAS3ParallelTest {
         OptimizedBLAS3.setParallelTaskObserverForTesting(new OptimizedBLAS3.ParallelTaskObserver() {
             @Override
             public void afterTask(int blockRow, int blockCol) {
-                if (injected.compareAndSet(false, true)) {
+                if (blockRow == 0 && blockCol == 0 && injected.compareAndSet(false, true)) {
                     throw injectedFailure;
                 }
             }
@@ -165,15 +184,17 @@ public class OptimizedBLAS3ParallelTest {
         }
 
         assertTrue("Failure was not injected after parallel work completed", injected.get());
-        for (double value : c.getRawData()) {
-            assertEquals("beta must be applied once and no sequential retry may run", 4.0, value, 0.0);
-        }
+        assertEquals(
+            "Completed tile must contain one beta scaling and one alpha*A*B contribution",
+            4.0 + PARALLEL_K, c.getRawData()[0], 0.0
+        );
     }
 
     @Test
     public void interruptedWaitRestoresFlagAndPropagatesCause() throws Exception {
         CountDownLatch workerEnteredTask = new CountDownLatch(1);
         CountDownLatch releaseWorkers = new CountDownLatch(1);
+        CountDownLatch completedTasks = new CountDownLatch(parallelTaskCount());
         AtomicReference<Throwable> observedFailure = new AtomicReference<>();
         AtomicBoolean interruptFlagObserved = new AtomicBoolean();
         OptimizedBLAS3.setParallelTaskObserverForTesting(new OptimizedBLAS3.ParallelTaskObserver() {
@@ -188,6 +209,11 @@ public class OptimizedBLAS3ParallelTest {
                     Thread.currentThread().interrupt();
                     throw new RuntimeException(failure);
                 }
+            }
+
+            @Override
+            public void afterTask(int blockRow, int blockCol) {
+                completedTasks.countDown();
             }
         });
 
@@ -219,10 +245,111 @@ public class OptimizedBLAS3ParallelTest {
             assertTrue("Caller interrupt flag was not restored", interruptFlagObserved.get());
         } finally {
             releaseWorkers.countDown();
+            assertTrue("Interrupted GEMM tasks did not drain", completedTasks.await(10, TimeUnit.SECONDS));
             OptimizedBLAS3.setParallelTaskObserverForTesting(null);
             caller.interrupt();
             caller.join(TimeUnit.SECONDS.toMillis(10));
         }
+    }
+
+    @Test
+    public void excessiveRequestedParallelismIsBoundedByAvailableProcessors() {
+        assertEquals(
+            Math.max(1, Runtime.getRuntime().availableProcessors()),
+            GemmDispatch.boundedParallelism(Integer.MAX_VALUE)
+        );
+
+        GemmDispatch.BlockSizes blocks = GemmDispatch.computeBlockSizes();
+        int maxParallelism = GemmDispatch.boundedParallelism(Integer.MAX_VALUE);
+        int actual = GemmDispatch.optimalParallelism(
+            blocks.mc * Math.max(2, maxParallelism), blocks.nc * 2, blocks.kc,
+            Integer.MAX_VALUE, blocks
+        );
+
+        assertTrue("Effective parallelism exceeded the processor bound", actual <= maxParallelism);
+        assertEquals("Effective parallelism must remain a power of two", actual, Integer.highestOneBit(actual));
+    }
+
+    @Test
+    public void concurrentSameSizeCallsCreateAndUseOnlyOnePool() throws Exception {
+        int callers = 8;
+        Set<String> workers = ConcurrentHashMap.newKeySet();
+        CyclicBarrier startTogether = new CyclicBarrier(callers);
+        CyclicBarrier bothPoolWorkersActive = new CyclicBarrier(2);
+        ExecutorService executor = Executors.newFixedThreadPool(callers, runnable -> {
+            Thread thread = new Thread(runnable, "gemm-concurrent-caller");
+            thread.setDaemon(true);
+            return thread;
+        });
+        OptimizedBLAS3.setParallelTaskObserverForTesting(new OptimizedBLAS3.ParallelTaskObserver() {
+            @Override
+            public void beforeTask(int blockRow, int blockCol) {
+                workers.add(Thread.currentThread().getName());
+                awaitBarrier(bothPoolWorkersActive);
+            }
+        });
+
+        try {
+            Matrix a = new Matrix(PARALLEL_M, PARALLEL_K);
+            Matrix b = new Matrix(PARALLEL_K, PARALLEL_N);
+            Set<Future<?>> calls = new HashSet<>();
+            for (int i = 0; i < callers; i++) {
+                calls.add(executor.submit(() -> {
+                    awaitBarrier(startTogether);
+                    OptimizedBLAS3.gemm(
+                        a, b, new Matrix(PARALLEL_M, PARALLEL_N),
+                        1.0, 0.0, TWO_THREAD_POLICY
+                    );
+                }));
+            }
+            for (Future<?> call : calls) {
+                awaitSuccessful(call);
+            }
+        } finally {
+            OptimizedBLAS3.setParallelTaskObserverForTesting(null);
+            executor.shutdownNow();
+            assertTrue("Concurrent GEMM callers did not terminate", executor.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        assertEquals("Concurrent same-key lookup must retain one pool", 1, OptimizedBLAS3.sharedPoolCountForTesting());
+        assertEquals("A two-thread pool must use exactly two workers", 2, workers.size());
+        assertTrue(workers.toString(),
+            workers.stream().allMatch(name -> name.startsWith(GEMM_WORKER_PREFIX + "p2-")));
+    }
+
+    @Test
+    public void gemmInvokedFromForkJoinWorkerCompletesInJlcPool() throws Exception {
+        Set<String> gemmWorkers = ConcurrentHashMap.newKeySet();
+        AtomicReference<String> invokingWorker = new AtomicReference<>();
+        ForkJoinPool invokingPool = new ForkJoinPool(1);
+        OptimizedBLAS3.setParallelTaskObserverForTesting(new OptimizedBLAS3.ParallelTaskObserver() {
+            @Override
+            public void afterTask(int blockRow, int blockCol) {
+                gemmWorkers.add(Thread.currentThread().getName());
+            }
+        });
+
+        try {
+            invokingPool.submit(() -> {
+                invokingWorker.set(Thread.currentThread().getName());
+                OptimizedBLAS3.gemm(
+                    new Matrix(PARALLEL_M, PARALLEL_K),
+                    new Matrix(PARALLEL_K, PARALLEL_N),
+                    new Matrix(PARALLEL_M, PARALLEL_N),
+                    1.0, 0.0, TWO_THREAD_POLICY
+                );
+            }).get(30, TimeUnit.SECONDS);
+        } finally {
+            OptimizedBLAS3.setParallelTaskObserverForTesting(null);
+            invokingPool.shutdownNow();
+            assertTrue("Invoking ForkJoinPool did not terminate", invokingPool.awaitTermination(10, TimeUnit.SECONDS));
+        }
+
+        assertNotNull(invokingWorker.get());
+        assertFalse("No completed real GEMM tile was observed", gemmWorkers.isEmpty());
+        assertTrue("Nested GEMM escaped the JLC pool: " + gemmWorkers,
+            gemmWorkers.stream().allMatch(name -> name.startsWith(GEMM_WORKER_PREFIX)));
+        assertFalse("Invoking worker executed a GEMM tile", gemmWorkers.contains(invokingWorker.get()));
     }
 
     @Test
@@ -247,23 +374,6 @@ public class OptimizedBLAS3ParallelTest {
                 && fourThreadWorkers.stream().noneMatch(name -> name.contains("commonPool")));
     }
 
-    private static void captureComputeTileThreadsUntilDone(Future<?> gemm, Set<String> executingThreads)
-            throws InterruptedException {
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
-        while (!gemm.isDone() && System.nanoTime() < deadline) {
-            for (Map.Entry<Thread, StackTraceElement[]> entry : Thread.getAllStackTraces().entrySet()) {
-                for (StackTraceElement frame : entry.getValue()) {
-                    if (frame.getClassName().equals(OptimizedBLAS3.class.getName())
-                            && frame.getMethodName().equals("computeTile")) {
-                        executingThreads.add(entry.getKey().getName());
-                        break;
-                    }
-                }
-            }
-            Thread.sleep(1L);
-        }
-    }
-
     private static void awaitSuccessful(Future<?> gemm) throws Exception {
         try {
             gemm.get(30, TimeUnit.SECONDS);
@@ -273,6 +383,24 @@ public class OptimizedBLAS3ParallelTest {
                 throw exception;
             }
             throw failure;
+        }
+    }
+
+    private static int parallelTaskCount() {
+        GemmDispatch.BlockSizes blocks = GemmDispatch.computeBlockSizes();
+        int blockRows = (PARALLEL_M + blocks.mc - 1) / blocks.mc;
+        int blockCols = (PARALLEL_N + blocks.nc - 1) / blocks.nc;
+        return blockRows * blockCols;
+    }
+
+    private static void awaitBarrier(CyclicBarrier barrier) {
+        try {
+            barrier.await(10, TimeUnit.SECONDS);
+        } catch (InterruptedException failure) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(failure);
+        } catch (BrokenBarrierException | TimeoutException failure) {
+            throw new RuntimeException(failure);
         }
     }
 
