@@ -6,10 +6,13 @@ import net.faulj.matrix.OffHeapMatrix;
 
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
+import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.concurrent.RecursiveAction;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Refactored BLAS Level-3 kernels with unified dispatch and optimal kernel selection.
@@ -28,27 +31,34 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 public final class OptimizedBLAS3 {
 
-    // Shared pool for parallel GEMM - avoids expensive pool creation per call
-    private static final AtomicReference<ForkJoinPool> SHARED_POOL = new AtomicReference<>();
+    // Shared pools for parallel GEMM - avoids expensive pool creation per call
+    private static final ConcurrentHashMap<Integer, ForkJoinPool> SHARED_POOLS = new ConcurrentHashMap<>();
+    private static final AtomicInteger GEMM_WORKER_SEQUENCE = new AtomicInteger();
+    private static final ParallelTaskObserver NO_OP_TASK_OBSERVER = new ParallelTaskObserver() {};
+    private static volatile ParallelTaskObserver parallelTaskObserver = NO_OP_TASK_OBSERVER;
 
     private static ForkJoinPool getSharedPool(int threads) {
-        ForkJoinPool pool = SHARED_POOL.get();
-        // Create new pool if none exists or parallelism changed significantly
-        if (pool == null || pool.isShutdown() || pool.getParallelism() != threads) {
-            ForkJoinPool newPool = new ForkJoinPool(threads);
-            if (SHARED_POOL.compareAndSet(pool, newPool)) {
-                // Shut down old pool if we successfully replaced it
-                if (pool != null && !pool.isShutdown()) {
-                    pool.shutdown();
-                }
-                pool = newPool;
-            } else {
-                // Another thread beat us, shut down our new pool
-                newPool.shutdown();
-                pool = SHARED_POOL.get();
-            }
-        }
-        return pool;
+        int parallelism = Math.max(1, threads);
+        return SHARED_POOLS.computeIfAbsent(parallelism, OptimizedBLAS3::createGemmPool);
+    }
+
+    private static ForkJoinPool createGemmPool(int parallelism) {
+        ForkJoinPool.ForkJoinWorkerThreadFactory workerFactory = pool -> {
+            ForkJoinWorkerThread worker = ForkJoinPool.defaultForkJoinWorkerThreadFactory.newThread(pool);
+            worker.setName("jlc-gemm-worker-p" + parallelism + "-" + GEMM_WORKER_SEQUENCE.incrementAndGet());
+            return worker;
+        };
+        return new ForkJoinPool(parallelism, workerFactory, null, false);
+    }
+
+    interface ParallelTaskObserver {
+        default void beforeTask(int blockRow, int blockCol) {}
+
+        default void afterTask(int blockRow, int blockCol) {}
+    }
+
+    static void setParallelTaskObserverForTesting(ParallelTaskObserver observer) {
+        parallelTaskObserver = observer == null ? NO_OP_TASK_OBSERVER : observer;
     }
 
     private OptimizedBLAS3() {}
@@ -296,10 +306,8 @@ public final class OptimizedBLAS3 {
                                                double[] c, int ldc, int m, int k, int n,
                                                double alpha, double beta, int threads,
                                                GemmWorkspace ws) {
-        // Apply beta to C
-        PackingUtils.scaleCPanel(c, 0, m, n, ldc, beta);
-
         if (alpha == 0.0 || k == 0 || m == 0 || n == 0) {
+            PackingUtils.scaleCPanel(c, 0, m, n, ldc, beta);
             return;
         }
 
@@ -311,43 +319,51 @@ public final class OptimizedBLAS3 {
             return;
         }
 
+        // Apply beta exactly once before any task starts modifying C.
+        PackingUtils.scaleCPanel(c, 0, m, n, ldc, beta);
+
         int blockRows = (m + blocks.mc - 1) / blocks.mc;
         int blockCols = (n + blocks.nc - 1) / blocks.nc;
 
         ForkJoinPool pool = getSharedPool(actualThreads);
-        try {
-            List<RecursiveAction> tasks = new ArrayList<>();
+        ParallelTaskObserver taskObserver = parallelTaskObserver;
+        List<RecursiveAction> tasks = new ArrayList<>();
 
-            for (int br = 0; br < blockRows; br++) {
-                for (int bc = 0; bc < blockCols; bc++) {
-                    final int blockRow = br;
-                    final int blockCol = bc;
+        for (int br = 0; br < blockRows; br++) {
+            for (int bc = 0; bc < blockCols; bc++) {
+                final int blockRow = br;
+                final int blockCol = bc;
 
-                    tasks.add(new RecursiveAction() {
-                        @Override
-                        protected void compute() {
-                            int ii = blockRow * blocks.mc;
-                            int jj = blockCol * blocks.nc;
-                            int rowEnd = Math.min(ii + blocks.mc, m);
-                            int colEnd = Math.min(jj + blocks.nc, n);
+                tasks.add(new RecursiveAction() {
+                    @Override
+                    protected void compute() {
+                        taskObserver.beforeTask(blockRow, blockCol);
+                        int ii = blockRow * blocks.mc;
+                        int jj = blockCol * blocks.nc;
+                        int rowEnd = Math.min(ii + blocks.mc, m);
+                        int colEnd = Math.min(jj + blocks.nc, n);
 
-                            // Get thread-local workspace
-                            GemmWorkspace localWs = GemmWorkspace.get();
-                            computeTile(a, lda, b, ldb, c, ldc, k,
-                                      ii, rowEnd, jj, colEnd,
-                                      alpha, blocks, localWs);
-                        }
-                    });
-                }
+                        // Get thread-local workspace
+                        GemmWorkspace localWs = GemmWorkspace.get();
+                        computeTile(a, lda, b, ldb, c, ldc, k,
+                                  ii, rowEnd, jj, colEnd,
+                                  alpha, blocks, localWs);
+                        taskObserver.afterTask(blockRow, blockCol);
+                    }
+                });
             }
-
-            // Invoke all tasks
-            ForkJoinTask.invokeAll(tasks);
-        } catch (Exception e) {
-            // Fallback to sequential
-            gemmMicrokernel(a, lda, b, ldb, c, ldc, m, k, n, alpha, beta, ws);
         }
-        // Note: Do NOT shutdown the shared pool - it's reused across calls
+
+        try {
+            pool.submit(() -> ForkJoinTask.invokeAll(tasks)).get();
+        } catch (InterruptedException failure) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("parallel GEMM failed", failure);
+        } catch (ExecutionException failure) {
+            throw new RuntimeException("parallel GEMM failed", failure.getCause());
+        } catch (RuntimeException failure) {
+            throw new RuntimeException("parallel GEMM failed", failure);
+        }
     }
 
     /**
