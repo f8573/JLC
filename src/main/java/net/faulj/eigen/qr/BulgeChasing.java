@@ -91,21 +91,20 @@ public class BulgeChasing {
 
                 // LAPACK: implicit normalization via tau
                 double tau = 2.0 / (1.0 + v1 * v1 + v2 * v2);
-                v0 *= tau; v1 *= tau; v2 *= tau;
 
                 if (k + nr - 1 > m) break;
 
                 // Apply from left to H
                 int jstart = Math.max(0, k - 1);
-                applyReflectorLeftRaw(h, n, k, jstart, n - 1, v0, v1, v2);
+                applyReflectorLeftRaw(h, n, k, jstart, n - 1, v0, v1, v2, tau);
 
                 // Apply from right to H
                 int iend = Math.min(m + 1, k + 3);
-                applyReflectorRightRaw(h, n, k, iend, v0, v1, v2);
+                applyReflectorRightRaw(h, n, k, iend, v0, v1, v2, tau);
 
                 // Accumulate Q
                 if (q != null) {
-                    applyReflectorRightRaw(q, qn, k, qn - 1, v0, v1, v2);
+                    applyReflectorRightRaw(q, qn, k, qn - 1, v0, v1, v2, tau);
                 }
 
                 // Next bulge position
@@ -172,43 +171,38 @@ public class BulgeChasing {
 
     /**
      * Apply 3x3 Householder reflector from left using raw arrays.
-     * LAPACK: P * A where P = I - 2*v*v^T, optimized for cache.
+     * LAPACK: P * A where P = I - tau*v*v^T, optimized for cache.
      */
-    private static void applyReflectorLeftRaw(double[] a, int n, int row, int colStart, int colEnd, double v0, double v1, double v2) {
+    private static void applyReflectorLeftRaw(double[] a, int n, int row, int colStart, int colEnd,
+                                               double v0, double v1, double v2, double tau) {
         int r0 = row * n;
         int r1 = (row + 1) * n;
         int r2 = (row + 2) * n;
 
         int jEnd = Math.min(colEnd + 1, n);
-        double twoV0 = 2.0 * v0;
-        double twoV1 = 2.0 * v1;
-        double twoV2 = 2.0 * v2;
 
         // LAPACK: blocked update for cache efficiency
         for (int j = colStart; j < jEnd; j++) {
             double a0 = a[r0 + j];
             double a1 = a[r1 + j];
             double a2 = a[r2 + j];
-            double dot = v0 * a0 + v1 * a1 + v2 * a2;
-            a[r0 + j] = a0 - twoV0 * dot;
-            a[r1 + j] = a1 - twoV1 * dot;
-            a[r2 + j] = a2 - twoV2 * dot;
+            double scaledDot = tau * (v0 * a0 + v1 * a1 + v2 * a2);
+            a[r0 + j] = a0 - v0 * scaledDot;
+            a[r1 + j] = a1 - v1 * scaledDot;
+            a[r2 + j] = a2 - v2 * scaledDot;
         }
     }
 
     /**
      * Apply 3x3 Householder reflector from right using raw arrays.
-     * LAPACK: A * P where P = I - 2*v*v^T, optimized for row-major layout.
+     * LAPACK: A * P where P = I - tau*v*v^T, optimized for row-major layout.
      */
-    private static void applyReflectorRightRaw(double[] a, int n, int col, int rowEnd, double v0, double v1, double v2) {
+    private static void applyReflectorRightRaw(double[] a, int n, int col, int rowEnd,
+                                                double v0, double v1, double v2, double tau) {
         int iEnd = Math.min(rowEnd + 1, n);
         int c0 = col;
         int c1 = col + 1;
         int c2 = col + 2;
-
-        double twoV0 = 2.0 * v0;
-        double twoV1 = 2.0 * v1;
-        double twoV2 = 2.0 * v2;
 
         // LAPACK: vectorized update pattern
         for (int i = 0; i < iEnd; i++) {
@@ -216,10 +210,10 @@ public class BulgeChasing {
             double a0 = a[ri + c0];
             double a1 = a[ri + c1];
             double a2 = a[ri + c2];
-            double dot = v0 * a0 + v1 * a1 + v2 * a2;
-            a[ri + c0] = a0 - twoV0 * dot;
-            a[ri + c1] = a1 - twoV1 * dot;
-            a[ri + c2] = a2 - twoV2 * dot;
+            double scaledDot = tau * (v0 * a0 + v1 * a1 + v2 * a2);
+            a[ri + c0] = a0 - v0 * scaledDot;
+            a[ri + c1] = a1 - v1 * scaledDot;
+            a[ri + c2] = a2 - v2 * scaledDot;
         }
     }
 
