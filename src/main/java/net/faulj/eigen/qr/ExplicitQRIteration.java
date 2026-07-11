@@ -74,35 +74,162 @@ public class ExplicitQRIteration {
         Matrix Q = hessResult.getQ();
         
         int maxIterations = MAX_ITERATIONS * n;
+        int activeEnd = n - 1;
 
         for (int iter = 0; iter < maxIterations; iter++) {
             if (isConverged(T, EPSILON, symmetric)) {
                 break;
             }
 
-            double shift = computeWilkinsonShift(T);
-            Matrix shifted = T.copy();
-            for (int i = 0; i < n; i++) {
+            activeEnd = deflateConvergedTrailingBlocks(T, activeEnd, EPSILON);
+            if (activeEnd < 0) {
+                break;
+            }
+
+            int activeStart = findActiveBlockStart(T, activeEnd, EPSILON);
+            Matrix shifted = T.crop(activeStart, activeEnd, activeStart, activeEnd);
+            double shift = computeWilkinsonShift(T, activeEnd);
+            for (int i = 0; i < shifted.getRowCount(); i++) {
                 shifted.set(i, i, shifted.get(i, i) - shift);
             }
 
             QRResult qr = HouseholderQR.decompose(shifted);
             Matrix qStep = qr.getQ();
 
-            // Similarity update: T_{k+1} = Q^T T Q
-            T = qStep.transpose().multiply(T).multiply(qStep);
-
-            Q = Q.multiply(qStep);
+            applyBlockSimilarity(T, qStep, activeStart);
+            accumulateBlockTransform(Q, qStep, activeStart);
 
             // Deflate tiny subdiagonal elements to stabilize convergence.
-            for (int i = 1; i < n; i++) {
-                if (Math.abs(T.get(i, i - 1)) < EPSILON) {
+            for (int i = activeStart + 1; i <= activeEnd; i++) {
+                if (isNegligibleSubdiagonal(T, i, EPSILON)) {
                     T.set(i, i - 1, 0.0);
+                }
+            }
+
+            // A Hessenberg QR step has exact zeros below the first subdiagonal;
+            // remove only the roundoff fill-in created by the dense block update.
+            for (int i = activeStart + 2; i <= activeEnd; i++) {
+                for (int j = activeStart; j < i - 1; j++) {
+                    T.set(i, j, 0.0);
                 }
             }
         }
 
         return new Matrix[]{T, Q};
+    }
+
+    private static int deflateConvergedTrailingBlocks(Matrix T, int activeEnd, double tol) {
+        int m = activeEnd;
+        while (m >= 0) {
+            if (m == 0) {
+                return -1;
+            }
+            if (isNegligibleSubdiagonal(T, m, tol)) {
+                T.set(m, m - 1, 0.0);
+                m--;
+                continue;
+            }
+
+            int l = findActiveBlockStart(T, m, tol);
+            if (m - l == 1 && hasComplexEigenvalues(T, l)) {
+                return l - 1;
+            }
+            return m;
+        }
+        return -1;
+    }
+
+    private static int findActiveBlockStart(Matrix T, int activeEnd, double tol) {
+        int l = activeEnd;
+        while (l > 0) {
+            if (isNegligibleSubdiagonal(T, l, tol)) {
+                T.set(l, l - 1, 0.0);
+                break;
+            }
+            l--;
+        }
+        return l;
+    }
+
+    private static boolean isNegligibleSubdiagonal(Matrix T, int row, double tol) {
+        double scale = Math.abs(T.get(row - 1, row - 1)) + Math.abs(T.get(row, row));
+        return Math.abs(T.get(row, row - 1)) <= tol * Math.max(1.0, scale);
+    }
+
+    private static boolean hasComplexEigenvalues(Matrix T, int start) {
+        double a = T.get(start, start);
+        double b = T.get(start, start + 1);
+        double c = T.get(start + 1, start);
+        double d = T.get(start + 1, start + 1);
+        double scale = Math.max(Math.max(Math.abs(a), Math.abs(b)),
+                Math.max(Math.abs(c), Math.abs(d)));
+        if (scale == 0.0) {
+            return false;
+        }
+        a /= scale;
+        b /= scale;
+        c /= scale;
+        d /= scale;
+        return (a - d) * (a - d) + 4.0 * b * c < 0.0;
+    }
+
+    private static void applyBlockSimilarity(Matrix T, Matrix transform, int offset) {
+        int n = T.getRowCount();
+        int blockSize = transform.getRowCount();
+        double[] t = T.getRawData();
+        double[] q = transform.getRawData();
+        double[] work = new double[blockSize];
+
+        // T <- Q_block^T T
+        for (int col = 0; col < n; col++) {
+            for (int i = 0; i < blockSize; i++) {
+                double sum = 0.0;
+                for (int k = 0; k < blockSize; k++) {
+                    sum += q[k * blockSize + i] * t[(offset + k) * n + col];
+                }
+                work[i] = sum;
+            }
+            for (int i = 0; i < blockSize; i++) {
+                t[(offset + i) * n + col] = work[i];
+            }
+        }
+
+        // T <- T Q_block
+        for (int row = 0; row < n; row++) {
+            int rowOffset = row * n;
+            for (int j = 0; j < blockSize; j++) {
+                double sum = 0.0;
+                for (int k = 0; k < blockSize; k++) {
+                    sum += t[rowOffset + offset + k] * q[k * blockSize + j];
+                }
+                work[j] = sum;
+            }
+            for (int j = 0; j < blockSize; j++) {
+                t[rowOffset + offset + j] = work[j];
+            }
+        }
+    }
+
+    private static void accumulateBlockTransform(Matrix Q, Matrix transform, int offset) {
+        int n = Q.getRowCount();
+        int blockSize = transform.getRowCount();
+        double[] accumulated = Q.getRawData();
+        double[] q = transform.getRawData();
+        double[] work = new double[blockSize];
+
+        for (int row = 0; row < n; row++) {
+            int rowOffset = row * n;
+            for (int j = 0; j < blockSize; j++) {
+                double sum = 0.0;
+                for (int k = 0; k < blockSize; k++) {
+                    sum += accumulated[rowOffset + offset + k] * q[k * blockSize + j];
+                }
+                work[j] = sum;
+            }
+            for (int j = 0; j < blockSize; j++) {
+                accumulated[rowOffset + offset + j] = work[j];
+            }
+        }
     }
 
     /**
@@ -185,14 +312,13 @@ public class ExplicitQRIteration {
      * @param T working matrix
      * @return shift value
      */
-    private static double computeWilkinsonShift(Matrix T) {
-        int n = T.getRowCount();
-        if (n < 2) {
+    private static double computeWilkinsonShift(Matrix T, int activeEnd) {
+        if (activeEnd < 1) {
             return T.get(0, 0);
         }
 
-        int i = n - 2;
-        int j = n - 1;
+        int i = activeEnd - 1;
+        int j = activeEnd;
         double a = T.get(i, i);
         double b = T.get(i, j);
         double c = T.get(j, i);
