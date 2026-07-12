@@ -135,6 +135,39 @@ public class SVDTests {
         assertAccurate(A, A.multiply(Aplus).multiply(A), "A*A+*A (rank-deficient)", cond);
     }
 
+    /**
+     * Protects both pseudoinverse overloads on an exactly rank-deficient
+     * rectangular matrix by checking all four Moore-Penrose identities.
+     */
+    @Test
+    public void testPseudoinverseRankDeficientMoorePenroseIdentities() {
+        Matrix A = new Matrix(new double[][]{
+                {1, 2},
+                {2, 4},
+                {3, 6}
+        });
+
+        Pseudoinverse pseudoinverse = new Pseudoinverse();
+        assertMoorePenroseIdentities(A, pseudoinverse.compute(A));
+        assertMoorePenroseIdentities(A, pseudoinverse.compute(A, 1e-12));
+    }
+
+    private static void assertMoorePenroseIdentities(Matrix A, Matrix Aplus) {
+        assertEquals(A.getColumnCount(), Aplus.getRowCount());
+        assertEquals(A.getRowCount(), Aplus.getColumnCount());
+
+        Matrix leftProjector = A.multiply(Aplus);
+        Matrix rightProjector = Aplus.multiply(A);
+        assertTrue(MatrixUtils.relativeError(A,
+                leftProjector.multiply(A)) < 1e-10);
+        assertTrue(MatrixUtils.relativeError(Aplus,
+                rightProjector.multiply(Aplus)) < 1e-10);
+        assertTrue(MatrixUtils.relativeError(leftProjector,
+                leftProjector.transpose()) < 1e-10);
+        assertTrue(MatrixUtils.relativeError(rightProjector,
+                rightProjector.transpose()) < 1e-10);
+    }
+
     // ========== Rank Estimation Tests ==========
 
     /**
