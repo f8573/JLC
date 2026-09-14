@@ -1,18 +1,41 @@
 #include "jlc_native.h"
+#include "gemm_internal.hpp"
+#include "gemm_packing.hpp"
+#include "gemm_panel.hpp"
+#include "gemm_test_hooks.hpp"
+#if defined(JLC_NATIVE_ENABLE_EXPERIMENTAL_GEMM)
+#include "gemm_experimental.hpp"
+#endif
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#if defined(JLC_NATIVE_TEST_POOL_FAULT_INJECTION)
+#include <climits>
+#endif
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <condition_variable>
+#include <fstream>
 #include <new>
 #include <mutex>
+#include <memory>
+#include <set>
+#include <stdexcept>
+#include <string>
 #include <thread>
+#include <utility>
 #include <vector>
+
+#if defined(__linux__)
+#include <pthread.h>
+#include <sched.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+#endif
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
 #include <malloc.h>
@@ -26,50 +49,10 @@
 #include <cblas.h>
 #endif
 
-namespace {
-constexpr int L1_CACHE = 32 * 1024;
-constexpr int L2_CACHE = 256 * 1024;
-constexpr int L3_CACHE = 8 * 1024 * 1024;
-constexpr long long PARALLEL_THRESHOLD_FLOPS = 5'000'000LL;
-using ProfileClock = std::chrono::steady_clock;
-
-struct BlockSizes {
-    int mc;
-    int kc;
-    int nc;
-    int mr;
-    int nr;
-};
-
-struct MatrixDescriptor {
-    const double* data;
-    double* mutable_data;
-    int offset;
-    int ld;
-    int rows;
-    int cols;
-    bool col_major;
-    bool transpose;
-};
-
-struct ProfileAccumulator {
-    std::uint64_t calls = 0;
-    std::uint64_t wall_ns = 0;
-    std::uint64_t vendor_calls = 0;
-    std::uint64_t vendor_ns = 0;
-    std::uint64_t scale_c_ns = 0;
-    std::uint64_t pack_a_ns = 0;
-    std::uint64_t pack_b_ns = 0;
-    std::uint64_t kernel_ns = 0;
-    std::uint64_t thread_launch_ns = 0;
-    std::uint64_t thread_join_ns = 0;
-    std::uint64_t pack_a_calls = 0;
-    std::uint64_t pack_b_calls = 0;
-    std::uint64_t microtile_calls = 0;
-    std::uint64_t pack_a_bytes = 0;
-    std::uint64_t pack_b_bytes = 0;
-};
-
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC visibility push(hidden)
+#endif
+namespace jlc_gemm {
 struct ProfileState {
     std::atomic<bool> enabled{false};
     std::atomic<std::uint64_t> calls{0};
@@ -155,30 +138,6 @@ void aligned_release(void* ptr) {
 #endif
 }
 
-inline std::uint64_t elapsed_ns(ProfileClock::time_point start) {
-    return static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(ProfileClock::now() - start).count()
-    );
-}
-
-struct ScopedProfileTimer {
-    std::uint64_t* target;
-    ProfileClock::time_point start;
-
-    ScopedProfileTimer(bool enabled, std::uint64_t& destination)
-        : target(enabled ? &destination : nullptr) {
-        if (target != nullptr) {
-            start = ProfileClock::now();
-        }
-    }
-
-    ~ScopedProfileTimer() {
-        if (target != nullptr) {
-            *target += elapsed_ns(start);
-        }
-    }
-};
-
 inline bool profiling_enabled() {
     return g_profile.enabled.load(std::memory_order_relaxed);
 }
@@ -207,7 +166,7 @@ void merge_profile(const ProfileAccumulator& profile) {
     add_profile(g_profile.pack_b_bytes, profile.pack_b_bytes);
 }
 
-void record_last_profile_metadata(int requested_threads, int actual_threads, int panel_count, const BlockSizes& blocks) {
+void record_last_profile_metadata(int requested_threads, int actual_threads, int panel_count, const ResolvedGemmPlan& blocks) {
     g_profile.last_requested_threads.store(static_cast<std::uint64_t>(requested_threads), std::memory_order_relaxed);
     g_profile.last_actual_threads.store(static_cast<std::uint64_t>(actual_threads), std::memory_order_relaxed);
     g_profile.last_panel_count.store(static_cast<std::uint64_t>(panel_count), std::memory_order_relaxed);
@@ -216,72 +175,6 @@ void record_last_profile_metadata(int requested_threads, int actual_threads, int
     g_profile.last_nc.store(static_cast<std::uint64_t>(blocks.nc), std::memory_order_relaxed);
     g_profile.last_mr.store(static_cast<std::uint64_t>(blocks.mr), std::memory_order_relaxed);
     g_profile.last_nr.store(static_cast<std::uint64_t>(blocks.nr), std::memory_order_relaxed);
-}
-
-inline int round_up(int value, int multiple) {
-    if (multiple <= 0) {
-        return value;
-    }
-    const int rem = value % multiple;
-    return rem == 0 ? value : value + multiple - rem;
-}
-
-int parse_env_positive_int(const char* name, int fallback) {
-    const char* value = std::getenv(name);
-    if (value == nullptr || *value == '\0') {
-        return fallback;
-    }
-    char* end = nullptr;
-    const long parsed = std::strtol(value, &end, 10);
-    if (end == value || parsed <= 0 || parsed > 1'000'000L) {
-        return fallback;
-    }
-    return static_cast<int>(parsed);
-}
-
-inline bool parse_env_bool(const char* name, bool fallback) {
-    const char* value = std::getenv(name);
-    if (value == nullptr || *value == '\0') {
-        return fallback;
-    }
-    if (value[0] == '0' || value[0] == 'f' || value[0] == 'F'
-        || value[0] == 'n' || value[0] == 'N') {
-        return false;
-    }
-    return value[0] == '1' || value[0] == 't' || value[0] == 'T'
-        || value[0] == 'y' || value[0] == 'Y';
-}
-
-inline bool small_k_update_gemm_enabled() {
-    return parse_env_bool("JLC_NATIVE_SMALL_K_UPDATE_GEMM", false);
-}
-
-inline int logical_rows(const MatrixDescriptor& desc) {
-    return desc.transpose ? desc.cols : desc.rows;
-}
-
-inline int logical_cols(const MatrixDescriptor& desc) {
-    return desc.transpose ? desc.rows : desc.cols;
-}
-
-inline const double* data_ptr(const MatrixDescriptor& desc) {
-    return desc.data + desc.offset;
-}
-
-inline double* mutable_data_ptr(const MatrixDescriptor& desc) {
-    return desc.mutable_data + desc.offset;
-}
-
-inline double load_element(const MatrixDescriptor& desc, int row, int col) {
-    const double* base = data_ptr(desc);
-    if (!desc.transpose) {
-        return desc.col_major
-            ? base[col * desc.ld + row]
-            : base[row * desc.ld + col];
-    }
-    return desc.col_major
-        ? base[row * desc.ld + col]
-        : base[col * desc.ld + row];
 }
 
 constexpr const char* provider_description() {
@@ -340,68 +233,6 @@ bool try_vendor_gemm(const MatrixDescriptor& a, const MatrixDescriptor& b, const
 #endif
 }
 
-BlockSizes compute_block_sizes(int m, int n, int k) {
-    int nr = 1;
-    int mr = 4;
-#if defined(__AVX512F__)
-    nr = 8;
-    mr = 6;
-#elif defined(__AVX2__)
-    nr = 4;
-    mr = 5;
-#endif
-
-    const int l1_constraint = std::max(64, L1_CACHE / (8 * mr * 2));
-    const int l2_constraint = static_cast<int>(std::sqrt(L2_CACHE / (8.0 * 2.0)));
-
-    int kc = round_up(std::min(l1_constraint, l2_constraint), 8);
-    kc = std::clamp(kc, 64, 512);
-
-    int nc = round_up((L2_CACHE / 2) / (kc * 8), nr);
-    nc = std::clamp(nc, nr * 4, 4096);
-
-    int mc = round_up(L3_CACHE / (8 * std::max(1, kc + nc)), mr);
-    mc = std::clamp(mc, mr * 4, 2048);
-
-#if defined(__AVX2__) && !defined(__AVX512F__)
-    const int max_dim = std::max(m, std::max(n, k));
-    if (max_dim >= 4096) {
-        kc = std::max(kc, 384);
-    } else if (max_dim >= 2048) {
-        kc = std::max(kc, 256);
-    }
-#endif
-
-    const int mr_override = parse_env_positive_int("JLC_NATIVE_MR", 0);
-    const int nr_override = parse_env_positive_int("JLC_NATIVE_NR", 0);
-    const int kc_override = parse_env_positive_int("JLC_NATIVE_KC", 0);
-    const int nc_override = parse_env_positive_int("JLC_NATIVE_NC", 0);
-    const int mc_override = parse_env_positive_int("JLC_NATIVE_MC", 0);
-
-    if (mr_override > 0) {
-        mr = mr_override;
-    }
-    if (nr_override > 0) {
-        nr = nr_override;
-    }
-    if (kc_override > 0) {
-        kc = round_up(kc_override, 4);
-    }
-    if (nc_override > 0) {
-        nc = round_up(nc_override, std::max(1, nr));
-    }
-    if (mc_override > 0) {
-        mc = round_up(mc_override, std::max(1, mr));
-    }
-    mr = std::clamp(mr, 1, 64);
-    nr = std::clamp(nr, 1, 64);
-    kc = std::clamp(kc, 8, 4096);
-    nc = std::clamp(nc, nr, 4096);
-    mc = std::clamp(mc, mr, 4096);
-
-    return BlockSizes{mc, kc, nc, mr, nr};
-}
-
 inline void scale_c(const MatrixDescriptor& c, int m, int n, double beta) {
     if (beta == 1.0) {
         return;
@@ -437,290 +268,6 @@ inline void scale_c(const MatrixDescriptor& c, int m, int n, double beta) {
     }
 }
 
-inline void pack_a(const MatrixDescriptor& a, int row_start, int rows,
-                   int col_start, int k_block, double alpha, double* a_pack) {
-    int dst = 0;
-    const double* base = data_ptr(a);
-    if (!a.transpose && !a.col_major) {
-        if (alpha == 1.0) {
-            for (int r = 0; r < rows; ++r) {
-                const int src = (row_start + r) * a.ld + col_start;
-                std::memcpy(a_pack + dst, base + src, sizeof(double) * static_cast<std::size_t>(k_block));
-                dst += k_block;
-            }
-        } else {
-            for (int r = 0; r < rows; ++r) {
-                const int src = (row_start + r) * a.ld + col_start;
-                for (int p = 0; p < k_block; ++p) {
-                    a_pack[dst++] = base[src + p] * alpha;
-                }
-            }
-        }
-        return;
-    }
-
-    for (int r = 0; r < rows; ++r) {
-        for (int p = 0; p < k_block; ++p) {
-            a_pack[dst++] = load_element(a, row_start + r, col_start + p) * alpha;
-        }
-    }
-}
-
-inline void pack_b(const MatrixDescriptor& b, int row_start, int k_block,
-                   int col_start, int cols, int packed_cols, double* b_pack) {
-    int dst = 0;
-    const double* base = data_ptr(b);
-    if (!b.transpose && !b.col_major) {
-        for (int p = 0; p < k_block; ++p) {
-            const int src = (row_start + p) * b.ld + col_start;
-            std::memcpy(b_pack + dst, base + src, sizeof(double) * static_cast<std::size_t>(cols));
-            if (packed_cols > cols) {
-                std::fill(b_pack + dst + cols, b_pack + dst + packed_cols, 0.0);
-            }
-            dst += packed_cols;
-        }
-        return;
-    }
-
-    for (int p = 0; p < k_block; ++p) {
-        for (int col = 0; col < cols; ++col) {
-            b_pack[dst + col] = load_element(b, row_start + p, col_start + col);
-        }
-        if (packed_cols > cols) {
-            std::fill(b_pack + dst + cols, b_pack + dst + packed_cols, 0.0);
-        }
-        dst += packed_cols;
-    }
-}
-
-inline void microkernel_scalar(int mr, int k_block, int n_block, int packed_n,
-                               const double* a_pack, const double* b_pack,
-                               double* c, int ldc) {
-    for (int r = 0; r < mr; ++r) {
-        const double* a_row = a_pack + r * k_block;
-        double* c_row = c + r * ldc;
-        for (int col = 0; col < n_block; ++col) {
-            double accum = 0.0;
-            for (int p = 0; p < k_block; ++p) {
-                accum += a_row[p] * b_pack[p * packed_n + col];
-            }
-            c_row[col] += accum;
-        }
-    }
-}
-
-#if defined(__AVX2__)
-inline void microkernel_5x4_avx2(int k_block, const double* a_pack,
-                                 const double* b_pack, int packed_n,
-                                 double* c, int ldc) {
-    __m256d c0 = _mm256_loadu_pd(c);
-    __m256d c1 = _mm256_loadu_pd(c + ldc);
-    __m256d c2 = _mm256_loadu_pd(c + 2 * ldc);
-    __m256d c3 = _mm256_loadu_pd(c + 3 * ldc);
-    __m256d c4 = _mm256_loadu_pd(c + 4 * ldc);
-
-    const int off1 = k_block;
-    const int off2 = 2 * k_block;
-    const int off3 = 3 * k_block;
-    const int off4 = 4 * k_block;
-
-    for (int p = 0; p < k_block; ++p) {
-        const __m256d b = _mm256_loadu_pd(b_pack + p * packed_n);
-        c0 = _mm256_fmadd_pd(_mm256_broadcast_sd(a_pack + p), b, c0);
-        c1 = _mm256_fmadd_pd(_mm256_broadcast_sd(a_pack + off1 + p), b, c1);
-        c2 = _mm256_fmadd_pd(_mm256_broadcast_sd(a_pack + off2 + p), b, c2);
-        c3 = _mm256_fmadd_pd(_mm256_broadcast_sd(a_pack + off3 + p), b, c3);
-        c4 = _mm256_fmadd_pd(_mm256_broadcast_sd(a_pack + off4 + p), b, c4);
-    }
-
-    _mm256_storeu_pd(c, c0);
-    _mm256_storeu_pd(c + ldc, c1);
-    _mm256_storeu_pd(c + 2 * ldc, c2);
-    _mm256_storeu_pd(c + 3 * ldc, c3);
-    _mm256_storeu_pd(c + 4 * ldc, c4);
-}
-#endif
-
-#if defined(__AVX512F__)
-inline void microkernel_6x8_avx512(int k_block, const double* a_pack,
-                                   const double* b_pack, int packed_n,
-                                   double* c, int ldc) {
-    __m512d c0 = _mm512_loadu_pd(c);
-    __m512d c1 = _mm512_loadu_pd(c + ldc);
-    __m512d c2 = _mm512_loadu_pd(c + 2 * ldc);
-    __m512d c3 = _mm512_loadu_pd(c + 3 * ldc);
-    __m512d c4 = _mm512_loadu_pd(c + 4 * ldc);
-    __m512d c5 = _mm512_loadu_pd(c + 5 * ldc);
-
-    const int off1 = k_block;
-    const int off2 = 2 * k_block;
-    const int off3 = 3 * k_block;
-    const int off4 = 4 * k_block;
-    const int off5 = 5 * k_block;
-
-    for (int p = 0; p < k_block; ++p) {
-        const __m512d b = _mm512_loadu_pd(b_pack + p * packed_n);
-        c0 = _mm512_fmadd_pd(_mm512_set1_pd(a_pack[p]), b, c0);
-        c1 = _mm512_fmadd_pd(_mm512_set1_pd(a_pack[off1 + p]), b, c1);
-        c2 = _mm512_fmadd_pd(_mm512_set1_pd(a_pack[off2 + p]), b, c2);
-        c3 = _mm512_fmadd_pd(_mm512_set1_pd(a_pack[off3 + p]), b, c3);
-        c4 = _mm512_fmadd_pd(_mm512_set1_pd(a_pack[off4 + p]), b, c4);
-        c5 = _mm512_fmadd_pd(_mm512_set1_pd(a_pack[off5 + p]), b, c5);
-    }
-
-    _mm512_storeu_pd(c, c0);
-    _mm512_storeu_pd(c + ldc, c1);
-    _mm512_storeu_pd(c + 2 * ldc, c2);
-    _mm512_storeu_pd(c + 3 * ldc, c3);
-    _mm512_storeu_pd(c + 4 * ldc, c4);
-    _mm512_storeu_pd(c + 5 * ldc, c5);
-}
-#endif
-
-inline void compute_microtile(const BlockSizes& blocks,
-                              int m_block, int k_block, int n_block, int packed_n,
-                              const double* a_pack, const double* b_pack,
-                              double* c, int ldc) {
-#if defined(__AVX512F__)
-    if (blocks.nr == 8 && blocks.mr == 6 && m_block == 6 && n_block == 8) {
-        microkernel_6x8_avx512(k_block, a_pack, b_pack, packed_n, c, ldc);
-        return;
-    }
-#endif
-#if defined(__AVX2__)
-    if (blocks.nr == 4 && blocks.mr == 5 && m_block == 5 && n_block == 4) {
-        microkernel_5x4_avx2(k_block, a_pack, b_pack, packed_n, c, ldc);
-        return;
-    }
-#endif
-    microkernel_scalar(m_block, k_block, n_block, packed_n, a_pack, b_pack, c, ldc);
-}
-
-inline bool supports_small_k_update_gemm(const MatrixDescriptor& a, const MatrixDescriptor& b,
-                                         const MatrixDescriptor& c, int m, int k, int n) {
-    if (!small_k_update_gemm_enabled()) {
-        return false;
-    }
-    if (c.col_major || c.transpose || b.col_major || b.transpose || a.col_major) {
-        return false;
-    }
-    if (k <= 0 || k > 64 || m < 128 || n < 32 || n > 128) {
-        return false;
-    }
-    return true;
-}
-
-inline double load_small_k_a(const MatrixDescriptor& a, const double* base, int row, int p) {
-    return a.transpose
-        ? base[p * a.ld + row]
-        : base[row * a.ld + p];
-}
-
-#if defined(__AVX2__)
-inline void small_k_update_tile_4x4_avx2(const MatrixDescriptor& a, const double* a_base,
-                                         const double* b_base, double* c_base,
-                                         int row, int col, int k, double alpha,
-                                         int b_ld, int c_ld) {
-    __m256d c0 = _mm256_loadu_pd(c_base + row * c_ld + col);
-    __m256d c1 = _mm256_loadu_pd(c_base + (row + 1) * c_ld + col);
-    __m256d c2 = _mm256_loadu_pd(c_base + (row + 2) * c_ld + col);
-    __m256d c3 = _mm256_loadu_pd(c_base + (row + 3) * c_ld + col);
-
-    for (int p = 0; p < k; ++p) {
-        const __m256d b_vec = _mm256_loadu_pd(b_base + p * b_ld + col);
-        c0 = _mm256_fmadd_pd(_mm256_set1_pd(alpha * load_small_k_a(a, a_base, row, p)), b_vec, c0);
-        c1 = _mm256_fmadd_pd(_mm256_set1_pd(alpha * load_small_k_a(a, a_base, row + 1, p)), b_vec, c1);
-        c2 = _mm256_fmadd_pd(_mm256_set1_pd(alpha * load_small_k_a(a, a_base, row + 2, p)), b_vec, c2);
-        c3 = _mm256_fmadd_pd(_mm256_set1_pd(alpha * load_small_k_a(a, a_base, row + 3, p)), b_vec, c3);
-    }
-
-    _mm256_storeu_pd(c_base + row * c_ld + col, c0);
-    _mm256_storeu_pd(c_base + (row + 1) * c_ld + col, c1);
-    _mm256_storeu_pd(c_base + (row + 2) * c_ld + col, c2);
-    _mm256_storeu_pd(c_base + (row + 3) * c_ld + col, c3);
-}
-#endif
-
-#if defined(__AVX512F__)
-inline void small_k_update_tile_4x8_avx512(const MatrixDescriptor& a, const double* a_base,
-                                           const double* b_base, double* c_base,
-                                           int row, int col, int k, double alpha,
-                                           int b_ld, int c_ld) {
-    __m512d c0 = _mm512_loadu_pd(c_base + row * c_ld + col);
-    __m512d c1 = _mm512_loadu_pd(c_base + (row + 1) * c_ld + col);
-    __m512d c2 = _mm512_loadu_pd(c_base + (row + 2) * c_ld + col);
-    __m512d c3 = _mm512_loadu_pd(c_base + (row + 3) * c_ld + col);
-
-    for (int p = 0; p < k; ++p) {
-        const __m512d b_vec = _mm512_loadu_pd(b_base + p * b_ld + col);
-        c0 = _mm512_fmadd_pd(_mm512_set1_pd(alpha * load_small_k_a(a, a_base, row, p)), b_vec, c0);
-        c1 = _mm512_fmadd_pd(_mm512_set1_pd(alpha * load_small_k_a(a, a_base, row + 1, p)), b_vec, c1);
-        c2 = _mm512_fmadd_pd(_mm512_set1_pd(alpha * load_small_k_a(a, a_base, row + 2, p)), b_vec, c2);
-        c3 = _mm512_fmadd_pd(_mm512_set1_pd(alpha * load_small_k_a(a, a_base, row + 3, p)), b_vec, c3);
-    }
-
-    _mm512_storeu_pd(c_base + row * c_ld + col, c0);
-    _mm512_storeu_pd(c_base + (row + 1) * c_ld + col, c1);
-    _mm512_storeu_pd(c_base + (row + 2) * c_ld + col, c2);
-    _mm512_storeu_pd(c_base + (row + 3) * c_ld + col, c3);
-}
-#endif
-
-void small_k_update_gemm(const MatrixDescriptor& a, const MatrixDescriptor& b, const MatrixDescriptor& c,
-                         int m, int k, int n, double alpha, bool profile_enabled,
-                         ProfileAccumulator& profile) {
-    const double* a_base = data_ptr(a);
-    const double* b_base = data_ptr(b);
-    double* c_base = mutable_data_ptr(c);
-    const ProfileClock::time_point kernel_start = profile_enabled ? ProfileClock::now() : ProfileClock::time_point{};
-
-    int row = 0;
-    for (; row + 4 <= m; row += 4) {
-        int col = 0;
-#if defined(__AVX512F__)
-        for (; col + 8 <= n; col += 8) {
-            small_k_update_tile_4x8_avx512(a, a_base, b_base, c_base, row, col, k, alpha, b.ld, c.ld);
-            if (profile_enabled) {
-                ++profile.microtile_calls;
-            }
-        }
-#elif defined(__AVX2__)
-        for (; col + 4 <= n; col += 4) {
-            small_k_update_tile_4x4_avx2(a, a_base, b_base, c_base, row, col, k, alpha, b.ld, c.ld);
-            if (profile_enabled) {
-                ++profile.microtile_calls;
-            }
-        }
-#endif
-        for (; col < n; ++col) {
-            for (int r = 0; r < 4; ++r) {
-                double sum = 0.0;
-                for (int p = 0; p < k; ++p) {
-                    sum = std::fma(load_small_k_a(a, a_base, row + r, p), b_base[p * b.ld + col], sum);
-                }
-                c_base[(row + r) * c.ld + col] = std::fma(alpha, sum, c_base[(row + r) * c.ld + col]);
-            }
-            if (profile_enabled) {
-                ++profile.microtile_calls;
-            }
-        }
-    }
-
-    for (; row < m; ++row) {
-        for (int col = 0; col < n; ++col) {
-            double sum = 0.0;
-            for (int p = 0; p < k; ++p) {
-                sum = std::fma(load_small_k_a(a, a_base, row, p), b_base[p * b.ld + col], sum);
-            }
-            c_base[row * c.ld + col] = std::fma(alpha, sum, c_base[row * c.ld + col]);
-        }
-    }
-
-    if (profile_enabled) {
-        profile.kernel_ns += elapsed_ns(kernel_start);
-    }
-}
-
 inline void add_to_c(const MatrixDescriptor& c, int row, int col, double value) {
     double* base = mutable_data_ptr(c);
     if (c.col_major) {
@@ -743,61 +290,165 @@ void process_generic_output(const MatrixDescriptor& a, const MatrixDescriptor& b
     }
 }
 
-struct Scratch {
-    std::vector<double> a_pack;
-    std::vector<double> b_pack;
+void cancel_shared_job(const ThreadPoolJob& job) {
+    job.failed->store(true, std::memory_order_relaxed);
+#if defined(JLC_NATIVE_ENABLE_EXPERIMENTAL_GEMM)
+    if (job.shared_a != nullptr) job.shared_a->cancel();
+#endif
+    if (job.tail != nullptr) job.tail->cancel();
+}
 
-    double* ensure_a(std::size_t size) {
-        if (a_pack.size() < size) {
-            a_pack.resize(size);
-        }
-        return a_pack.data();
+#if defined(__linux__)
+int read_topology_id(int cpu, const char* name) {
+    const std::string path = "/sys/devices/system/cpu/cpu" + std::to_string(cpu)
+        + "/topology/" + name;
+    std::ifstream input(path);
+    int value = -1;
+    input >> value;
+    return input ? value : -1;
+}
+
+std::vector<int> select_allowed_physical_cpus(int threads) {
+    cpu_set_t allowed;
+    CPU_ZERO(&allowed);
+    if (sched_getaffinity(0, sizeof(allowed), &allowed) != 0) {
+        throw std::runtime_error("sched_getaffinity failed while selecting physical CPUs");
     }
 
-    double* ensure_b(std::size_t size) {
-        if (b_pack.size() < size) {
-            b_pack.resize(size);
+    std::vector<int> selected;
+    std::set<std::pair<int, int>> seen_cores;
+    for (int cpu = 0; cpu < CPU_SETSIZE && static_cast<int>(selected.size()) < threads; ++cpu) {
+        if (!CPU_ISSET(cpu, &allowed)) {
+            continue;
         }
-        return b_pack.data();
+        const int package = read_topology_id(cpu, "physical_package_id");
+        const int core = read_topology_id(cpu, "core_id");
+        if (package < 0 || core < 0) {
+            continue;
+        }
+        if (seen_cores.emplace(package, core).second) {
+            selected.push_back(cpu);
+        }
     }
-};
+    if (static_cast<int>(selected.size()) != threads) {
+        std::fprintf(stderr,
+                     "JLC worker affinity error: requested %d workers but only %zu distinct allowed physical cores were discovered\n",
+                     threads, selected.size());
+        throw std::runtime_error("insufficient distinct allowed physical cores");
+    }
+    return selected;
+}
 
-struct ThreadPoolJob {
-    const MatrixDescriptor* a = nullptr;
-    const MatrixDescriptor* b = nullptr;
-    const MatrixDescriptor* c = nullptr;
-    int m = 0;
-    int k = 0;
-    int n = 0;
-    double alpha = 0.0;
-    BlockSizes blocks{};
-    int panel_stride = 0;
-    bool profile_enabled = false;
-    std::vector<ProfileAccumulator>* profiles = nullptr;
-};
+std::string affinity_mask_string(const cpu_set_t& mask) {
+    std::string result;
+    for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
+        if (CPU_ISSET(cpu, &mask)) {
+            if (!result.empty()) {
+                result += ',';
+            }
+            result += std::to_string(cpu);
+        }
+    }
+    return result;
+}
+#endif
+
+WorkerAffinityRecord configure_current_worker_affinity(bool physical_affinity, int intended_cpu) {
+    WorkerAffinityRecord record;
+    record.intended_cpu = physical_affinity ? intended_cpu : -1;
+#if defined(__linux__)
+    record.tid = static_cast<long>(syscall(SYS_gettid));
+    if (physical_affinity) {
+        cpu_set_t requested_mask;
+        CPU_ZERO(&requested_mask);
+        CPU_SET(intended_cpu, &requested_mask);
+        record.status = pthread_setaffinity_np(pthread_self(), sizeof(requested_mask), &requested_mask);
+    }
+    cpu_set_t observed_mask;
+    CPU_ZERO(&observed_mask);
+    const int get_status = pthread_getaffinity_np(pthread_self(), sizeof(observed_mask), &observed_mask);
+    if (record.status == 0 && get_status != 0) {
+        record.status = get_status;
+    }
+    record.affinity_mask = get_status == 0 ? affinity_mask_string(observed_mask) : "unavailable";
+    record.observed_cpu = sched_getcpu();
+#else
+    record.status = physical_affinity ? -1 : 0;
+    record.affinity_mask = "unsupported";
+#endif
+    return record;
+}
+
+std::vector<int> select_worker_cpus(bool physical, int threads) {
+    if (!physical) return {};
+#if defined(__linux__)
+    return select_allowed_physical_cpus(threads);
+#else
+    throw std::runtime_error("physical worker affinity unsupported on this platform");
+#endif
+}
+
+WorkerAffinityRecord initialize_worker_affinity(bool physical, int intended_cpu) noexcept {
+    try {
+#if defined(JLC_NATIVE_TEST_WORKER_FAULT_INJECTION)
+        const char* fault = std::getenv("JLC_NATIVE_TEST_WORKER_FAIL");
+        if (fault != nullptr && std::strcmp(fault, "startup") == 0) throw std::bad_alloc();
+#endif
+        return configure_current_worker_affinity(physical, intended_cpu);
+    } catch (...) {
+        WorkerAffinityRecord failed;
+        failed.status = -1;
+        return failed;
+    }
+}
 
 void process_column_panels(const MatrixDescriptor& a, const MatrixDescriptor& b, const MatrixDescriptor& c,
                            int m, int k, int n, double alpha,
-                           const BlockSizes& blocks,
+                           const ResolvedGemmPlan& blocks,
                            int panel_start, int panel_stride,
                            Scratch& scratch, bool profile_enabled, ProfileAccumulator& profile);
 
+void process_scheduled_panels(const ThreadPoolJob& job, int worker, Scratch& scratch,
+                              ProfileAccumulator& profile);
+
+// One task boundary for both lifetimes. Completion/join remains the caller's job.
+void run_worker_task(const ThreadPoolJob& job, int index, Scratch& scratch) noexcept {
+    try {
+#if defined(JLC_NATIVE_TEST_WORKER_FAULT_INJECTION)
+        const char* fault = std::getenv("JLC_NATIVE_TEST_WORKER_FAIL");
+        if (index == 1 && fault != nullptr && std::strcmp(fault, "task") == 0) throw std::bad_alloc();
+#endif
+        ProfileAccumulator local_profile;
+        process_scheduled_panels(job, index, scratch, local_profile);
+        if (job.profile_enabled && job.profiles != nullptr)
+            (*job.profiles)[static_cast<std::size_t>(index)] = local_profile;
+    } catch (...) {
+        cancel_shared_job(job);
+    }
+}
+
 struct NativeWorkspace {
     int preferred_threads;
-    int alignment_bytes;
-    Scratch scratch;
+#if defined(JLC_NATIVE_ENABLE_EXPERIMENTAL_GEMM)
+    SharedAStorage shared_a_storage;
+#endif
     std::mutex mutex;
     std::mutex pool_mutex;
     std::condition_variable pool_cv;
     std::condition_variable pool_done_cv;
+    std::condition_variable pool_startup_cv;
     bool pool_stop = false;
-    bool pool_has_job = false;
     int pool_active = 0;
     std::uint64_t pool_generation = 0;
     int pool_threads = 0;
+    int pool_started = 0;
+    bool pool_startup_failed = false;
+    bool pool_physical_affinity = false;
     ThreadPoolJob pool_job{};
     std::vector<std::thread> pool_workers;
     std::vector<Scratch> pool_scratch;
+    std::vector<int> pool_selected_cpus;
+    std::vector<WorkerAffinityRecord> pool_affinity_records;
 };
 
 std::atomic<NativeWorkspace*> g_default_workspace{nullptr};
@@ -807,6 +458,19 @@ NativeWorkspace* current_workspace() {
 }
 
 void pool_worker(NativeWorkspace* workspace, int worker_index) {
+    const int intended_cpu = workspace->pool_physical_affinity
+        ? workspace->pool_selected_cpus[static_cast<std::size_t>(worker_index)]
+        : -1;
+    WorkerAffinityRecord affinity_record = initialize_worker_affinity(workspace->pool_physical_affinity, intended_cpu);
+
+    {
+        std::lock_guard<std::mutex> lock(workspace->pool_mutex);
+        workspace->pool_startup_failed = workspace->pool_startup_failed || affinity_record.status != 0;
+        workspace->pool_affinity_records[static_cast<std::size_t>(worker_index)] = std::move(affinity_record);
+        ++workspace->pool_started;
+        workspace->pool_startup_cv.notify_one();
+    }
+
     std::uint64_t observed_generation = 0;
     while (true) {
         ThreadPoolJob job;
@@ -822,27 +486,12 @@ void pool_worker(NativeWorkspace* workspace, int worker_index) {
             job = workspace->pool_job;
         }
 
-        ProfileAccumulator local_profile;
-        Scratch& scratch = workspace->pool_scratch[static_cast<std::size_t>(worker_index)];
-        process_column_panels(
-            *job.a, *job.b, *job.c,
-            job.m, job.k, job.n, job.alpha,
-            job.blocks,
-            worker_index * job.blocks.nc,
-            job.panel_stride,
-            scratch,
-            job.profile_enabled,
-            local_profile
-        );
-        if (job.profile_enabled && job.profiles != nullptr) {
-            (*job.profiles)[static_cast<std::size_t>(worker_index)] = local_profile;
-        }
+        run_worker_task(job, worker_index, workspace->pool_scratch[static_cast<std::size_t>(worker_index)]);
 
         {
             std::lock_guard<std::mutex> lock(workspace->pool_mutex);
             --workspace->pool_active;
             if (workspace->pool_active == 0) {
-                workspace->pool_has_job = false;
                 workspace->pool_done_cv.notify_one();
             }
         }
@@ -853,10 +502,17 @@ void shutdown_thread_pool(NativeWorkspace* workspace) {
     if (workspace == nullptr) {
         return;
     }
+#if defined(JLC_NATIVE_TEST_POOL_FAULT_INJECTION)
+    const std::size_t workers_to_join = workspace->pool_workers.size();
+    if (pool_test_diagnostics_requested()) {
+        std::fprintf(stderr,
+                     "JLC_POOL_SHUTDOWN_BEGIN requested=%d created=%zu started=%d\n",
+                     workspace->pool_threads, workers_to_join, workspace->pool_started);
+    }
+#endif
     {
         std::lock_guard<std::mutex> lock(workspace->pool_mutex);
         workspace->pool_stop = true;
-        workspace->pool_has_job = true;
     }
     workspace->pool_cv.notify_all();
     for (std::thread& worker : workspace->pool_workers) {
@@ -867,13 +523,24 @@ void shutdown_thread_pool(NativeWorkspace* workspace) {
     workspace->pool_workers.clear();
     workspace->pool_scratch.clear();
     workspace->pool_threads = 0;
+    workspace->pool_started = 0;
+    workspace->pool_startup_failed = false;
+    workspace->pool_physical_affinity = false;
+    workspace->pool_selected_cpus.clear();
+    workspace->pool_affinity_records.clear();
     workspace->pool_stop = false;
-    workspace->pool_has_job = false;
     workspace->pool_active = 0;
     workspace->pool_generation = 0;
+#if defined(JLC_NATIVE_TEST_POOL_FAULT_INJECTION)
+    if (pool_test_diagnostics_requested()) {
+        std::fprintf(stderr, "JLC_POOL_SHUTDOWN_END joined=%zu\n", workers_to_join);
+    }
+#endif
 }
 
-void ensure_thread_pool(NativeWorkspace* workspace, int threads) {
+void ensure_thread_pool(NativeWorkspace* workspace, int threads,
+                        GemmWorkerAffinityMode affinity_mode,
+                        bool affinity_diagnostics) {
     if (workspace == nullptr) {
         return;
     }
@@ -881,21 +548,52 @@ void ensure_thread_pool(NativeWorkspace* workspace, int threads) {
         shutdown_thread_pool(workspace);
         return;
     }
-    if (workspace->pool_threads == threads && !workspace->pool_workers.empty()) {
+    const bool physical_affinity = affinity_mode == GemmWorkerAffinityMode::Physical;
+    if (workspace->pool_threads == threads && !workspace->pool_workers.empty()
+        && workspace->pool_physical_affinity == physical_affinity) {
         return;
     }
     shutdown_thread_pool(workspace);
     workspace->pool_threads = threads;
+    workspace->pool_physical_affinity = physical_affinity;
+    workspace->pool_selected_cpus = select_worker_cpus(physical_affinity, threads);
     workspace->pool_scratch.assign(static_cast<std::size_t>(threads), Scratch{});
+    workspace->pool_affinity_records.assign(static_cast<std::size_t>(threads), WorkerAffinityRecord{});
     workspace->pool_workers.reserve(static_cast<std::size_t>(threads));
-    for (int index = 0; index < threads; ++index) {
-        workspace->pool_workers.emplace_back([workspace, index]() { pool_worker(workspace, index); });
+#if defined(JLC_NATIVE_TEST_POOL_FAULT_INJECTION)
+    const int fail_at = pool_creation_failure_index();
+#endif
+    try {
+        for (int index = 0; index < threads; ++index) {
+#if defined(JLC_NATIVE_TEST_POOL_FAULT_INJECTION)
+            if (index == fail_at) {
+                std::fprintf(stderr,
+                             "JLC_POOL_CREATE_INJECT requested=%d fail_at=%d created=%zu started=%d\n",
+                             threads, fail_at, workspace->pool_workers.size(), workspace->pool_started);
+                throw std::runtime_error("injected persistent-pool thread creation failure");
+            }
+#endif
+            workspace->pool_workers.emplace_back([workspace, index]() { pool_worker(workspace, index); });
+        }
+    } catch (...) {
+        shutdown_thread_pool(workspace);
+        throw;
+    }
+    {
+        std::unique_lock<std::mutex> lock(workspace->pool_mutex);
+        workspace->pool_startup_cv.wait(lock, [&]() { return workspace->pool_started == threads; });
+    }
+    if (affinity_diagnostics) report_worker_affinity(workspace->pool_affinity_records);
+    if (workspace->pool_startup_failed) {
+        std::fprintf(stderr, "JLC worker affinity error: one or more workers failed affinity setup\n");
+        shutdown_thread_pool(workspace);
+        throw std::runtime_error("worker affinity setup failed");
     }
 }
 
 void process_column_panels(const MatrixDescriptor& a, const MatrixDescriptor& b, const MatrixDescriptor& c,
                            int m, int k, int n, double alpha,
-                           const BlockSizes& blocks,
+                           const ResolvedGemmPlan& blocks,
                            int panel_start, int panel_stride,
                            Scratch& scratch,
                            bool profile_enabled,
@@ -910,7 +608,7 @@ void process_column_panels(const MatrixDescriptor& a, const MatrixDescriptor& b,
             double* b_pack = scratch.ensure_b(static_cast<std::size_t>(k_block) * packed_n);
             {
                 ScopedProfileTimer timer(profile_enabled, profile.pack_b_ns);
-                pack_b(b, kk, k_block, jj, n_panel, packed_n, b_pack);
+                pack_b_selected(blocks, b, kk, k_block, jj, n_panel, packed_n, b_pack);
             }
             if (profile_enabled) {
                 ++profile.pack_b_calls;
@@ -924,7 +622,7 @@ void process_column_panels(const MatrixDescriptor& a, const MatrixDescriptor& b,
                     double* a_pack = scratch.ensure_a(static_cast<std::size_t>(m_block) * k_block);
                     {
                         ScopedProfileTimer timer(profile_enabled, profile.pack_a_ns);
-                        pack_a(a, i, m_block, kk, k_block, alpha, a_pack);
+                        pack_a_selected(blocks, a, i, m_block, kk, k_block, alpha, a_pack);
                     }
                     if (profile_enabled) {
                         ++profile.pack_a_calls;
@@ -936,7 +634,7 @@ void process_column_panels(const MatrixDescriptor& a, const MatrixDescriptor& b,
                     for (; j + blocks.nr <= n_panel; j += blocks.nr) {
                         double* c_tile = c_base + i * c.ld + jj + j;
                         compute_microtile(blocks, m_block, k_block, blocks.nr, packed_n,
-                                          a_pack, b_pack + j, c_tile, c.ld);
+                                          a_pack, b_micro_panel(blocks, b_pack, j, k_block), c_tile, c.ld);
                         if (profile_enabled) {
                             ++profile.microtile_calls;
                         }
@@ -944,7 +642,7 @@ void process_column_panels(const MatrixDescriptor& a, const MatrixDescriptor& b,
                     if (j < n_panel) {
                         double* c_tile = c_base + i * c.ld + jj + j;
                         compute_microtile(blocks, m_block, k_block, n_panel - j, packed_n,
-                                          a_pack, b_pack + j, c_tile, c.ld);
+                                          a_pack, b_micro_panel(blocks, b_pack, j, k_block), c_tile, c.ld);
                         if (profile_enabled) {
                             ++profile.microtile_calls;
                         }
@@ -955,6 +653,108 @@ void process_column_panels(const MatrixDescriptor& a, const MatrixDescriptor& b,
                 }
             }
         }
+    }
+}
+
+
+void process_shared_rows(const ThreadPoolJob& job, int jj, int kk, const double* b_pack,
+                         int first_tile, int last_tile, Scratch& scratch, ProfileAccumulator& profile) {
+    const int n_panel = std::min(job.blocks.nc, job.n - jj);
+    const int packed_n = round_up(n_panel, job.blocks.nr);
+    const int kb = std::min(job.blocks.kc, job.k - kk);
+    process_shared_private_rows(*job.a, *job.c, job.m, jj, kk, kb, n_panel, packed_n,
+                              job.alpha, job.blocks, b_pack, first_tile, last_tile,
+                              scratch, job.profile_enabled, profile);
+}
+
+int row_tiles(int m, const ResolvedGemmPlan& blocks) {
+    return (m / blocks.mc) * ((blocks.mc + blocks.mr - 1) / blocks.mr)
+        + ((m % blocks.mc) + blocks.mr - 1) / blocks.mr;
+}
+
+// Convert an original MC/MR tile boundary into a row, retaining MC tail tiles.
+int tile_row(int tile, int m, const ResolvedGemmPlan& blocks) {
+    const int per_mc = (blocks.mc + blocks.mr - 1) / blocks.mr;
+    return std::min(m, (tile / per_mc) * blocks.mc + (tile % per_mc) * blocks.mr);
+}
+
+void process_scheduled_panels(const ThreadPoolJob& job, int worker, Scratch& scratch,
+                              ProfileAccumulator& profile) {
+    const int threads = job.panel_stride / job.blocks.nc;
+    const int tiles = row_tiles(job.m, job.blocks);
+    SchedulerWork stats;
+    const bool diagnostic = job.work != nullptr;
+    const auto start = diagnostic ? ProfileClock::now() : ProfileClock::time_point{};
+    const int full_n = job.tail == nullptr ? job.n : job.tail->full_panels * job.blocks.nc;
+    const auto count_work = [&](int width, int first, int last) {
+        if (!diagnostic || first == last) return;
+        ++stats.tasks;
+        ++stats.panels;
+        const int rows = tile_row(last, job.m, job.blocks) - tile_row(first, job.m, job.blocks);
+        stats.rows += rows;
+        stats.microtiles += static_cast<std::uint64_t>(last - first) * ((width + job.blocks.nr - 1) / job.blocks.nr);
+        stats.flops += 2ULL * rows * width * job.k;
+    };
+    // Shared-buffer paths must release peers waiting at a barrier after any
+    // worker-side failure.
+    const auto run = [&] {
+#if defined(JLC_NATIVE_ENABLE_EXPERIMENTAL_GEMM)
+        if (job.shared_a != nullptr) {
+            process_l3_column_panels(job, worker, full_n, scratch, profile);
+            if (job.failed->load(std::memory_order_relaxed)) return;
+        } else
+#endif
+        {
+            process_column_panels(*job.a, *job.b, *job.c, job.m, job.k, full_n, job.alpha,
+                                  job.blocks, worker * job.blocks.nc, job.panel_stride,
+                                  scratch, job.profile_enabled, profile);
+        }
+        if (diagnostic) {
+            for (int jj = worker * job.blocks.nc; jj < full_n; jj += job.panel_stride)
+                count_work(std::min(job.blocks.nc, full_n - jj), 0, tiles);
+        }
+        if (job.tail == nullptr) return;
+        const int remainder = static_cast<int>(job.tail->panels.size());
+        const int group = worker % remainder;
+        const int rank = worker / remainder;
+        const int members = (threads - 1 - group) / remainder + 1;
+        const int first = static_cast<int>(static_cast<long long>(tiles) * rank / members);
+        const int last = static_cast<int>(static_cast<long long>(tiles) * (rank + 1) / members);
+        const int jj = (job.tail->full_panels + group) * job.blocks.nc;
+        const int width = std::min(job.blocks.nc, job.n - jj);
+        const int packed_n = round_up(width, job.blocks.nr);
+        auto& shared = *job.tail->panels[group];
+        count_work(width, first, last);
+        const auto barrier = [&] {
+            const auto wait_start = diagnostic ? ProfileClock::now() : ProfileClock::time_point{};
+            const bool ok = shared.barrier(members);
+            if (diagnostic) stats.wait_ns += elapsed_ns(wait_start);
+            return ok;
+        };
+        for (int kk = 0; kk < job.k; kk += job.blocks.kc) {
+            const int kb = std::min(job.blocks.kc, job.k - kk);
+            if (rank == 0) {
+                ScopedProfileTimer timer(job.profile_enabled, profile.pack_b_ns);
+                pack_b_selected(job.blocks, *job.b, kk, kb, jj, width, packed_n, shared.packed_b.data());
+                if (job.profile_enabled) {
+                    ++profile.pack_b_calls;
+                    profile.pack_b_bytes += static_cast<std::uint64_t>(kb) * packed_n * sizeof(double);
+                }
+            }
+            if (!barrier()) return; // publish B before readers start
+#if defined(JLC_NATIVE_TEST_A_PACKING_FAULT_INJECTION)
+            const char* fault = std::getenv("JLC_NATIVE_TEST_A_FAIL");
+            if (job.shared_a != nullptr && worker == 1 && kk == 0 && fault != nullptr
+                && std::strcmp(fault, "tail") == 0) throw std::runtime_error("injected tail consumer failure");
+#endif
+            process_shared_rows(job, jj, kk, shared.packed_b.data(), first, last, scratch, profile);
+            if (!barrier()) return; // all readers finish before B is overwritten
+        }
+    };
+    run();
+    if (diagnostic) {
+        stats.elapsed_ns = elapsed_ns(start);
+        (*job.work)[worker] = stats;
     }
 }
 
@@ -1014,9 +814,11 @@ jlc_status native_gemm_impl(const MatrixDescriptor& a, const MatrixDescriptor& b
         return JLC_STATUS_SUCCESS;
     }
 
-    if (supports_small_k_update_gemm(a, b, c, m, k, n)) {
+#if defined(JLC_NATIVE_ENABLE_EXPERIMENTAL_GEMM)
+    const bool small_k_update_enabled = small_k_update_gemm_enabled();
+    if (supports_small_k_update_gemm(a, b, c, m, k, n, small_k_update_enabled)) {
         try {
-            const BlockSizes blocks = compute_block_sizes(m, n, k);
+            const ResolvedGemmPlan blocks = resolve_gemm_plan(m, n, k);
             NativeWorkspace* workspace = current_workspace();
             const int requested_threads = std::max(1, threads > 0 ? threads : (workspace == nullptr ? 1 : workspace->preferred_threads));
             record_last_profile_metadata(requested_threads, 1, 1, blocks);
@@ -1028,6 +830,8 @@ jlc_status native_gemm_impl(const MatrixDescriptor& a, const MatrixDescriptor& b
         finalize_profile();
         return JLC_STATUS_SUCCESS;
     }
+
+#endif
 
     if (c.col_major) {
         try {
@@ -1041,7 +845,7 @@ jlc_status native_gemm_impl(const MatrixDescriptor& a, const MatrixDescriptor& b
     }
 
     try {
-        const BlockSizes blocks = compute_block_sizes(m, n, k);
+        const ResolvedGemmPlan blocks = resolve_gemm_plan(m, n, k);
         const long long flops = 2LL * m * n * k;
         const int panel_count = std::max(1, (n + blocks.nc - 1) / blocks.nc);
         NativeWorkspace* workspace = current_workspace();
@@ -1051,9 +855,17 @@ jlc_status native_gemm_impl(const MatrixDescriptor& a, const MatrixDescriptor& b
             : 1;
         record_last_profile_metadata(requested_threads, actual_threads, panel_count, blocks);
 
+        const GemmRuntimeConfig config = resolve_gemm_runtime_config(actual_threads > 1);
+#if defined(JLC_NATIVE_ENABLE_EXPERIMENTAL_GEMM)
+        const bool use_l3_a = config.a_packing == GemmAPackingMode::SharedL3;
+        const bool a_diagnostics = config.a_packing_diagnostics;
+#endif
         if (actual_threads <= 1) {
             ProfileAccumulator local_profile;
             Scratch local_scratch;
+#if defined(JLC_NATIVE_ENABLE_EXPERIMENTAL_GEMM)
+            if (a_diagnostics) report_a_packing(SharedASchedule{}, "single-worker");
+#endif
             process_column_panels(a, b, c, m, k, n, alpha, blocks, 0, blocks.nc,
                                   local_scratch, profile_enabled, local_profile);
             if (profile_enabled) {
@@ -1063,21 +875,47 @@ jlc_status native_gemm_impl(const MatrixDescriptor& a, const MatrixDescriptor& b
             return JLC_STATUS_SUCCESS;
         }
 
+        std::atomic<bool> worker_failed{false};
+        SharedTailSchedule tail;
+#if defined(JLC_NATIVE_ENABLE_EXPERIMENTAL_GEMM)
+        SharedASchedule shared_a;
+        SharedAStorage local_a_storage;
+#endif
+        const bool use_shared_tail = config.scheduler == GemmSchedulerMode::SharedTail
+            && panel_count % actual_threads != 0;
+        if (use_shared_tail) {
+            const int remainder = panel_count % actual_threads;
+            tail.full_panels = panel_count - remainder;
+            for (int r = 0; r < remainder; ++r) {
+                auto panel = std::make_unique<SharedTailPanel>();
+                panel->packed_b.resize(packed_elements(std::min(k, blocks.kc),
+                    round_up(std::min(blocks.nc, n - (tail.full_panels + r) * blocks.nc), blocks.nr)));
+                tail.panels.push_back(std::move(panel));
+            }
+        }
+        std::vector<SchedulerWork> work(config.scheduler_diagnostics ? actual_threads : 0);
+        ThreadPoolJob job;
+        job.a = &a; job.b = &b; job.c = &c;
+        job.m = m; job.k = k; job.n = n; job.alpha = alpha;
+        job.blocks = blocks;
+        job.panel_stride = actual_threads * blocks.nc;
+        job.profile_enabled = profile_enabled;
+        job.tail = use_shared_tail ? &tail : nullptr;
+        job.work = work.empty() ? nullptr : &work;
+        job.failed = &worker_failed;
+
         if (workspace != nullptr) {
             std::lock_guard<std::mutex> lock(workspace->mutex);
-            ensure_thread_pool(workspace, actual_threads);
+            ensure_thread_pool(workspace, actual_threads,
+                               config.worker_affinity, config.worker_affinity_diagnostics);
+#if defined(JLC_NATIVE_ENABLE_EXPERIMENTAL_GEMM)
+            if (use_l3_a && workspace->pool_physical_affinity) {
+                shared_a.prepare(workspace->shared_a_storage, workspace->pool_selected_cpus,
+                    packed_elements(std::min(m, blocks.mc), std::min(k, blocks.kc)), a_diagnostics);
+                job.shared_a = &shared_a;
+            }
+#endif
             std::vector<ProfileAccumulator> worker_profiles(static_cast<std::size_t>(actual_threads));
-            ThreadPoolJob job;
-            job.a = &a;
-            job.b = &b;
-            job.c = &c;
-            job.m = m;
-            job.k = k;
-            job.n = n;
-            job.alpha = alpha;
-            job.blocks = blocks;
-            job.panel_stride = actual_threads * blocks.nc;
-            job.profile_enabled = profile_enabled;
             job.profiles = profile_enabled ? &worker_profiles : nullptr;
 
             const ProfileClock::time_point launch_start = profile_enabled ? ProfileClock::now() : ProfileClock::time_point{};
@@ -1086,7 +924,6 @@ jlc_status native_gemm_impl(const MatrixDescriptor& a, const MatrixDescriptor& b
                 std::unique_lock<std::mutex> pool_lock(workspace->pool_mutex);
                 workspace->pool_job = job;
                 workspace->pool_active = actual_threads;
-                workspace->pool_has_job = true;
                 ++workspace->pool_generation;
                 workspace->pool_cv.notify_all();
                 if (profile_enabled) {
@@ -1103,26 +940,59 @@ jlc_status native_gemm_impl(const MatrixDescriptor& a, const MatrixDescriptor& b
                     merge_profile(worker_profile);
                 }
             }
+#if defined(JLC_NATIVE_ENABLE_EXPERIMENTAL_GEMM)
+            if (a_diagnostics) report_a_packing(shared_a, use_l3_a ? "physical-affinity-required" : "selector-private");
+#endif
         } else {
             std::vector<std::thread> workers;
             std::vector<ProfileAccumulator> worker_profiles(static_cast<std::size_t>(actual_threads));
+            const bool physical_affinity = config.worker_affinity == GemmWorkerAffinityMode::Physical;
+            const bool affinity_diagnostics = config.worker_affinity_diagnostics;
+            const std::vector<int> selected_cpus = select_worker_cpus(physical_affinity, actual_threads);
+#if defined(JLC_NATIVE_ENABLE_EXPERIMENTAL_GEMM)
+            if (use_l3_a && physical_affinity) {
+                shared_a.prepare(local_a_storage, selected_cpus,
+                    packed_elements(std::min(m, blocks.mc), std::min(k, blocks.kc)), a_diagnostics);
+                job.shared_a = &shared_a;
+            }
+#endif
+            std::vector<WorkerAffinityRecord> affinity_records(static_cast<std::size_t>(actual_threads));
+            job.profiles = profile_enabled ? &worker_profiles : nullptr;
             workers.reserve(static_cast<std::size_t>(actual_threads));
             const ProfileClock::time_point launch_start = profile_enabled ? ProfileClock::now() : ProfileClock::time_point{};
+            try {
             for (int thread_index = 0; thread_index < actual_threads; ++thread_index) {
-                workers.emplace_back([=, &a, &b, &c, &blocks, &worker_profiles]() {
-                    Scratch thread_scratch;
-                    ProfileAccumulator local_profile;
-                    process_column_panels(
-                        a, b, c, m, k, n, alpha, blocks,
-                        thread_index * blocks.nc, actual_threads * blocks.nc,
-                        thread_scratch,
-                        profile_enabled,
-                        local_profile
-                    );
-                    if (profile_enabled) {
-                        worker_profiles[static_cast<std::size_t>(thread_index)] = local_profile;
-                    }
+#if defined(JLC_NATIVE_TEST_A_PACKING_FAULT_INJECTION)
+                const char* fault = std::getenv("JLC_NATIVE_TEST_A_FAIL");
+                if (job.shared_a != nullptr && thread_index == 2 && fault != nullptr
+                    && std::strcmp(fault, "create") == 0) throw std::runtime_error("injected per-call creation failure");
+#endif
+#if defined(JLC_NATIVE_TEST_WORKER_FAULT_INJECTION)
+                const char* worker_fault = std::getenv("JLC_NATIVE_TEST_WORKER_FAIL");
+                if (thread_index == 2 && worker_fault != nullptr && std::strcmp(worker_fault, "create") == 0)
+                    throw std::runtime_error("injected fallback creation failure");
+#endif
+                workers.emplace_back([job, physical_affinity, thread_index, &selected_cpus, &affinity_records]() {
+                    try {
+                        const int intended_cpu = physical_affinity ? selected_cpus[static_cast<std::size_t>(thread_index)] : -1;
+                        auto record = initialize_worker_affinity(physical_affinity, intended_cpu);
+#if defined(JLC_NATIVE_TEST_A_PACKING_FAULT_INJECTION)
+                        const char* fault = std::getenv("JLC_NATIVE_TEST_A_FAIL");
+                        if (job.shared_a != nullptr && thread_index == 1 && fault != nullptr
+                            && std::strcmp(fault, "affinity") == 0) record.status = 1;
+#endif
+                        const bool failed = record.status != 0;
+                        affinity_records[static_cast<std::size_t>(thread_index)] = std::move(record);
+                        if (failed) { cancel_shared_job(job); return; }
+                        Scratch thread_scratch;
+                        run_worker_task(job, thread_index, thread_scratch);
+                    } catch (...) { cancel_shared_job(job); }
                 });
+            }
+            } catch (...) {
+                cancel_shared_job(job);
+                for (auto& worker : workers) if (worker.joinable()) worker.join();
+                throw;
             }
             if (profile_enabled) {
                 call_profile.thread_launch_ns += elapsed_ns(launch_start);
@@ -1131,13 +1001,19 @@ jlc_status native_gemm_impl(const MatrixDescriptor& a, const MatrixDescriptor& b
             for (std::thread& worker : workers) {
                 worker.join();
             }
+            if (affinity_diagnostics) report_worker_affinity(affinity_records);
             if (profile_enabled) {
                 call_profile.thread_join_ns += elapsed_ns(join_start);
                 for (const ProfileAccumulator& worker_profile : worker_profiles) {
                     merge_profile(worker_profile);
                 }
             }
+#if defined(JLC_NATIVE_ENABLE_EXPERIMENTAL_GEMM)
+            if (a_diagnostics) report_a_packing(shared_a, use_l3_a ? "physical-affinity-required" : "selector-private");
+#endif
         }
+        if (!work.empty()) report_scheduler_work(work, use_shared_tail);
+        if (worker_failed.load(std::memory_order_relaxed)) throw std::runtime_error("GEMM worker failed");
     } catch (const std::bad_alloc&) {
         finalize_profile();
         return JLC_STATUS_OUT_OF_MEMORY;
@@ -1150,6 +1026,11 @@ jlc_status native_gemm_impl(const MatrixDescriptor& a, const MatrixDescriptor& b
     return JLC_STATUS_SUCCESS;
 }
 }
+
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC visibility pop
+#endif
+using namespace jlc_gemm;
 
 bool jlc_native_is_available() {
     return true;
@@ -1169,13 +1050,12 @@ const char* jlc_native_provider_description() {
     return provider_description();
 }
 
-jlc_context_handle jlc_native_context_create(int preferred_threads, int alignment_bytes, int /*flags*/) {
+jlc_context_handle jlc_native_context_create(int preferred_threads, int /*alignment_bytes*/, int /*flags*/) {
     auto* workspace = new (std::nothrow) NativeWorkspace();
     if (workspace == nullptr) {
         return 0;
     }
     workspace->preferred_threads = std::max(1, preferred_threads);
-    workspace->alignment_bytes = std::max(8, alignment_bytes);
     NativeWorkspace* expected = nullptr;
     g_default_workspace.compare_exchange_strong(expected, workspace, std::memory_order_acq_rel);
     return reinterpret_cast<jlc_context_handle>(workspace);
@@ -1243,6 +1123,9 @@ void jlc_native_context_destroy(jlc_context_handle handle) {
     if (!workspace->pool_workers.empty()) {
         shutdown_thread_pool(workspace);
     }
+#if defined(JLC_NATIVE_ENABLE_EXPERIMENTAL_GEMM)
+    workspace->shared_a_storage = SharedAStorage{};
+#endif
     NativeWorkspace* expected = workspace;
     g_default_workspace.compare_exchange_strong(expected, nullptr, std::memory_order_acq_rel);
 }

@@ -1,21 +1,23 @@
 # Native Backend Performance Notes
 
-These notes describe the current built-in C++ baseline for the JNI native backend.
+These notes retain implementation diagnostics and historical measurements for the built-in C++ JNI backend. They are not a current validated performance campaign.
 
 ## MSVC AVX2 Build
 
 The Windows MSVC build must compile native targets with `/arch:AVX2`. Without it, MSVC does not define `__AVX2__`, the packed AVX2 GEMM microkernel is compiled out, and GEMM falls back to the scalar path.
 
-Expected runtime diagnostics for the built-in backend:
+Expected runtime diagnostics for the built-in backend on AVX2:
 
 ```text
 runtimeDescription = jlc_native packed AVX2 GEMM
 providerDescription = builtin only
-GEMM MR = 5
-GEMM NR = 4
+GEMM MR = 6
+GEMM NR = 8
 ```
 
 `NativeGemmIntegrationTest.nativeBackendUsesAvx2PackedMicrokernelOnWindowsBuild` guards this locally by checking the runtime description and profiler-selected tile shape.
+
+The current production GEMM defaults are the intrinsic AVX2 6x8 kernel, row-separated A packing, panel scheduling, private A packing, no worker pinning, and MC/KC/NC = 2048/256/128 for 2048³. Retained tuning selectors are catalogued in [`docs/EXPERIMENTAL_GEMM_PATHS.md`](../docs/EXPERIMENTAL_GEMM_PATHS.md); they are not production recommendations.
 
 ## QR Factorization Defaults
 
@@ -28,9 +30,9 @@ max(m, n) >= 1536  -> block size 96
 
 `JLC_NATIVE_QR_BLOCK_SIZE` and `nativeQrSetBlockSizeOverride` still override this policy for tuning runs.
 
-## Current AVX2 Baseline
+## Historical AVX2 Snapshot (not current validation)
 
-Measured on the current Windows/MSVC built-in backend with one QR GEMM thread:
+Historically measured on a Windows/MSVC built-in backend with one QR GEMM thread. Preserve these values for provenance only; do not treat them as current hardware-relative or scaling evidence:
 
 ```text
 512x512 factorize   block 48  ~37.7 ms
