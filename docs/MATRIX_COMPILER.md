@@ -1,4 +1,4 @@
-# Matrix Compiler M1–M3
+# Matrix Compiler M1–M4
 
 JLC now has a small, opt-in matrix-expression compiler in
 `net.faulj.compiler.matrix`. It provides trustworthy infrastructure for
@@ -245,6 +245,99 @@ This output claims representation and legality only. M3 has no
 Vector API generation, runtime thread scheduler, or benchmark-driven schedule
 choice. Those concerns remain outside M3 and CPU lowering begins in M4.
 
+## M4: CPU lowering and end-to-end execution
+
+M4 is the terminal execution layer. The complete opt-in path is:
+
+```text
+MatrixExpr
+  -> ExecutionPlan
+  -> AffineProgram
+  -> DependenceGraph
+  -> SchedulePlan
+  -> CpuExecutionPlan
+  -> Matrix
+```
+
+`MatrixCompiler.compileProgram(expression, semantics)` returns an immutable
+`CompiledMatrixProgram` containing every inspectable stage. Its `execute()`
+method executes the `CpuExecutionPlan`; it does not interpret the affine IR.
+The CPU package is `net.faulj.compiler.matrix.cpu` and contains the bounded
+`CpuLowerer`, `CpuExecutionPlan`, `CpuExecutor`, `CpuBufferBinding`, and
+operation-specific `CpuStep` types.
+
+### Hybrid CPU lowering
+
+M4 deliberately has two lowering boundaries:
+
+- `MATMUL_INIT` plus `MATMUL_UPDATE` become one opaque `CpuGemmStep` that calls
+  the canonical `net.faulj.kernels.gemm.Gemm.multiply` facade. The native or
+  Java backend, packing, blocking, microkernel dispatch, and worker scheduling
+  remain owned by the existing GEMM implementation.
+- `ADD`, `SCALE`, and `TRANSPOSE` become bounded explicit Java loops over the
+  M3 schedule band. The loop realization honors loop interchange and
+  strip-mining, including generated remainder guards. It uses public
+  `Matrix.get`, `getImag`, `set`, and `setComplex` APIs and does not weaken
+  Matrix encapsulation.
+
+The initial M4 schedule recognizes one safe M3 fusion family:
+
+```text
+T = scale(A, alpha)
+Z = add(T, B)
+```
+
+The CPU plan realizes this as one loop,
+`Z[i,j] = alpha * A[i,j] + B[i,j]`, and elides the logical `T` materialization.
+The affine statements and M2 logical buffer remain available for inspection;
+only the CPU materialization decision changes. Arbitrary expression fusion,
+fusion search, and buffer reuse are not implemented.
+
+M3 `PARALLEL` and `VECTOR` annotations continue to mean “legal to realize,”
+not “must realize.” M4 preserves those annotations and uses deterministic
+serial scalar fallback. This keeps legality separate from a new thread-pool
+or SIMD implementation and leaves native GEMM concurrency unchanged.
+
+### Runtime ownership and symbolic plans
+
+External `Input` buffers reuse M2's `EXTERNAL_INPUT` / `BORROWED` facts and are
+bound by reference at execution time. The CPU plan does not snapshot inputs;
+callers must avoid concurrent mutation and must keep caller-owned off-heap
+storage valid. The compiler never closes or frees external storage. CPU
+temporaries receive ordinary execution-owned `Matrix` instances, with no
+allocator, pool, lifetime-based reuse, or early-free policy. `SymbolicInput`
+buffers remain non-executable and unresolved symbolic plans fail before any
+CPU step begins.
+
+### Fixed M4 benchmark suite
+
+The benchmark suite is one JUnit class with exactly four families. Each case
+uses deterministic inputs, two warmups, five measured iterations, median
+reporting, checksum consumption, and a correctness comparison before timing.
+The measurements below are an honest single-host result from Java 21.0.12 on
+Linux/amd64 with 32 reported processors and the `native` GEMM backend; they are
+not universal performance claims.
+
+| Family | Shapes / comparison | Observed result |
+| --- | --- | --- |
+| Matrix-chain reassociation | `1000x10 * 10x1000 * 1000x10`; STRICT vs RELAXED | Planner cost `20,000,000` vs `200,000`; median `3.378 ms` vs `3.119 ms`; realized speedup `1.083x`; correctness passed. |
+| Elementwise fusion | `scale(256x256, 2.5) + 256x256` | Temporary materializations `2` eager vs `1` compiler; estimated temporary bytes `1,048,576` vs `524,288`; median `3.972 ms` eager vs `13.382 ms` fused; correctness passed. Fusion was slower in this scalar public-API loop and is reported as such. |
+| Direct GEMM overhead | `192x192 * 192x192` | Direct `Gemm` median `0.312 ms`; compiled median `0.306 ms`; measured orchestration overhead `-1.83%`; correctness passed and both use the same GEMM facade. |
+| Shared DAG | `X = A * B; Y = X + X`, `96x96` | One GEMM invocation, two logical temporary buffers, median `22.249 ms`; producer computed once; correctness passed. |
+
+These results distinguish planner arithmetic reduction, temporary
+materialization reduction, runtime speedup, and compiler orchestration
+overhead. No result is used as a completion gate or as a reason to begin more
+performance tuning.
+
+### M4 limitations
+
+M4 does not add new schedule transformations, a universal affine interpreter,
+automatic parallel execution, arbitrary SIMD synthesis, GEMM replacement,
+buffer reuse, allocation planning, JIT/code generation, or a new native
+backend. The explicit loop backend is intentionally small and conservative;
+opaque GEMM remains the production path for multiplication.
+
 ## Fixed matrix-compiler milestone path
 
 1. M1 — Graph IR + whole-expression optimization
@@ -252,13 +345,16 @@ choice. Those concerns remain outside M3 and CPU lowering begins in M4.
 3. M3 — Legal polyhedral schedule transformations
 4. M4 — CPU lowering + end-to-end benchmark proof
 
-**M4 is the terminal milestone. There is no M5 in the matrix-compiler pathway.**
+**M4 IS THE TERMINAL MATRIX-COMPILER MILESTONE. THERE IS NO M5.**
 
 Extensions outside this M1–M4 pathway include CUDA, GPU scheduling,
 heterogeneous CPU/GPU placement, autotuning research, ML cost models,
 distributed execution, and unrelated compiler research. Those may be separate
 future projects, but they must not extend the matrix-compiler milestone path.
 
-M1 and M2 demonstrate inspectable compiler infrastructure, not a real-workload
-performance claim. Controlled benchmarks on actual programs are required
-before making one.
+## Post-M4 ideas
+
+CUDA/GPU backends, heterogeneous placement, autotuning, ML cost models, more
+general polyhedral solving, JIT/code generation, and additional fusion families
+are separate future projects, not unfinished M4 work. They do not extend the
+M1–M4 matrix-compiler pathway.

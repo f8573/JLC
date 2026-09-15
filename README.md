@@ -79,6 +79,16 @@ Runtime selection is controlled by `jlc.backend=auto|java|native` (default
 `jlc.algorithm.<name>.backend=auto|java|cpp`; an explicit native request still
 falls back to Java if the library cannot load or the operation is unsupported.
 
+## Matrix compiler pathway
+
+JLC also has an opt-in matrix-expression compiler. A `MatrixExpr` DAG is
+planned, lowered to bounded affine/dependence facts, checked with legal M3
+schedule transformations, and can now execute through a small CPU lowering
+layer. Matrix multiplication remains on the existing optimized `Gemm` facade;
+the compiler adds inspectable matrix-chain optimization and explicit
+elementwise/transpose execution without presenting JLC as a general-purpose
+polyhedral compiler. See [`docs/MATRIX_COMPILER.md`](docs/MATRIX_COMPILER.md).
+
 ## Native GEMM design
 
 The production path computes `C = alpha * A * B + beta * C` through a layered
