@@ -201,6 +201,9 @@ explanation. M3 derives only the bounded direction facts required by the
 canonical M2 accesses, including constant affine offsets and the MatMul
 reduction dimension. An unknown alias, direction, or dependence is rejected;
 it never becomes optimistic independence.
+Identical write accesses are compared across iterations: unique unit
+projections can prove independence, while collapsed or unsupported mappings
+remain conservative.
 
 ### M3 transformation vocabulary
 
@@ -211,8 +214,8 @@ M3 implements exactly these five transformations:
   guards and multidimensional composition; generated tile loops cannot be
   re-strip-mined, and a binder cannot move behind an index that depends on it;
 - producer/consumer or sibling `FUSION` only for compatible domains, bands,
-  proven statement ordering, and proven producer-value availability at each
-  fused consumer iteration;
+  proven statement ordering, and pointwise RAW, WAR, and WAW ordering at
+  unique shared locations; unsupported offsets remain `UNKNOWN`;
 - `PARALLEL` loop marking only when no blocking loop-carried dependence exists;
 - `VECTOR` loop marking only when legality is proven.
 
@@ -311,8 +314,10 @@ serial scalar fallback. This keeps legality separate from a new thread-pool
 or SIMD implementation and leaves native GEMM concurrency unchanged.
 
 Before lowering, M4 validates the executable subset and the retained M1/M2
-provenance. It rejects writes to borrowed buffers, foreign buffers, incomplete
-domains or loop bands, malformed tile bindings and guards, nested schedule
+provenance. It requires exact logical `[0,N)` bounds for executable matrix
+dimensions, including tiled bindings, and rejects writes to borrowed buffers,
+foreign buffers, incomplete or shifted domains or loop bands, malformed tile
+bindings and guards, nested schedule
 bodies it cannot reproduce, mismatched MatMul forms, and fusion families other
 than the validated scale-then-add case. Rejection is intentional; M4 is not a
 general affine interpreter.

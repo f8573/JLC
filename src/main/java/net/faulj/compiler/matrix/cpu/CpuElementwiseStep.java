@@ -160,6 +160,8 @@ public final class CpuElementwiseStep implements CpuStep {
             ? context.value(secondOperand) : null;
         boolean complex = first.hasImagData()
             || (second != null && second.hasImagData());
+        boolean firstComplex = first.hasImagData();
+        boolean secondComplex = second != null && second.hasImagData();
         if (complex) {
             output.ensureImagData();
         }
@@ -182,7 +184,11 @@ public final class CpuElementwiseStep implements CpuStep {
                     return;
                 }
                 real += second.get(secondIndices[0], secondIndices[1]);
-                imaginary += second.getImag(secondIndices[0], secondIndices[1]);
+                if (firstComplex && secondComplex) {
+                    imaginary += second.getImag(secondIndices[0], secondIndices[1]);
+                } else if (secondComplex) {
+                    imaginary = second.getImag(secondIndices[0], secondIndices[1]);
+                }
             }
             if (complex) {
                 output.setComplex(outputIndices[0], outputIndices[1], real, imaginary);

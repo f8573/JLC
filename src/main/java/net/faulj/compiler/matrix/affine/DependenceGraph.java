@@ -154,9 +154,6 @@ public final class DependenceGraph {
                                         Map<Key, Dependence> result) {
         for (AffineAccess sourceAccess : source.accesses()) {
             for (AffineAccess sinkAccess : sink.accesses()) {
-                if (source == sink && sourceAccess == sinkAccess) {
-                    continue;
-                }
                 if (sourceAccess.isReduction() && sinkAccess.isReduction()
                     && sourceAccess.buffer() == sinkAccess.buffer()) {
                     continue;
@@ -228,7 +225,8 @@ public final class DependenceGraph {
         return (sourceStatement.kind() == StatementKind.MATMUL_INIT
                 && sinkStatement.kind() == StatementKind.MATMUL_UPDATE)
             || (sourceStatement.kind() == StatementKind.MATMUL_UPDATE
-                && sourceStatement.hasReduction());
+                && sourceStatement.hasReduction()
+                && (source.isReduction() || sink.isReduction()));
     }
 
     private static DependenceStatus supportedOverlap(AffineStatement sourceStatement,

@@ -56,6 +56,118 @@ public class MatrixCompilerAuditRegressionTest {
     }
 
     @Test
+    public void pointwiseScaleAddFusionRemainsLegal() {
+        AffineProgram program = AffineProgram.lower(MatrixCompiler.compile(
+            MatrixExpr.symbolicInput("A", new MatrixShape(3, 3)).scale(2.0)
+                .add(MatrixExpr.symbolicInput("B", new MatrixShape(3, 3)))));
+        assertEquals(LegalityStatus.LEGAL, SchedulePlan.initial(program).fusion(0, 1).status());
+    }
+
+    @Test
+    public void offsetWawAndWarFusionCannotInterleave() {
+        AffineVariable i = variable("i");
+        AffineVariable j = variable("j");
+        LogicalBuffer state = temporary(0, "state", new MatrixShape(1, 4));
+        IterationDomain points = domain(i, j, 1, 3);
+        AffineStatement firstWrite = statement(0, points,
+            List.of(AffineAccess.write(state, expr(i), expr(j))));
+        AffineStatement shiftedWrite = statement(1, points,
+            List.of(AffineAccess.write(state, expr(i), expr(j).add(1))));
+        AffineProgram waw = program(List.of(state), List.of(firstWrite, shiftedWrite),
+            state, List.of(i, j));
+        assertEquals(LegalityStatus.UNKNOWN, SchedulePlan.initial(waw).fusion(0, 1).status());
+
+        AffineStatement firstRead = statement(0, points,
+            List.of(AffineAccess.read(state, expr(i), expr(j).add(1))));
+        AffineStatement secondWrite = statement(1, points,
+            List.of(AffineAccess.write(state, expr(i), expr(j))));
+        AffineProgram war = program(List.of(state), List.of(firstRead, secondWrite),
+            state, List.of(i, j));
+        assertEquals(LegalityStatus.UNKNOWN, SchedulePlan.initial(war).fusion(0, 1).status());
+    }
+
+    @Test
+    public void sameLocationPointwiseWriteReadFusionRemainsLegal() {
+        AffineVariable i = variable("i");
+        AffineVariable j = variable("j");
+        LogicalBuffer state = temporary(0, "state", new MatrixShape(2, 2));
+        IterationDomain points = domain(i, j, 2, 2);
+        AffineStatement write = statement(0, points,
+            List.of(AffineAccess.write(state, expr(i), expr(j))));
+        AffineStatement read = statement(1, points,
+            List.of(AffineAccess.read(state, expr(i), expr(j))));
+        AffineProgram program = program(List.of(state), List.of(write, read),
+            state, List.of(i, j));
+        assertEquals(LegalityStatus.LEGAL, SchedulePlan.initial(program).fusion(0, 1).status());
+    }
+
+    @Test
+    public void identicalNoninjectiveWriteAccessBlocksParallelMarking() {
+        AffineVariable i = variable("i");
+        AffineVariable j = variable("j");
+        LogicalBuffer state = temporary(0, "state", new MatrixShape(4, 4));
+        IterationDomain points = domain(i, j, 4, 4);
+        for (AffineAccess access : List.of(
+            AffineAccess.write(state, expr(i), AffineExpr.constant(0)),
+            AffineAccess.readWrite(state, expr(i), AffineExpr.constant(0)))) {
+            AffineStatement update = statement(0, points, List.of(access));
+            AffineProgram program = program(List.of(state), List.of(update), state,
+                List.of(i, j));
+            assertEquals(DependenceStatus.UNKNOWN,
+                program.dependenceGraph().query(update, update, DependenceKind.WAW));
+            assertEquals(LegalityStatus.UNKNOWN,
+                SchedulePlan.initial(program).parallel(0, "j").status());
+        }
+        AffineStatement canonical = statement(0, points,
+            List.of(AffineAccess.write(state, expr(i), expr(j))));
+        AffineProgram canonicalProgram = program(List.of(state), List.of(canonical), state,
+            List.of(i, j));
+        assertEquals(DependenceStatus.PROVEN_NONE,
+            canonicalProgram.dependenceGraph().query(canonical, canonical, DependenceKind.WAW));
+        assertEquals(LegalityStatus.LEGAL,
+            SchedulePlan.initial(canonicalProgram).parallel(0, "j").status());
+        AffineStatement collapsedRow = statement(0, points,
+            List.of(AffineAccess.write(state, AffineExpr.constant(0), expr(j))));
+        AffineProgram rowProgram = program(List.of(state), List.of(collapsedRow), state,
+            List.of(i, j));
+        assertEquals(LegalityStatus.UNKNOWN,
+            SchedulePlan.initial(rowProgram).parallel(0, "i").status());
+    }
+
+    @Test
+    public void ordinaryMixedAddCopiesImaginaryLaneExactly() {
+        for (double imaginary : new double[]{-0.0, Double.NaN,
+            Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY}) {
+            Matrix real = scalar(2.0, null);
+            Matrix complex = scalar(3.0, imaginary);
+            assertOrdinaryAddMatchesEager(real, complex);
+            assertOrdinaryAddMatchesEager(complex, real);
+            assertCanonicalizedAddMatchesEager(real, complex);
+            assertCanonicalizedAddMatchesEager(complex, real);
+        }
+        Matrix real = scalar(2.0, null);
+        Matrix negativeZero = scalar(3.0, -0.0);
+        assertEquals(0x8000000000000000L,
+            Double.doubleToRawLongBits(MatrixCompiler.compileProgram(
+                MatrixExpr.input(real).add(MatrixExpr.input(negativeZero)))
+                .execute().getImag(0, 0)));
+        assertEquals(0x8000000000000000L,
+            Double.doubleToRawLongBits(MatrixCompiler.compileProgram(
+                MatrixExpr.input(negativeZero).add(MatrixExpr.input(real)))
+                .execute().getImag(0, 0)));
+    }
+
+    @Test
+    public void shiftedLogicalDomainsRejectBeforeCpuExecution() {
+        assertShiftedScaleRejected(1, 3, 0, 2);
+        assertShiftedScaleRejected(0, 2, 1, 3);
+        assertShiftedScaleRejected(-1, 1, 0, 2);
+        assertShiftedScaleRejected(0, 2, -1, 1);
+        assertCanonicalScaleAccepted(2, 2);
+        assertCanonicalScaleAccepted(5, 3);
+    }
+
+    @Test
     public void generatedTileLoopsCannotBeRetiled() {
         SchedulePlan tiled = SchedulePlan.initial(addProgram(8, 8))
             .stripMine(0, "i", 4).schedule();
@@ -169,6 +281,11 @@ public class MatrixCompilerAuditRegressionTest {
             graph.query(update, update, DependenceKind.REDUCTION));
         assertEquals(DependenceStatus.UNKNOWN,
             graph.query(update, update, DependenceKind.RAW));
+        assertEquals(DependenceStatus.UNKNOWN,
+            graph.query(update, update, DependenceKind.WAW));
+        AffineProgram program = program(List.of(output, state), List.of(update), output,
+            List.of(i, j, k));
+        assertFalse(SchedulePlan.initial(program).parallel(0, "k").accepted());
     }
 
     @Test
@@ -317,7 +434,7 @@ public class MatrixCompilerAuditRegressionTest {
                 AffineAccess.read(input, expr(i), expr(j))), "partial scale");
         AffineProgram program = program(List.of(output, input), List.of(scale), output, List.of(i, j));
 
-        expectLoweringRejected(SchedulePlan.initial(program), null, "completely cover");
+        expectLoweringRejected(SchedulePlan.initial(program), null, "exact canonical");
     }
 
     @Test
@@ -362,6 +479,54 @@ public class MatrixCompilerAuditRegressionTest {
         net.faulj.compiler.matrix.CompiledMatrixProgram compiled = MatrixCompiler.compileProgram(expression);
         assertTrue(compiled.cpuPlan().hasFusedElementwiseStep());
         assertMatrixBitsEqual(expected, compiled.execute());
+    }
+
+    private static void assertOrdinaryAddMatchesEager(Matrix left, Matrix right) {
+        Matrix expected = left.add(right);
+        Matrix actual = MatrixCompiler.compileProgram(
+            MatrixExpr.input(left).add(MatrixExpr.input(right))).execute();
+        assertMatrixBitsEqual(expected, actual);
+    }
+
+    private static void assertCanonicalizedAddMatchesEager(Matrix left, Matrix right) {
+        Matrix expected = left.multiplyScalar(1.0).add(right);
+        Matrix actual = MatrixCompiler.compileProgram(
+            MatrixExpr.input(left).scale(1.0).add(MatrixExpr.input(right))).execute();
+        assertMatrixBitsEqual(expected, actual);
+        Matrix expectedReversed = right.add(left.multiplyScalar(1.0));
+        Matrix actualReversed = MatrixCompiler.compileProgram(
+            MatrixExpr.input(right).add(MatrixExpr.input(left).scale(1.0))).execute();
+        assertMatrixBitsEqual(expectedReversed, actualReversed);
+    }
+
+    private static void assertShiftedScaleRejected(long iLower, long iUpper,
+                                                   long jLower, long jUpper) {
+        expectLoweringRejected(scaleProgram(iLower, iUpper, jLower, jUpper), null,
+            "exact canonical");
+    }
+
+    private static void assertCanonicalScaleAccepted(int rows, int columns) {
+        SchedulePlan schedule = scaleProgram(0, rows, 0, columns);
+        CpuExecutableSubsetValidator.validate(schedule);
+        CpuExecutableSubsetValidator.validate(schedule.stripMine(0, "i", 2).schedule());
+        CpuExecutableSubsetValidator.validate(schedule.stripMine(0, "i", 3).schedule());
+    }
+
+    private static SchedulePlan scaleProgram(long iLower, long iUpper,
+                                             long jLower, long jUpper) {
+        AffineVariable i = variable("i");
+        AffineVariable j = variable("j");
+        MatrixShape shape = new MatrixShape((int) (iUpper - iLower), (int) (jUpper - jLower));
+        LogicalBuffer output = temporary(0, "output", shape);
+        LogicalBuffer input = external(1, "input", shape);
+        IterationDomain points = IterationDomain.of(
+            IterationDomain.range(i, iLower, iUpper),
+            IterationDomain.range(j, jLower, jUpper));
+        AffineStatement scale = new AffineStatement(0, StatementKind.SCALE, points,
+            List.of(AffineAccess.write(output, expr(i), expr(j)),
+                AffineAccess.read(input, expr(i), expr(j))), "scale domain probe");
+        return SchedulePlan.initial(program(List.of(output, input), List.of(scale), output,
+            List.of(i, j)));
     }
 
     private static void assertMatrixBitsEqual(Matrix expected, Matrix actual) {

@@ -6,6 +6,8 @@ import java.util.Optional;
 
 import net.faulj.compiler.matrix.OptimizationSemantics;
 import net.faulj.compiler.matrix.affine.AffineStatement;
+import net.faulj.compiler.matrix.affine.AffineAccess;
+import net.faulj.compiler.matrix.affine.AffineExpr;
 import net.faulj.compiler.matrix.affine.AffineVariable;
 import net.faulj.compiler.matrix.affine.Dependence;
 import net.faulj.compiler.matrix.affine.DependenceKind;
@@ -355,26 +357,39 @@ public final class ScheduleLegality {
 
     private static LegalityResult checkFusedAvailability(AffineStatement producer,
                                                           AffineStatement consumer) {
-        boolean hasProducerConsumerRaw = false;
-        for (net.faulj.compiler.matrix.affine.AffineAccess write : producer.accesses()) {
-            if (!write.writes()) {
-                continue;
-            }
-            for (net.faulj.compiler.matrix.affine.AffineAccess read : consumer.accesses()) {
-                if (!read.reads() || write.buffer() != read.buffer()) {
+        for (AffineAccess first : producer.accesses()) {
+            for (AffineAccess second : consumer.accesses()) {
+                if (first.buffer() != second.buffer()
+                    || (!first.writes() && !second.writes())) {
                     continue;
                 }
-                hasProducerConsumerRaw = true;
-                if (!write.indices().equals(read.indices())) {
+                // The original two-region order puts every producer point before
+                // every consumer point. Interleaving is safe only when a shared
+                // location belongs to the same unique logical point in both.
+                if (!first.indices().equals(second.indices())
+                    || !isInjectiveUnitProjection(first, producer)
+                    || !isInjectiveUnitProjection(second, consumer)) {
                     return LegalityResult.unknown(
-                        "fusion cannot prove producer values are available at the consumer iteration");
+                        "fusion cannot prove RAW/WAR/WAW ordering across iterations");
                 }
             }
         }
-        if (!hasProducerConsumerRaw) {
-            return LegalityResult.legal("no producer-consumer RAW availability constraint");
+        return LegalityResult.legal(
+            "all shared RAW/WAR/WAW locations are unique to the same fused iteration");
+    }
+
+    private static boolean isInjectiveUnitProjection(AffineAccess access,
+                                                      AffineStatement statement) {
+        java.util.Set<AffineVariable> seen = new java.util.HashSet<>();
+        for (AffineExpr index : access.indices()) {
+            if (index.coefficients().size() != 1
+                || index.coefficients().firstEntry().getValue() != 1L
+                || !seen.add(index.coefficients().firstKey())) {
+                return false;
+            }
         }
-        return LegalityResult.legal("producer and consumer use identical affine locations per iteration");
+        return seen.containsAll(statement.domain().variables())
+            && seen.size() == statement.domain().variables().size();
     }
 
     private static boolean bindingsFollowDefinitions(List<ScheduleLoop> loops) {

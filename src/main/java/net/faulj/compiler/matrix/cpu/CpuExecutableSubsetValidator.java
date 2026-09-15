@@ -127,6 +127,9 @@ final class CpuExecutableSubsetValidator {
         long rows = extent(statement.domain(), i);
         long columns = extent(statement.domain(), j);
         long reduction = extent(statement.domain(), k);
+        requireCanonicalRange(statement, i, statement.accesses().get(2).buffer().shape().rows());
+        requireCanonicalRange(statement, j, statement.accesses().get(2).buffer().shape().columns());
+        requireCanonicalRange(statement, k, statement.accesses().get(0).buffer().shape().columns());
         if (statement.accesses().get(0).buffer().shape().rows() != rows
             || statement.accesses().get(0).buffer().shape().columns() != reduction
             || statement.accesses().get(1).buffer().shape().rows() != reduction
@@ -279,8 +282,23 @@ final class CpuExecutableSubsetValidator {
         long second = extent(statement.domain(), statement.domain().variables().get(1));
         long rows = transposed ? second : first;
         long columns = transposed ? first : second;
+        requireCanonicalRange(statement, statement.domain().variables().get(0),
+            transposed ? buffer.shape().columns() : buffer.shape().rows());
+        requireCanonicalRange(statement, statement.domain().variables().get(1),
+            transposed ? buffer.shape().rows() : buffer.shape().columns());
         if (buffer.shape().rows() != rows || buffer.shape().columns() != columns) {
             reject(statement, "domain does not completely cover access buffer shape");
+        }
+    }
+
+    private static void requireCanonicalRange(AffineStatement statement,
+                                              AffineVariable variable,
+                                              long expectedExtent) {
+        IterationDomain.Range range = statement.domain().ranges().stream()
+            .filter(candidate -> candidate.variable().equals(variable))
+            .findFirst().orElseThrow();
+        if (range.lowerInclusive() != 0L || range.upperExclusive() != expectedExtent) {
+            reject(statement, "domain must cover the exact canonical [0,N) logical range");
         }
     }
 
