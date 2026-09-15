@@ -67,4 +67,23 @@ public final class MatrixCompiler {
         }
         return plan.evaluate();
     }
+
+    /**
+     * Compile an expression through the complete inspectable M1-M4 pipeline.
+     * The returned program executes its lowered CPU plan when requested.
+     */
+    public static CompiledMatrixProgram compileProgram(MatrixExpr expression) {
+        return compileProgram(expression, OptimizationSemantics.STRICT);
+    }
+
+    public static CompiledMatrixProgram compileProgram(MatrixExpr expression,
+                                                       OptimizationSemantics semantics) {
+        return compileProgram(expression, semantics, new FlopCostModel());
+    }
+
+    public static CompiledMatrixProgram compileProgram(MatrixExpr expression,
+                                                       OptimizationSemantics semantics,
+                                                       MatrixCostModel costModel) {
+        return CompiledMatrixProgram.from(compile(expression, semantics, costModel));
+    }
 }

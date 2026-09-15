@@ -4,6 +4,7 @@ import java.util.IdentityHashMap;
 
 import net.faulj.kernels.gemm.Gemm;
 import net.faulj.matrix.Matrix;
+import net.faulj.matrix.OffHeapMatrix;
 
 /**
  * M1 interpreter for execution plans.
@@ -14,7 +15,18 @@ final class MatrixPlanEvaluator {
 
     static Matrix evaluate(PlanNode root) {
         PlanNode.requireNode(root, "Plan root");
-        return evaluate(root, new IdentityHashMap<>());
+        IdentityHashMap<PlanNode, Matrix> values = new IdentityHashMap<>();
+        Matrix result = null;
+        Throwable failure = null;
+        try {
+            result = evaluate(root, values);
+            return result;
+        } catch (RuntimeException | Error exception) {
+            failure = exception;
+            throw exception;
+        } finally {
+            closeOwnedIntermediates(values, result, failure);
+        }
     }
 
     private static Matrix evaluate(PlanNode node,
@@ -46,5 +58,36 @@ final class MatrixPlanEvaluator {
         }
         values.put(node, result);
         return result;
+    }
+
+    private static void closeOwnedIntermediates(IdentityHashMap<PlanNode, Matrix> values,
+                                                Matrix transferredResult,
+                                                Throwable failure) {
+        IdentityHashMap<Matrix, Boolean> closed = new IdentityHashMap<>();
+        RuntimeException cleanupFailure = null;
+        for (java.util.Map.Entry<PlanNode, Matrix> entry : values.entrySet()) {
+            Matrix matrix = entry.getValue();
+            if (entry.getKey() instanceof PlanInput || matrix == transferredResult
+                || closed.put(matrix, Boolean.TRUE) != null
+                || !(matrix instanceof OffHeapMatrix offHeap)) {
+                continue;
+            }
+            try {
+                offHeap.close();
+            } catch (RuntimeException exception) {
+                if (cleanupFailure == null) {
+                    cleanupFailure = exception;
+                } else {
+                    cleanupFailure.addSuppressed(exception);
+                }
+            }
+        }
+        if (cleanupFailure != null) {
+            if (failure != null) {
+                failure.addSuppressed(cleanupFailure);
+            } else {
+                throw cleanupFailure;
+            }
+        }
     }
 }
