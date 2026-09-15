@@ -139,7 +139,9 @@ public final class CpuFusedElementwiseStep implements CpuStep {
         Matrix output = context.allocate(outputBuffer);
         Matrix scaled = context.value(scaledOperand);
         Matrix addend = context.value(addOperand);
-        boolean complex = scaled.hasImagData() || addend.hasImagData();
+        boolean scaledComplex = scaled.hasImagData();
+        boolean addendComplex = addend.hasImagData();
+        boolean complex = scaledComplex || addendComplex;
         if (complex) {
             output.ensureImagData();
         }
@@ -157,10 +159,20 @@ public final class CpuFusedElementwiseStep implements CpuStep {
             double addReal = addend.get(addIndices[0], addIndices[1]);
             double real = scaledOperandFirst ? scaledReal + addReal : addReal + scaledReal;
             if (complex) {
-                double scaledImaginary = factor * scaled.getImag(scaleIndices[0], scaleIndices[1]);
-                double addImaginary = addend.getImag(addIndices[0], addIndices[1]);
-                double imaginary = scaledOperandFirst
-                    ? scaledImaginary + addImaginary : addImaginary + scaledImaginary;
+                double imaginary;
+                if (scaledComplex && addendComplex) {
+                    double scaledImaginary = factor
+                        * scaled.getImag(scaleIndices[0], scaleIndices[1]);
+                    double addImaginary = addend.getImag(addIndices[0], addIndices[1]);
+                    imaginary = scaledOperandFirst
+                        ? scaledImaginary + addImaginary : addImaginary + scaledImaginary;
+                } else if (scaledComplex) {
+                    // Matrix.add copies a lone imaginary array; it does not add +0.0.
+                    imaginary = factor * scaled.getImag(scaleIndices[0], scaleIndices[1]);
+                } else {
+                    // Eager scale of a real matrix has no imaginary lane, even for NaN/Inf.
+                    imaginary = addend.getImag(addIndices[0], addIndices[1]);
+                }
                 output.setComplex(outputIndices[0], outputIndices[1], real, imaginary);
             } else {
                 output.set(outputIndices[0], outputIndices[1], real);

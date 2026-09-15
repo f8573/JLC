@@ -2,6 +2,7 @@ package net.faulj.compiler.matrix.cpu;
 
 import static org.junit.Assert.assertEquals;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.function.Supplier;
 
@@ -11,14 +12,15 @@ import net.faulj.compiler.matrix.CompiledMatrixProgram;
 import net.faulj.compiler.matrix.MatrixCompiler;
 import net.faulj.compiler.matrix.MatrixExpr;
 import net.faulj.compiler.matrix.OptimizationSemantics;
+import net.faulj.compute.DispatchPolicy;
 import net.faulj.kernels.gemm.Gemm;
 import net.faulj.matrix.Matrix;
 import net.faulj.nativeblas.BackendRegistry;
 
 /**
  * The fixed M4 benchmark suite: chain reassociation, fusion, direct GEMM
- * overhead, and shared DAG execution. Results are informational; every case
- * is correctness-gated before timing.
+ * dispatch boundary, and shared DAG execution. Results are informational;
+ * every case is correctness-gated before timing.
  */
 public class MatrixCpuBenchmarkTest {
     private static final int WARMUPS = 2;
@@ -33,11 +35,12 @@ public class MatrixCpuBenchmarkTest {
             + ", processors=" + Runtime.getRuntime().availableProcessors()
             + ", backend=" + BackendRegistry.snapshot().activeBackend());
         System.out.println("M4 benchmark methodology: warmups=" + WARMUPS
-            + ", measured=" + MEASURED + ", statistic=median, correctness=before-timing");
+            + ", measured=" + MEASURED
+            + ", statistic=median, boundary=execution-only, correctness=before-timing");
 
         benchmarkMatrixChain();
         benchmarkElementwiseFusion();
-        benchmarkDirectGemmOverhead();
+        benchmarkDirectGemmBoundary();
         benchmarkSharedDag();
     }
 
@@ -62,9 +65,12 @@ public class MatrixCpuBenchmarkTest {
         double speedup = strictMillis / relaxedMillis;
         System.out.printf(Locale.ROOT,
             "M4 A MATRIX-CHAIN REASSOCIATION: strictCost=%d relaxedCost=%d "
-                + "strictMedianMs=%.3f relaxedMedianMs=%.3f realizedSpeedup=%.3fx correctness=PASS%n",
+                + "strictProductBackends=%s relaxedProductBackends=%s "
+                + "strictMedianMs=%.3f relaxedMedianMs=%.3f observedRatio=%.3fx correctness=PASS%n",
             strict.expressionPlan().scalarMultiplicationCost(),
             relaxed.expressionPlan().scalarMultiplicationCost(),
+            List.of(selectedGemmBackend(1000, 1000), selectedGemmBackend(1000, 10)),
+            List.of(selectedGemmBackend(10, 10), selectedGemmBackend(1000, 10)),
             strictMillis, relaxedMillis, speedup);
     }
 
@@ -74,11 +80,10 @@ public class MatrixCpuBenchmarkTest {
         MatrixExpr expression = MatrixExpr.input("A", a).scale(2.5).add(MatrixExpr.input("B", b));
         CompiledMatrixProgram compiled = MatrixCompiler.compileProgram(
             expression, OptimizationSemantics.STRICT);
-        Matrix eagerReference = MatrixCompiler.evaluate(expression, OptimizationSemantics.STRICT);
+        Matrix eagerReference = a.multiplyScalar(2.5).add(b);
         assertMatrixEquals(eagerReference, compiled.execute(), 1e-10);
 
-        double eagerMillis = medianMillis(() -> MatrixCompiler.evaluate(
-            expression, OptimizationSemantics.STRICT));
+        double eagerMillis = medianMillis(() -> a.multiplyScalar(2.5).add(b));
         double fusedMillis = medianMillis(compiled::execute);
         long eagerBytes = (long) 256 * 256 * Double.BYTES * 2L;
         System.out.printf(Locale.ROOT,
@@ -92,7 +97,7 @@ public class MatrixCpuBenchmarkTest {
             eagerMillis, fusedMillis);
     }
 
-    private static void benchmarkDirectGemmOverhead() {
+    private static void benchmarkDirectGemmBoundary() {
         Matrix a = filled(192, 192, 0.001);
         Matrix b = filled(192, 192, 0.002);
         MatrixExpr expression = MatrixExpr.input("A", a).matmul(MatrixExpr.input("B", b));
@@ -103,12 +108,16 @@ public class MatrixCpuBenchmarkTest {
 
         double directMillis = medianMillis(() -> Gemm.multiply(a, b));
         double compilerMillis = medianMillis(compiled::execute);
-        double overhead = (compilerMillis / directMillis - 1.0) * 100.0;
+        double difference = (compilerMillis / directMillis - 1.0) * 100.0;
+        String interpretation = Math.abs(difference) <= 5.0
+            ? "measurement-noise" : "observed-timing-difference";
         System.out.printf(Locale.ROOT,
-            "M4 C DIRECT GEMM OVERHEAD: shape=192x192x192 directMedianMs=%.3f "
-                + "compilerMedianMs=%.3f measuredOverhead=%.2f%% sameGemmBackend=PASS "
+            "M4 C DIRECT GEMM DISPATCH BOUNDARY: shape=192x192x192 directMedianMs=%.3f "
+                + "compilerMedianMs=%.3f executionDelta=%.2f%% interpretation=%s "
+                + "selectedBackend=%s sameGemmFacade=PASS "
                 + "correctness=PASS%n",
-            directMillis, compilerMillis, overhead);
+            directMillis, compilerMillis, difference, interpretation,
+            selectedGemmBackend(192, 192));
     }
 
     private static void benchmarkSharedDag() {
@@ -123,11 +132,19 @@ public class MatrixCpuBenchmarkTest {
 
         double compilerMillis = medianMillis(compiled::execute);
         System.out.printf(Locale.ROOT,
-            "M4 D SHARED DAG: gemmInvocations=%d temporaryBuffers=%d "
-                + "compilerMedianMs=%.3f computedOnce=PASS correctness=PASS%n",
+            "M4 D SHARED DAG: plannedGemmSteps=%d observedRuntimeInvocations=not-instrumented "
+                + "temporaryBuffers=%d compilerMedianMs=%.3f sharedPlanNodeOnce=PASS "
+                + "correctness=PASS%n",
             compiled.cpuPlan().gemmStepCount(),
             compiled.cpuPlan().temporaryCount(),
             compilerMillis);
+    }
+
+    private static String selectedGemmBackend(int rows, int columns) {
+        DispatchPolicy policy = DispatchPolicy.defaultPolicy();
+        int threads = policy.isParallelEnabled() ? policy.getParallelism() : 1;
+        return BackendRegistry.shouldUseCppForAlgorithm(
+            "gemm", "multiply", rows, columns, threads) ? "native" : "java";
     }
 
     private static double medianMillis(Supplier<Matrix> operation) {

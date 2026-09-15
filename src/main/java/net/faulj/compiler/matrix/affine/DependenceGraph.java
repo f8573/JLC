@@ -124,7 +124,11 @@ public final class DependenceGraph {
 
         for (int index = 0; index < statements.size(); index++) {
             AffineStatement source = statements.get(index);
-            if (source.kind() == StatementKind.MATMUL_UPDATE && source.hasReduction()) {
+            if (source.domain().isEmpty()) {
+                continue;
+            }
+            if (source.kind() == StatementKind.MATMUL_UPDATE && source.hasReduction()
+                && source.domain().extent(source.reduction().variable()) >= 2L) {
                 add(result, new Dependence(
                     source,
                     source,
@@ -133,8 +137,12 @@ public final class DependenceGraph {
                     "same (i,j); k -> k+1",
                     source.reduction()));
             }
+            compareAccesses(source, source, result);
             for (int next = index + 1; next < statements.size(); next++) {
                 AffineStatement sink = statements.get(next);
+                if (sink.domain().isEmpty()) {
+                    continue;
+                }
                 compareAccesses(source, sink, result);
             }
         }
@@ -146,18 +154,16 @@ public final class DependenceGraph {
                                         Map<Key, Dependence> result) {
         for (AffineAccess sourceAccess : source.accesses()) {
             for (AffineAccess sinkAccess : sink.accesses()) {
+                if (source == sink && sourceAccess == sinkAccess) {
+                    continue;
+                }
                 if (sourceAccess.isReduction() && sinkAccess.isReduction()
                     && sourceAccess.buffer() == sinkAccess.buffer()) {
-                    add(result, new Dependence(
-                        source,
-                        sink,
-                        DependenceKind.REDUCTION,
-                        DependenceStatus.PROVEN_DEPENDENCE,
-                        "same reduction buffer; ordered k instances",
-                        sink.reduction()));
+                    continue;
                 }
 
-                DependenceStatus overlap = overlapStatus(sourceAccess, sinkAccess);
+                DependenceStatus overlap = overlapStatus(
+                    source, sink, sourceAccess, sinkAccess);
                 if (overlap == DependenceStatus.PROVEN_NONE) {
                     continue;
                 }
@@ -193,20 +199,101 @@ public final class DependenceGraph {
         }
     }
 
-    private static DependenceStatus overlapStatus(AffineAccess source, AffineAccess sink) {
+    private static DependenceStatus overlapStatus(AffineStatement sourceStatement,
+                                                  AffineStatement sinkStatement,
+                                                  AffineAccess source,
+                                                  AffineAccess sink) {
         AliasRelation alias = AliasAnalysis.between(source.buffer(), sink.buffer());
         if (alias == AliasRelation.NO_ALIAS) {
             return DependenceStatus.PROVEN_NONE;
         }
         if (alias == AliasRelation.MAY_ALIAS) {
-            return source.reads() && sink.reads()
+            return !source.writes() && !sink.writes()
                 ? DependenceStatus.PROVEN_NONE
                 : DependenceStatus.UNKNOWN;
         }
-        if (source.buffer().isTemporary() || source.hasSameIndices(sink)) {
+        if (isCanonicalMatMulFlow(sourceStatement, sinkStatement, source, sink)) {
             return DependenceStatus.PROVEN_DEPENDENCE;
         }
-        return DependenceStatus.UNKNOWN;
+        return supportedOverlap(sourceStatement, sinkStatement, source, sink);
+    }
+
+    private static boolean isCanonicalMatMulFlow(AffineStatement sourceStatement,
+                                                  AffineStatement sinkStatement,
+                                                  AffineAccess source,
+                                                  AffineAccess sink) {
+        if (source.buffer() != sink.buffer() || !source.hasSameIndices(sink)) {
+            return false;
+        }
+        return (sourceStatement.kind() == StatementKind.MATMUL_INIT
+                && sinkStatement.kind() == StatementKind.MATMUL_UPDATE)
+            || (sourceStatement.kind() == StatementKind.MATMUL_UPDATE
+                && sourceStatement.hasReduction());
+    }
+
+    private static DependenceStatus supportedOverlap(AffineStatement sourceStatement,
+                                                      AffineStatement sinkStatement,
+                                                      AffineAccess source,
+                                                      AffineAccess sink) {
+        if (source.indices().size() != sink.indices().size()) {
+            return DependenceStatus.UNKNOWN;
+        }
+        java.util.Set<AffineVariable> sourceVariables = new java.util.HashSet<>();
+        java.util.Set<AffineVariable> sinkVariables = new java.util.HashSet<>();
+        boolean differentInstances = sourceStatement != sinkStatement;
+        for (int dimension = 0; dimension < source.indices().size(); dimension++) {
+            AffineExpr left = source.index(dimension);
+            AffineExpr right = sink.index(dimension);
+            if (!isUnitProjection(left) || !isUnitProjection(right)) {
+                return DependenceStatus.UNKNOWN;
+            }
+            AffineVariable leftVariable = left.coefficients().firstKey();
+            AffineVariable rightVariable = right.coefficients().firstKey();
+            if (!sourceVariables.add(leftVariable) || !sinkVariables.add(rightVariable)) {
+                return DependenceStatus.UNKNOWN;
+            }
+            IterationDomain.Range leftRange = range(sourceStatement.domain(), leftVariable);
+            IterationDomain.Range rightRange = range(sinkStatement.domain(), rightVariable);
+            if (leftRange == null || rightRange == null) {
+                return DependenceStatus.UNKNOWN;
+            }
+            long leftLower;
+            long leftUpper;
+            long rightLower;
+            long rightUpper;
+            try {
+                leftLower = Math.addExact(leftRange.lowerInclusive(), left.constant());
+                leftUpper = Math.addExact(leftRange.upperExclusive(), left.constant());
+                rightLower = Math.addExact(rightRange.lowerInclusive(), right.constant());
+                rightUpper = Math.addExact(rightRange.upperExclusive(), right.constant());
+            } catch (ArithmeticException overflow) {
+                return DependenceStatus.UNKNOWN;
+            }
+            if (Math.max(leftLower, rightLower) >= Math.min(leftUpper, rightUpper)) {
+                return DependenceStatus.PROVEN_NONE;
+            }
+            if (!leftVariable.equals(rightVariable) || left.constant() != right.constant()) {
+                differentInstances = true;
+            }
+        }
+        if (sourceVariables.size() != sourceStatement.domain().variables().size()
+            || sinkVariables.size() != sinkStatement.domain().variables().size()) {
+            return DependenceStatus.UNKNOWN;
+        }
+        return differentInstances
+            ? DependenceStatus.PROVEN_DEPENDENCE : DependenceStatus.PROVEN_NONE;
+    }
+
+    private static boolean isUnitProjection(AffineExpr expression) {
+        return expression.coefficients().size() == 1
+            && expression.coefficients().firstEntry().getValue() == 1L;
+    }
+
+    private static IterationDomain.Range range(IterationDomain domain,
+                                                AffineVariable variable) {
+        return domain.ranges().stream()
+            .filter(candidate -> candidate.variable().equals(variable))
+            .findFirst().orElse(null);
     }
 
     private static String relationFor(AffineStatement source,
@@ -226,8 +313,9 @@ public final class DependenceGraph {
     private static void add(Map<Key, Dependence> result, Dependence candidate) {
         Key key = new Key(candidate.source(), candidate.sink(), candidate.kind());
         Dependence previous = result.get(key);
-        if (previous == null || previous.status() == DependenceStatus.UNKNOWN
-            && candidate.status() == DependenceStatus.PROVEN_DEPENDENCE) {
+        if (previous == null
+            || previous.status() == DependenceStatus.PROVEN_DEPENDENCE
+                && candidate.status() == DependenceStatus.UNKNOWN) {
             result.put(key, candidate);
         }
     }

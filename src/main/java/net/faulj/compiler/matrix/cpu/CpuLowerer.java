@@ -76,6 +76,12 @@ public final class CpuLowerer {
             throw new IllegalArgumentException(
                 "Execution-plan and schedule optimization semantics must match");
         }
+        if (executionPlan != null && !schedule.program().originatesFrom(executionPlan)) {
+            throw new IllegalArgumentException(
+                "ExecutionPlan and AffineProgram do not share verified M1/M2 provenance");
+        }
+
+        CpuExecutableSubsetValidator.validate(schedule);
 
         PlanMapping mapping = executionPlan == null
             ? null : PlanMapping.create(executionPlan, schedule.program());
@@ -93,6 +99,10 @@ public final class CpuLowerer {
                 emitted.add(fused.addStatement);
                 elided.add(fused.eliminatedBuffer);
                 continue;
+            }
+            if (region.statements().size() != 1) {
+                throw new IllegalArgumentException(
+                    "CPU lowering supports only singleton regions and validated scale-add fusion");
             }
 
             for (AffineStatement statement : region.statements()) {

@@ -274,6 +274,47 @@ public class MatrixCompilerTest {
     }
 
     @Test
+    public void m1ClosesHiddenOffHeapIntermediateAndKeepsBorrowedInputOpen() {
+        try (OffHeapMatrix a = new OffHeapMatrix(2, 2)) {
+            a.set(0, 0, 1.0);
+            a.set(1, 1, 1.0);
+            CapturingMatrix addend = new CapturingMatrix(2, 2, false);
+            Matrix b = new Matrix(new double[][]{{2, 3}, {4, 5}});
+
+            Matrix result = MatrixCompiler.evaluate(
+                MatrixExpr.input(addend).add(
+                    MatrixExpr.input(a).matmul(MatrixExpr.input(b))));
+
+            assertEquals(2.0, result.get(0, 0), 0.0);
+            assertTrue(addend.captured instanceof OffHeapMatrix);
+            assertFalse(((OffHeapMatrix) addend.captured).segment().scope().isAlive());
+            assertTrue(a.segment().scope().isAlive());
+        }
+    }
+
+    @Test
+    public void m1ClosesHiddenOffHeapIntermediateWhenConsumerThrows() {
+        try (OffHeapMatrix a = new OffHeapMatrix(2, 2)) {
+            a.set(0, 0, 1.0);
+            a.set(1, 1, 1.0);
+            CapturingMatrix addend = new CapturingMatrix(2, 2, true);
+            Matrix b = new Matrix(new double[][]{{2, 3}, {4, 5}});
+            try {
+                MatrixCompiler.evaluate(
+                    MatrixExpr.input(addend).add(
+                        MatrixExpr.input(a).matmul(MatrixExpr.input(b))));
+                fail("Expected capturing consumer failure");
+            } catch (IllegalStateException expected) {
+                assertEquals("audit consumer failure", expected.getMessage());
+            }
+
+            assertTrue(addend.captured instanceof OffHeapMatrix);
+            assertFalse(((OffHeapMatrix) addend.captured).segment().scope().isAlive());
+            assertTrue(a.segment().scope().isAlive());
+        }
+    }
+
+    @Test
     public void symbolicInputsAreNotExecutable() {
         MatrixExpr expression = MatrixExpr.symbolicInput("A", new MatrixShape(2, 3))
             .matmul(MatrixExpr.symbolicInput("B", new MatrixShape(3, 2)));
@@ -283,6 +324,25 @@ public class MatrixCompilerTest {
             fail("Expected symbolic input evaluation to fail");
         } catch (IllegalStateException exception) {
             assertTrue(exception.getMessage().contains("symbolic input"));
+        }
+    }
+
+    private static final class CapturingMatrix extends Matrix {
+        private final boolean fail;
+        private Matrix captured;
+
+        private CapturingMatrix(int rows, int columns, boolean fail) {
+            super(rows, columns);
+            this.fail = fail;
+        }
+
+        @Override
+        public Matrix add(Matrix other) {
+            captured = other;
+            if (fail) {
+                throw new IllegalStateException("audit consumer failure");
+            }
+            return super.add(other);
         }
     }
 

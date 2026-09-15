@@ -5,6 +5,7 @@ import java.util.Map;
 
 import net.faulj.compiler.matrix.affine.LogicalBuffer;
 import net.faulj.matrix.Matrix;
+import net.faulj.matrix.OffHeapMatrix;
 
 /** Package-private runtime state for one CPU plan invocation. */
 final class CpuExecutionContext {
@@ -46,5 +47,34 @@ final class CpuExecutionContext {
 
     boolean isOwned(LogicalBuffer buffer) {
         return owned.containsKey(buffer);
+    }
+
+    void closeOwnedExcept(Matrix transferredResult, Throwable failure) {
+        IdentityHashMap<Matrix, Boolean> closed = new IdentityHashMap<>();
+        RuntimeException cleanupFailure = null;
+        for (Map.Entry<LogicalBuffer, Boolean> entry : owned.entrySet()) {
+            Matrix matrix = values.get(entry.getKey());
+            if (matrix == null || matrix == transferredResult
+                || closed.put(matrix, Boolean.TRUE) != null
+                || !(matrix instanceof OffHeapMatrix offHeap)) {
+                continue;
+            }
+            try {
+                offHeap.close();
+            } catch (RuntimeException exception) {
+                if (cleanupFailure == null) {
+                    cleanupFailure = exception;
+                } else {
+                    cleanupFailure.addSuppressed(exception);
+                }
+            }
+        }
+        if (cleanupFailure != null) {
+            if (failure != null) {
+                failure.addSuppressed(cleanupFailure);
+            } else {
+                throw cleanupFailure;
+            }
+        }
     }
 }

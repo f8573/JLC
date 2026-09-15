@@ -86,8 +86,11 @@ planned, lowered to bounded affine/dependence facts, checked with legal M3
 schedule transformations, and can now execute through a small CPU lowering
 layer. Matrix multiplication remains on the existing optimized `Gemm` facade;
 the compiler adds inspectable matrix-chain optimization and explicit
-elementwise/transpose execution without presenting JLC as a general-purpose
-polyhedral compiler. See [`docs/MATRIX_COMPILER.md`](docs/MATRIX_COMPILER.md).
+elementwise/transpose execution with bounded affine/polyhedral-style schedule
+transformations over JLC's supported matrix IR. It is not a general-purpose
+polyhedral compiler. Unsupported executable schedules are rejected before CPU
+execution. M4 is terminal; there is no M5. See
+[`docs/MATRIX_COMPILER.md`](docs/MATRIX_COMPILER.md).
 
 ## Native GEMM design
 

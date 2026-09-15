@@ -71,7 +71,18 @@ public final class IterationDomain {
     }
 
     public boolean isEmpty() {
-        return ranges.isEmpty();
+        return ranges.isEmpty()
+            || ranges.stream().anyMatch(range -> range.lowerInclusive() == range.upperExclusive());
+    }
+
+    /** Return the extent of one named range, or {@code -1} when it is absent. */
+    public long extent(AffineVariable variable) {
+        for (Range range : ranges) {
+            if (range.variable().equals(variable)) {
+                return range.upperExclusive() - range.lowerInclusive();
+            }
+        }
+        return -1L;
     }
 
     @Override

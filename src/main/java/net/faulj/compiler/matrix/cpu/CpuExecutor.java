@@ -47,22 +47,31 @@ public final class CpuExecutor {
             context.bind(captured.buffer(), matrix);
         }
 
-        for (CpuStep step : plan.steps()) {
-            if (step instanceof CpuGemmStep gemm) {
-                gemm.execute(context);
-            } else if (step instanceof CpuElementwiseStep elementwise) {
-                elementwise.execute(context);
-            } else if (step instanceof CpuTransposeStep transpose) {
-                transpose.execute(context);
-            } else if (step instanceof CpuFusedElementwiseStep fused) {
-                fused.execute(context);
-            } else {
-                throw new IllegalStateException(
-                    "Unsupported CPU step type: " + step.getClass().getName());
+        Matrix result = null;
+        Throwable failure = null;
+        try {
+            for (CpuStep step : plan.steps()) {
+                if (step instanceof CpuGemmStep gemm) {
+                    gemm.execute(context);
+                } else if (step instanceof CpuElementwiseStep elementwise) {
+                    elementwise.execute(context);
+                } else if (step instanceof CpuTransposeStep transpose) {
+                    transpose.execute(context);
+                } else if (step instanceof CpuFusedElementwiseStep fused) {
+                    fused.execute(context);
+                } else {
+                    throw new IllegalStateException(
+                        "Unsupported CPU step type: " + step.getClass().getName());
+                }
             }
+            result = context.value(plan.outputBuffer());
+            return result;
+        } catch (RuntimeException | Error exception) {
+            failure = exception;
+            throw exception;
+        } finally {
+            context.closeOwnedExcept(result, failure);
         }
-
-        return context.value(plan.outputBuffer());
     }
 
     private static void validateShape(LogicalBuffer buffer, Matrix matrix) {

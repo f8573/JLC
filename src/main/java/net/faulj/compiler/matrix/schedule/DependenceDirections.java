@@ -105,37 +105,50 @@ public final class DependenceDirections {
         if (source.indices().size() != sink.indices().size()) {
             return DependenceDirection.UNKNOWN;
         }
-        DependenceDirection result = DependenceDirection.EQUAL;
+        int sourceDimension = -1;
+        int sinkDimension = -1;
         for (int index = 0; index < source.indices().size(); index++) {
             AffineExpr sourceIndex = source.index(index);
             AffineExpr sinkIndex = sink.index(index);
-            AffineExpr delta;
-            try {
-                delta = sinkIndex.subtract(sourceIndex);
-            } catch (ArithmeticException overflow) {
+            if (!isSupportedUnitProjection(sourceIndex)
+                || !isSupportedUnitProjection(sinkIndex)) {
                 return DependenceDirection.UNKNOWN;
             }
-            if (!delta.isConstant()) {
-                return DependenceDirection.UNKNOWN;
+            if (sourceIndex.coefficient(variable) == 1L) {
+                if (sourceDimension >= 0) {
+                    return DependenceDirection.UNKNOWN;
+                }
+                sourceDimension = index;
             }
-            long offset = delta.constant();
-            if (offset == 0L) {
-                continue;
-            }
-            if (sourceIndex.coefficient(variable) != sinkIndex.coefficient(variable)) {
-                return DependenceDirection.UNKNOWN;
-            }
-            if (sourceIndex.coefficient(variable) == 0L) {
-                continue;
-            }
-            DependenceDirection component = offset > 0L
-                ? DependenceDirection.LESS : DependenceDirection.GREATER;
-            result = combine(result, component);
-            if (result == DependenceDirection.UNKNOWN) {
-                return result;
+            if (sinkIndex.coefficient(variable) == 1L) {
+                if (sinkDimension >= 0) {
+                    return DependenceDirection.UNKNOWN;
+                }
+                sinkDimension = index;
             }
         }
-        return result;
+        if (sourceDimension < 0 || sourceDimension != sinkDimension) {
+            return DependenceDirection.UNKNOWN;
+        }
+        AffineExpr sourceIndex = source.index(sourceDimension);
+        AffineExpr sinkIndex = sink.index(sinkDimension);
+        long sourceMinusSink;
+        try {
+            // sourceIteration + sourceConstant = sinkIteration + sinkConstant
+            sourceMinusSink = Math.subtractExact(sinkIndex.constant(), sourceIndex.constant());
+        } catch (ArithmeticException overflow) {
+            return DependenceDirection.UNKNOWN;
+        }
+        if (sourceMinusSink == 0L) {
+            return DependenceDirection.EQUAL;
+        }
+        return sourceMinusSink < 0L
+            ? DependenceDirection.LESS : DependenceDirection.GREATER;
+    }
+
+    private static boolean isSupportedUnitProjection(AffineExpr expression) {
+        return expression.coefficients().size() == 1
+            && expression.coefficients().firstEntry().getValue() == 1L;
     }
 
     private static DependenceDirection combine(DependenceDirection current,

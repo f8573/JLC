@@ -101,6 +101,7 @@ public final class AffineLowerer {
 
             DependenceGraph dependenceGraph = DependenceGraph.analyze(affineStatements);
             return new AffineProgram(
+                plan,
                 plan.semantics(),
                 logicalBuffers,
                 new ArrayList<>(variables.values()),

@@ -17,6 +17,7 @@ import net.faulj.compiler.matrix.OptimizationSemantics;
  * no interpreter, scheduler, allocator, or native code generator.</p>
  */
 public final class AffineProgram {
+    private final ExecutionPlan originatingPlan;
     private final OptimizationSemantics semantics;
     private final List<LogicalBuffer> buffers;
     private final List<AffineVariable> variables;
@@ -42,6 +43,17 @@ public final class AffineProgram {
                          List<AffineStatement> statements,
                          LogicalBuffer resultBuffer,
                          DependenceGraph dependenceGraph) {
+        this(null, semantics, buffers, variables, statements, resultBuffer, dependenceGraph);
+    }
+
+    AffineProgram(ExecutionPlan originatingPlan,
+                  OptimizationSemantics semantics,
+                  List<LogicalBuffer> buffers,
+                  List<AffineVariable> variables,
+                  List<AffineStatement> statements,
+                  LogicalBuffer resultBuffer,
+                  DependenceGraph dependenceGraph) {
+        this.originatingPlan = originatingPlan;
         this.semantics = Objects.requireNonNull(semantics, "Program semantics must not be null");
         this.buffers = immutableCopy(buffers, "Program buffers");
         this.variables = immutableCopy(variables, "Program variables");
@@ -69,6 +81,11 @@ public final class AffineProgram {
             throw new IllegalArgumentException("Dependence graph statements must match the program");
         }
         this.buffersById = Collections.unmodifiableMap(byId);
+    }
+
+    /** True only for the exact M1 plan instance that produced this M2 program. */
+    public boolean originatesFrom(ExecutionPlan plan) {
+        return originatingPlan != null && originatingPlan == plan;
     }
 
     public OptimizationSemantics semantics() {

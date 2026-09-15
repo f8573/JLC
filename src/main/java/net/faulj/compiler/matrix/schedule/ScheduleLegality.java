@@ -74,6 +74,13 @@ public final class ScheduleLegality {
             return LegalityResult.illegal("strip-mine loop " + variable + " is not present in region");
         }
         ScheduleLoop loop = region.band().loop(index);
+        if (!loop.inductionVariable().equals(loop.semanticVariable())
+            || loop.valueExpression() == null
+            || !loop.valueExpression().equals(
+                net.faulj.compiler.matrix.affine.AffineExpr.variable(loop.inductionVariable()))) {
+            return LegalityResult.illegal(
+                "re-strip-mining generated tile loops is outside the supported binding model");
+        }
         if (loop.step() != 1L) {
             return LegalityResult.illegal(
                 "strip-mine supports only unit-step canonical loops, got step " + loop.step());
@@ -122,6 +129,11 @@ public final class ScheduleLegality {
             return LegalityResult.illegal(
                 "incompatible loop bands for " + firstStatement.name() + " and "
                     + secondStatement.name());
+        }
+
+        LegalityResult availability = checkFusedAvailability(firstStatement, secondStatement);
+        if (!availability.isLegal()) {
+            return availability;
         }
 
         for (Dependence dependence : schedule.dependenceGraph().dependences()) {
@@ -187,6 +199,10 @@ public final class ScheduleLegality {
         ScheduleLoop right = proposedLoops.get(rightIndex);
         proposedLoops.set(leftIndex, right);
         proposedLoops.set(rightIndex, left);
+        if (!bindingsFollowDefinitions(proposedLoops)) {
+            return LegalityResult.illegal(
+                "interchange would move a binder loop after a derived index that depends on it");
+        }
         boolean reassociation = false;
 
         for (Dependence dependence : schedule.dependenceGraph().dependences()) {
@@ -335,6 +351,45 @@ public final class ScheduleLegality {
     private static boolean usesSemanticVariable(ScheduleLoop loop,
                                                 AffineVariable variable) {
         return loop.semanticVariable().equals(variable);
+    }
+
+    private static LegalityResult checkFusedAvailability(AffineStatement producer,
+                                                          AffineStatement consumer) {
+        boolean hasProducerConsumerRaw = false;
+        for (net.faulj.compiler.matrix.affine.AffineAccess write : producer.accesses()) {
+            if (!write.writes()) {
+                continue;
+            }
+            for (net.faulj.compiler.matrix.affine.AffineAccess read : consumer.accesses()) {
+                if (!read.reads() || write.buffer() != read.buffer()) {
+                    continue;
+                }
+                hasProducerConsumerRaw = true;
+                if (!write.indices().equals(read.indices())) {
+                    return LegalityResult.unknown(
+                        "fusion cannot prove producer values are available at the consumer iteration");
+                }
+            }
+        }
+        if (!hasProducerConsumerRaw) {
+            return LegalityResult.legal("no producer-consumer RAW availability constraint");
+        }
+        return LegalityResult.legal("producer and consumer use identical affine locations per iteration");
+    }
+
+    private static boolean bindingsFollowDefinitions(List<ScheduleLoop> loops) {
+        java.util.Set<AffineVariable> available = new java.util.HashSet<>();
+        for (ScheduleLoop loop : loops) {
+            available.add(loop.inductionVariable());
+            if (loop.valueExpression() != null
+                && !available.containsAll(loop.valueExpression().coefficients().keySet())) {
+                return false;
+            }
+            if (loop.valueExpression() != null) {
+                available.add(loop.semanticVariable());
+            }
+        }
+        return true;
     }
 
     private static ScheduleRegion regionFor(SchedulePlan schedule, int statementId) {

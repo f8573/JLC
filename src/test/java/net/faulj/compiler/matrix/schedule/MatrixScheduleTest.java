@@ -60,16 +60,19 @@ public class MatrixScheduleTest {
     }
 
     @Test
-    public void rawDependenceCanMakeInterchangeIllegal() {
+    public void correctedOffsetDirectionAllowsPositiveInterchange() {
         AffineProgram program = offsetRawProgram();
-        SchedulePlan initial = SchedulePlan.initial(program);
-        ScheduleTransformResult fused = initial.fusion(0, 1);
-        assertEquals(LegalityStatus.LEGAL, fused.status());
+        ScheduleRegion merged = new ScheduleRegion(
+            program.statements(),
+            new ScheduleBand(
+                loops(program.statements().get(0)),
+                new ScheduleSequence(program.statements().stream()
+                    .map(ScheduleStatement::new).toList())));
+        SchedulePlan schedule = SchedulePlan.of(program, List.of(merged));
 
-        ScheduleTransformResult result = fused.schedule().interchange(0, "i", "j");
-        assertEquals(LegalityStatus.ILLEGAL, result.status());
-        assertTrue(result.explanation().contains("S0 -> S1"));
-        assertSame(fused.schedule(), result.schedule());
+        ScheduleTransformResult result = schedule.interchange(0, "i", "j");
+        assertEquals(LegalityStatus.LEGAL, result.status());
+        assertEquals(List.of("j", "i"), loopNames(result.schedule().region(0)));
     }
 
     @Test
@@ -196,8 +199,14 @@ public class MatrixScheduleTest {
     @Test
     public void dependenceCarriedLoopCannotBeMarkedParallel() {
         AffineProgram program = offsetRawProgram();
-        ScheduleTransformResult fused = SchedulePlan.initial(program).fusion(0, 1);
-        ScheduleTransformResult result = fused.schedule().parallel(0, "i");
+        ScheduleRegion merged = new ScheduleRegion(
+            program.statements(),
+            new ScheduleBand(
+                loops(program.statements().get(0)),
+                new ScheduleSequence(program.statements().stream()
+                    .map(ScheduleStatement::new).toList())));
+        ScheduleTransformResult result = SchedulePlan.of(program, List.of(merged))
+            .parallel(0, "i");
 
         assertEquals(LegalityStatus.ILLEGAL, result.status());
         assertTrue(result.explanation().contains("carried by i"));

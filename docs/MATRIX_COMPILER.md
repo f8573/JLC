@@ -1,8 +1,8 @@
 # Matrix Compiler M1–M4
 
 JLC now has a small, opt-in matrix-expression compiler in
-`net.faulj.compiler.matrix`. It provides trustworthy infrastructure for
-future matrix-program and polyhedral work without changing the eager
+`net.faulj.compiler.matrix`. It implements bounded affine/polyhedral-style
+schedule transformations over JLC's supported matrix IR without changing the eager
 `net.faulj.matrix.Matrix` API or the existing GEMM backend.
 
 ## Matrix and MatrixExpr
@@ -28,11 +28,12 @@ composition and algebraic identities are intentionally not inferred.
 ## Optimization semantics
 
 `OptimizationSemantics.STRICT` is the default and preserves user-specified
-MatMul association and operation order. `RELAXED` allows matrix-chain
-reassociation and documents that rounding can differ. `FAST` currently has
-the same permissions as `RELAXED`; it reserves a named home for future
-fusion, vectorization, and scheduling permissions without authorizing unsafe
-M1 rewrites today.
+MatMul association and compiler-visible expression ordering constraints.
+Individual GEMM calls still use the production GEMM implementation's internal
+reduction order; `STRICT` does not promise Java scalar or bitwise execution.
+`RELAXED` allows matrix-chain reassociation and documents that rounding can
+differ. `FAST` currently has the same permissions as `RELAXED` and does not
+authorize unsafe M1 rewrites.
 
 ## Planning and cost
 
@@ -56,7 +57,10 @@ allocation, cache traffic, backend availability, and CPU/GPU placement later.
 nodes call the existing canonical `net.faulj.kernels.gemm.Gemm` facade. Add,
 scale, and transpose reuse the existing `Matrix` operations. Intermediates
 are materialized in M1, with identity-based memoization for shared DAG
-producers; fusion and temporary lifetime optimization are future work.
+producers. Compiler-owned hidden `OffHeapMatrix` intermediates are closed once
+at the end of evaluation on success or failure. Borrowed inputs are never
+closed, and an off-heap result returned to the caller remains the caller's
+responsibility.
 
 ## Explicitly out of scope for M1
 
@@ -125,14 +129,19 @@ Every statement exposes its domain and `READ`, `WRITE`, `READ_WRITE`, or
 `REDUCTION` accesses. The separate `DependenceGraph` reports `RAW`, `WAR`,
 `WAW`, and `REDUCTION` relationships. Queries return
 `PROVEN_DEPENDENCE`, `PROVEN_NONE`, or `UNKNOWN`; an ambiguous alias is never
-silently treated as independence.
+silently treated as independence. Only `READ`/`READ` participation is harmless
+under `MAY_ALIAS`; any possible write keeps the relationship `UNKNOWN`.
+Ordinary self RAW/WAR/WAW effects are analyzed independently of reduction
+metadata, and unresolved access forms stay conservative.
 
 MatMul initialization-to-update and update-to-consumer relationships are
 derived for the canonical accesses emitted by M2. The update statement also
 records its `k`-carried reduction relationship. `STRICT` records an ordered,
 conservative reduction; `RELAXED` and `FAST` mark reassociation as eligible
-for a future legality proof. M2 performs no schedule transformation and does
-not claim bitwise scalar ordering from the existing optimized GEMM backend.
+for bounded legality checks. A carried reduction dependence is reported only
+when the domain contains at least two valid `k` instances; empty and `K=1`
+domains do not invent one. M2 performs no schedule transformation and does not
+claim bitwise scalar ordering from the existing optimized GEMM backend.
 
 ### Inspection example
 
@@ -165,7 +174,7 @@ The M2 affine representation has no interpreter. Runtime evaluation remains
 the M1 path through `MatrixCompiler` and the existing `Gemm` facade. CPU
 lowering from this semantic representation is reserved for M4.
 
-## M3: legal polyhedral schedule transformations
+## M3: bounded affine schedule transformations
 
 M3 consumes an `AffineProgram` and its unchanged `DependenceGraph` and
 produces a separate immutable `SchedulePlan`. The computation and schedule
@@ -199,9 +208,11 @@ M3 implements exactly these five transformations:
 
 - adjacent loop `INTERCHANGE` with dependence-direction checking;
 - constant-positive `STRIP_MINE` / tiling, including explicit remainder
-  guards and multidimensional composition;
+  guards and multidimensional composition; generated tile loops cannot be
+  re-strip-mined, and a binder cannot move behind an index that depends on it;
 - producer/consumer or sibling `FUSION` only for compatible domains, bands,
-  and proven statement ordering;
+  proven statement ordering, and proven producer-value availability at each
+  fused consumer iteration;
 - `PARALLEL` loop marking only when no blocking loop-carried dependence exists;
 - `VECTOR` loop marking only when legality is proven.
 
@@ -273,7 +284,8 @@ M4 deliberately has two lowering boundaries:
 - `MATMUL_INIT` plus `MATMUL_UPDATE` become one opaque `CpuGemmStep` that calls
   the canonical `net.faulj.kernels.gemm.Gemm.multiply` facade. The native or
   Java backend, packing, blocking, microkernel dispatch, and worker scheduling
-  remain owned by the existing GEMM implementation.
+  remain owned by the existing GEMM implementation. Displayed MatMul loop
+  interchange, tiling, and annotations are not interpreted by the opaque call.
 - `ADD`, `SCALE`, and `TRANSPOSE` become bounded explicit Java loops over the
   M3 schedule band. The loop realization honors loop interchange and
   strip-mining, including generated remainder guards. It uses public
@@ -298,37 +310,48 @@ not “must realize.” M4 preserves those annotations and uses deterministic
 serial scalar fallback. This keeps legality separate from a new thread-pool
 or SIMD implementation and leaves native GEMM concurrency unchanged.
 
+Before lowering, M4 validates the executable subset and the retained M1/M2
+provenance. It rejects writes to borrowed buffers, foreign buffers, incomplete
+domains or loop bands, malformed tile bindings and guards, nested schedule
+bodies it cannot reproduce, mismatched MatMul forms, and fusion families other
+than the validated scale-then-add case. Rejection is intentional; M4 is not a
+general affine interpreter.
+
 ### Runtime ownership and symbolic plans
 
 External `Input` buffers reuse M2's `EXTERNAL_INPUT` / `BORROWED` facts and are
 bound by reference at execution time. The CPU plan does not snapshot inputs;
 callers must avoid concurrent mutation and must keep caller-owned off-heap
 storage valid. The compiler never closes or frees external storage. CPU
-temporaries receive ordinary execution-owned `Matrix` instances, with no
-allocator, pool, lifetime-based reuse, or early-free policy. `SymbolicInput`
-buffers remain non-executable and unresolved symbolic plans fail before any
-CPU step begins.
+temporaries are execution-owned. Hidden owned off-heap intermediates are
+closed exactly once at the end of execution on success or failure, including
+shared-DAG values. A returned off-heap result transfers to the caller and must
+be closed by the caller. There is no allocator, pool, lifetime-based reuse, or
+early-free policy. `SymbolicInput` buffers remain non-executable and unresolved
+symbolic plans fail before any CPU step begins.
 
 ### Fixed M4 benchmark suite
 
 The benchmark suite is one JUnit class with exactly four families. Each case
 uses deterministic inputs, two warmups, five measured iterations, median
 reporting, checksum consumption, and a correctness comparison before timing.
-The measurements below are an honest single-host result from Java 21.0.12 on
-Linux/amd64 with 32 reported processors and the `native` GEMM backend; they are
-not universal performance claims.
+Compilation and input construction are outside every timed region. Fusion
+compares eager direct `Matrix` operations with an already-compiled fused
+program's `execute()` method. GEMM dispatch is reported per product where the
+chain can mix Java and native selection. The measurements below are a
+single-host observation from Java 21.0.12 on Linux/amd64 with 32 reported
+processors; they are not universal performance claims.
 
 | Family | Shapes / comparison | Observed result |
 | --- | --- | --- |
-| Matrix-chain reassociation | `1000x10 * 10x1000 * 1000x10`; STRICT vs RELAXED | Planner cost `20,000,000` vs `200,000`; median `3.378 ms` vs `3.119 ms`; realized speedup `1.083x`; correctness passed. |
-| Elementwise fusion | `scale(256x256, 2.5) + 256x256` | Temporary materializations `2` eager vs `1` compiler; estimated temporary bytes `1,048,576` vs `524,288`; median `3.972 ms` eager vs `13.382 ms` fused; correctness passed. Fusion was slower in this scalar public-API loop and is reported as such. |
-| Direct GEMM overhead | `192x192 * 192x192` | Direct `Gemm` median `0.312 ms`; compiled median `0.306 ms`; measured orchestration overhead `-1.83%`; correctness passed and both use the same GEMM facade. |
-| Shared DAG | `X = A * B; Y = X + X`, `96x96` | One GEMM invocation, two logical temporary buffers, median `22.249 ms`; producer computed once; correctness passed. |
+| Matrix-chain reassociation | `1000x10 * 10x1000 * 1000x10`; STRICT vs RELAXED | Planner cost `20,000,000` vs `200,000`; product backends `[native,native]` vs `[java,native]`; median `6.349 ms` vs `5.436 ms`; observed ratio `1.168x`; correctness passed. |
+| Elementwise fusion | `scale(256x256, 2.5) + 256x256` | Temporary materializations `2` eager vs `1` compiler; estimated temporary bytes `1,048,576` vs `524,288`; median `4.668 ms` eager direct operations vs `15.162 ms` compiled fused execution; correctness passed. |
+| Direct GEMM dispatch boundary | `192x192 * 192x192` | Direct `0.516 ms`; compiled `0.528 ms`; execution delta `2.30%`, classified as measurement noise; selected backend `native`; correctness passed through the same GEMM facade. |
+| Shared DAG | `X = A * B; Y = X + X`, `96x96` | One planned GEMM step, runtime invocation count `not-instrumented`, two logical temporary buffers, median `23.473 ms`; shared plan node represented once; correctness passed. |
 
 These results distinguish planner arithmetic reduction, temporary
-materialization reduction, runtime speedup, and compiler orchestration
-overhead. No result is used as a completion gate or as a reason to begin more
-performance tuning.
+materialization reduction, and observed execution timing. No result is used as
+a completion gate or as a reason to begin more performance tuning.
 
 ### M4 limitations
 
@@ -342,7 +365,7 @@ opaque GEMM remains the production path for multiplication.
 
 1. M1 — Graph IR + whole-expression optimization
 2. M2 — Memory semantics + affine/dependence IR
-3. M3 — Legal polyhedral schedule transformations
+3. M3 — Bounded affine/polyhedral-style schedule transformations
 4. M4 — CPU lowering + end-to-end benchmark proof
 
 **M4 IS THE TERMINAL MATRIX-COMPILER MILESTONE. THERE IS NO M5.**
