@@ -64,7 +64,7 @@ public final class OffHeapMatrix extends Matrix implements AutoCloseable {
             ? (long) rows * ld
             : (long) cols * ld;
         long bytes = Math.multiplyExact(elements, (long) Double.BYTES);
-        this.arena = Arena.ofAuto();
+        this.arena = Arena.ofConfined();
         this.segment = arena.allocate(bytes, this.alignmentBytes);
         this.ownsArena = true;
     }

@@ -1,0 +1,8 @@
+#pragma once
+
+enum jlc_status {
+    JLC_STATUS_SUCCESS = 0,
+    JLC_STATUS_INVALID_ARGUMENT = 1,
+    JLC_STATUS_OUT_OF_MEMORY = 2,
+    JLC_STATUS_INTERNAL_ERROR = 3
+};

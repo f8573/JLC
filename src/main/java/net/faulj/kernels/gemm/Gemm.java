@@ -1,0 +1,149 @@
+package net.faulj.kernels.gemm;
+
+import net.faulj.compute.DispatchPolicy;
+import net.faulj.matrix.Matrix;
+import net.faulj.matrix.OffHeapMatrix;
+import net.faulj.nativeblas.BackendRegistry;
+
+/**
+ * Canonical GEMM facade for the library.
+ *
+ * <p>This class is the primary entry point for dense matrix-matrix multiply
+ * and related strided GEMM variants. Existing compute implementations are
+ * preserved and routed through this facade to keep behavior stable while
+ * making GEMM explicitly discoverable.</p>
+ */
+public final class Gemm {
+    private Gemm() {
+    }
+
+    /**
+     * Compute C = A * B using the default dispatch policy.
+     */
+    public static Matrix multiply(Matrix a, Matrix b) {
+        return multiply(a, b, DispatchPolicy.defaultPolicy());
+    }
+
+    /**
+     * Compute C = A * B using the provided dispatch policy.
+     */
+    public static Matrix multiply(Matrix a, Matrix b, DispatchPolicy policy) {
+        if (a == null || b == null) {
+            throw new IllegalArgumentException("Matrices must not be null");
+        }
+        int m = a.getRowCount();
+        int k = a.getColumnCount();
+        int k2 = b.getRowCount();
+        int n = b.getColumnCount();
+        if (k != k2) {
+            throw new IllegalArgumentException("Inner dimensions must agree for multiplication: " + k + " != " + k2);
+        }
+        Matrix c = (a instanceof OffHeapMatrix || b instanceof OffHeapMatrix)
+            ? new OffHeapMatrix(m, n)
+            : Matrix.zero(m, n);
+        gemm(a, b, c, 1.0, 0.0, policy);
+        return c;
+    }
+
+    /**
+     * Compute C = alpha * A * B + beta * C.
+     */
+    public static void gemm(Matrix a, Matrix b, Matrix c,
+                            double alpha, double beta, DispatchPolicy policy) {
+        BackendRegistry.gemmBackend(c.getRowCount(), c.getColumnCount(), threadCount(policy))
+            .gemm(a, b, c, alpha, beta, policy);
+    }
+
+    /**
+     * Strided GEMM facade (auto-kernel selection).
+     */
+    public static void gemmStrided(double[] a, int aOffset, int lda,
+                                   double[] b, int bOffset, int ldb,
+                                   double[] c, int cOffset, int ldc,
+                                   int m, int k, int n,
+                                   double alpha, double beta) {
+        BackendRegistry.gemmBackend("strided", m, n, threadCount(null))
+            .gemmStrided(a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta);
+    }
+
+    /**
+     * Strided GEMM with optional transpose of A.
+     */
+    public static void gemmStrided(boolean transposeA,
+                                   double[] a, int aOffset, int lda,
+                                   double[] b, int bOffset, int ldb,
+                                   double[] c, int cOffset, int ldc,
+                                   int m, int k, int n,
+                                   double alpha, double beta) {
+        BackendRegistry.gemmBackend("strided", m, n, threadCount(null))
+            .gemmStrided(transposeA, a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta);
+    }
+
+    /**
+     * Strided packed-SIMD GEMM with explicit block size.
+     */
+    public static void gemmStrided(double[] ad, int aOff, int lda,
+                                   double[] bd, int bOff, int ldb,
+                                   double[] cd, int cOff, int ldc,
+                                   int m, int k, int n,
+                                   double alpha, double beta, int blockSize) {
+        BackendRegistry.gemmBackend("strided", m, n, threadCount(null))
+            .gemmStrided(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
+    }
+
+    /**
+     * Strided GEMM for C = alpha * A^T * B + beta * C.
+     */
+    public static void gemmStridedTransA(double[] ad, int aOff, int lda,
+                                         double[] bd, int bOff, int ldb,
+                                         double[] cd, int cOff, int ldc,
+                                         int m, int k, int n,
+                                         double alpha, double beta, int blockSize) {
+        BackendRegistry.gemmBackend("strided_trans_a", k, n, threadCount(null))
+            .gemmStridedTransA(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
+    }
+
+    /**
+     * Strided GEMM where A is column-major and B/C are row-major.
+     */
+    public static void gemmStridedColMajorA(double[] ad, int aOff, int lda,
+                                            double[] bd, int bOff, int ldb,
+                                            double[] cd, int cOff, int ldc,
+                                            int m, int k, int n,
+                                            double alpha, double beta, int blockSize) {
+        BackendRegistry.gemmBackend("strided_col_major_a", m, n, threadCount(null))
+            .gemmStridedColMajorA(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
+    }
+
+    /**
+     * Strided GEMM where B is column-major and A/C are row-major.
+     */
+    public static void gemmStridedColMajorB(double[] ad, int aOff, int lda,
+                                            double[] bd, int bOff, int ldb,
+                                            double[] cd, int cOff, int ldc,
+                                            int m, int k, int n,
+                                            double alpha, double beta, int blockSize) {
+        BackendRegistry.gemmBackend("strided_col_major_b", m, n, threadCount(null))
+            .gemmStridedColMajorB(ad, aOff, lda, bd, bOff, ldb, cd, cOff, ldc, m, k, n, alpha, beta, blockSize);
+    }
+
+    /**
+     * Batched strided GEMM for row-major operands.
+     */
+    public static void gemmStridedBatched(double[] a, int aOffset, int lda, int aStride,
+                                          double[] b, int bOffset, int ldb, int bStride,
+                                          double[] c, int cOffset, int ldc, int cStride,
+                                          int m, int k, int n,
+                                          int batchCount,
+                                          double alpha, double beta) {
+        BackendRegistry.gemmBackend("strided_batched", m, n, threadCount(null)).gemmStridedBatched(a, aOffset, lda, aStride,
+            b, bOffset, ldb, bStride,
+            c, cOffset, ldc, cStride,
+            m, k, n, batchCount, alpha, beta);
+    }
+
+    private static int threadCount(DispatchPolicy policy) {
+        DispatchPolicy resolved = policy == null ? DispatchPolicy.defaultPolicy() : policy;
+        return resolved.isParallelEnabled() ? resolved.getParallelism() : 1;
+    }
+}
