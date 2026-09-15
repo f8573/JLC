@@ -1,4 +1,4 @@
-# Matrix Compiler M1–M2
+# Matrix Compiler M1–M3
 
 JLC now has a small, opt-in matrix-expression compiler in
 `net.faulj.compiler.matrix`. It provides trustworthy infrastructure for
@@ -164,6 +164,86 @@ dependences:
 The M2 affine representation has no interpreter. Runtime evaluation remains
 the M1 path through `MatrixCompiler` and the existing `Gemm` facade. CPU
 lowering from this semantic representation is reserved for M4.
+
+## M3: legal polyhedral schedule transformations
+
+M3 consumes an `AffineProgram` and its unchanged `DependenceGraph` and
+produces a separate immutable `SchedulePlan`. The computation and schedule
+remain distinct: schedule transformations reorder or annotate semantic
+statements, but M3 never executes a transformed schedule.
+
+### Schedule representation
+
+The `net.faulj.compiler.matrix.schedule` package contains immutable
+`ScheduleSequence`, `ScheduleBand`, `ScheduleLoop`, and `ScheduleStatement`
+nodes. The initial schedule copies each affine statement's domain order
+directly, for example `i -> j -> k` for a MatMul update. Loop bounds, steps,
+tile bindings, guards, and annotations are explicit and dumps are
+deterministic.
+
+Parallel and vector annotations are eligibility metadata. Relaxed reduction
+dimensions use explicit reduction metadata rather than claiming that M3 has
+created executable parallel reduction code.
+
+### Centralized legality
+
+`ScheduleLegality` returns `LEGAL`, `ILLEGAL`, or `UNKNOWN` with a deterministic
+explanation. M3 derives only the bounded direction facts required by the
+canonical M2 accesses, including constant affine offsets and the MatMul
+reduction dimension. An unknown alias, direction, or dependence is rejected;
+it never becomes optimistic independence.
+
+### M3 transformation vocabulary
+
+M3 implements exactly these five transformations:
+
+- adjacent loop `INTERCHANGE` with dependence-direction checking;
+- constant-positive `STRIP_MINE` / tiling, including explicit remainder
+  guards and multidimensional composition;
+- producer/consumer or sibling `FUSION` only for compatible domains, bands,
+  and proven statement ordering;
+- `PARALLEL` loop marking only when no blocking loop-carried dependence exists;
+- `VECTOR` loop marking only when legality is proven.
+
+Strict MatMul reductions preserve `k` ordering: `k` cannot be interchanged,
+parallel-marked, or vector-marked when that would change reduction ordering.
+Relaxed and fast semantics may accept explicitly requested reduction
+reassociation, parallel-reduction eligibility, or vector metadata, but no
+reduction execution is implemented.
+
+### Candidate bound
+
+The structural candidate generator emits the initial plan and at most one-step
+legal candidates from the supported vocabulary. It has a hard cap of 32
+candidates per generation. Tile sizes remain explicit inputs, and M3 performs
+no measured, cache-based, hardware-specific, machine-learning, or open-ended
+schedule search.
+
+### Schedule inspection
+
+An inspectable M3 dump has the following shape:
+
+```text
+initial schedule:
+  region 1:
+    for i [0,2) step 1
+      for j [0,4) step 1
+        for k [0,3) step 1
+          S1[i,j,k]
+schedule:
+  region 1:
+    for j [0,4) step 1
+      for i [0,2) step 1
+        for k [0,3) step 1
+          S1[i,j,k]
+transformation history:
+  interchange(i,j) in S1 -> LEGAL: no dependence carried in the proposed loop order
+```
+
+This output claims representation and legality only. M3 has no
+`AffineProgram` interpreter, CPU code generator, native-loop generator,
+Vector API generation, runtime thread scheduler, or benchmark-driven schedule
+choice. Those concerns remain outside M3 and CPU lowering begins in M4.
 
 ## Fixed matrix-compiler milestone path
 
