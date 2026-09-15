@@ -1,328 +1,369 @@
 # LambdaCompute (JLC)
 
-A dense linear-algebra library written in Java, built around a from-scratch,
-SIMD-aware GEMM (general matrix multiply) engine with a policy-driven dispatch
-layer, an optional CUDA path, off-heap storage, and a numerical-diagnostics web
-application on top.
+LambdaCompute is a Java/C++ dense linear-algebra library and
+numerical-diagnostics application, centered on a correctness-gated native FP64
+GEMM backend with a portable Java Vector API fallback.
 
-Live site: https://lambdacompute.org/
+Live site: <https://lambdacompute.org/>
 
-> **Reading this as a reviewer?** Jump to [What's interesting here](#whats-interesting-here),
-> the [GEMM architecture](#gemm-architecture), the [correctness story](#correctness-story),
-> and the [Reviewer guide](#reviewer-guide). The fastest way to verify the core
-> claims is the two commands in [Verify it yourself](#verify-it-yourself).
+## Performance headline
 
----
+Controlled benchmark: a same-host comparison for dense FP64 GEMM:
 
-## What's interesting here
+| Host | Workload | JLC native | Same-host reference | Ratio | Controlled setup |
+| --- | --- | ---: | ---: | ---: | --- |
+| AMD Ryzen 9 3950X, 16 physical Zen 2 cores / 32 logical CPUs | `C = A × B`, `2048³` | **~521 GFLOP/s median** | AOCL-BLIS: **583.348 GFLOP/s** | **89.3%** | 16 physical workers; physical worker affinity enabled for the benchmark |
 
-This repo is presented as a systems / performance engineering case study. The
-interesting parts are not the web app - they are the matrix-multiply core and
-the discipline used to keep it correct while making it fast:
+The controlled median was 520.959 GFLOP/s, or 89.3% of that reference. Healthy
+validated runs have been in the ~520–530 GFLOP/s range. This is a host-specific,
+median-based measurement, not a claim of universal BLAS parity or portability.
+The library default keeps worker affinity disabled; the controlled benchmark
+explicitly enabled `JLC_NATIVE_WORKER_AFFINITY=physical`.
 
-- A hand-written GEMM kernel using the Java Vector API (`jdk.incubator.vector`).
-  Packed A/B panels, a register-blocked microkernel with FMA, K-unrolling, and
-  masked remainder handling follow the same broad structure as BLIS/GotoBLAS,
-  but in Java.
-- A dispatch layer (`DispatchPolicy`, `GemmDispatch`) that selects a kernel
-  (tiny / small / matvec / single-thread microkernel / parallel / CUDA) from
-  problem shape and hardware, with cache-aware block sizing.
-- Two GEMM surfaces with different trade-offs: `BLAS3Kernels` (packed SIMD plus
-  strided / transposed / column-major variants and a parallel path) and
-  `OptimizedBLAS3` (the optimized dispatch-driven path used for the main CPU
-  route).
-- An optional CUDA path through JCublas (`CudaGemm`) that is used only when a
-  GPU is genuinely available and falls back cleanly otherwise.
-- Off-heap matrices (`OffHeapMatrix`) supported on the GEMM paths.
-- An independent, test-only correctness oracle (`GemmReference`) and a set of
-  parity tests that pin every public GEMM surface to it.
-- A parity-gated benchmark harness that refuses to time any backend that fails
-  correctness, and reports median-based GFLOPs with full distribution stats.
-- A real bug found and fixed through these tests: a wide-SIMD `4x4`
-  microkernel correctness failure (see [Correctness story](#correctness-story)).
+## Why this project is interesting
 
----
+JLC is useful as a systems and performance-engineering case study because it
+connects several layers that are easy to benchmark incorrectly in isolation:
 
-## What was hard
+- a public Java GEMM facade and backend policy;
+- a JNI boundary with direct, heap-mirror, strided, transposed, and off-heap
+  cases;
+- a from-scratch native blocked GEMM with packing, a register-blocked AVX2
+  microkernel, and a persistent worker pool;
+- correctness tests that cover the native contract before performance claims;
+- empirical optimization gates that keep attractive but regressive experiments
+  out of the production path.
 
-A few problems in this codebase were genuinely non-trivial:
+The Spring Boot and React application makes the numerical library inspectable,
+but the main engineering story is the matrix-multiply core and the evidence
+around it.
 
-- Making a Java Vector-API GEMM both fast and correct across vector widths.
-  `DoubleVector.SPECIES_PREFERRED` is 2 lanes on some machines, 4 on AVX2, 8 on
-  AVX-512. Kernels that hard-code a width are silently wrong on a wider
-  machine. The bug fixed in this branch was exactly this class of error: a
-  `4x4` kernel that loaded and stored full-width vectors when the preferred
-  width was `> 4`, reading and writing neighboring memory. The fix masks the
-  4-column loads and stores. See
-  [SpecializedKernels.gemm4x4](src/main/java/net/faulj/compute/SpecializedKernels.java).
-- Trusting benchmark numbers. A microbenchmark that times an incorrect kernel
-  is worse than useless. The harness here computes an independent oracle result
-  first and gates timing on parity - a backend that disagrees with the oracle is
-  reported `valid=false` with no GFLOPs at all.
-- Comparing backends honestly. Headline speedups use the median, never best of
-  N; small problems are repeated internally to clear timer granularity; and the
-  naive baseline and independent oracle are size-capped so they do not dominate
-  wall-clock at large sizes. Methodology lives in
-  [BENCHMARKS.md](BENCHMARKS.md).
-
----
-
-## GEMM architecture
-
-The two CPU GEMM surfaces share the same building blocks (packing + a SIMD
-microkernel) but differ in how they dispatch.
+## Architecture
 
 ```mermaid
 flowchart TD
-    Call["gemm(A, B, C, alpha, beta, policy)"] --> Validate["validate shapes / nulls"]
-    Validate --> Dispatch{"select kernel<br/>(shape + hardware + policy)"}
-    Dispatch -->|n == 1| Matvec["MATVEC<br/>SIMD dot products"]
-    Dispatch -->|tiny FLOPs| Tiny["TINY<br/>unrolled 2x2 / 3x3 / 4x4"]
-    Dispatch -->|small FLOPs| Small["SMALL<br/>scalar FMA, no packing"]
-    Dispatch -->|large + threads| Par["PARALLEL_MICRO<br/>tiled ForkJoin microkernel"]
-    Dispatch -->|GPU + huge FLOPs| Cuda["CUDA<br/>JCublas dgemm"]
-    Dispatch -->|default| Micro["MICROKERNEL<br/>packed SIMD, cache-blocked"]
-    Cuda -.->|unavailable / fails| Micro
-    Par -.->|too small / error| Micro
+    Caller["Java caller"] --> Facade["Gemm facade"]
+    Facade --> Registry["BackendRegistry / AlgorithmDispatch"]
+    Registry --> Java["JavaBackend\nVector API + fallback"]
+    Registry --> Native["NativeBackend / JNI"]
+    Facade -. "operand storage" .-> OffHeap["OffHeapMatrix"]
+    OffHeap -. "direct or heap-mirror path" .-> Native
+    Native --> Dispatch["native GEMM dispatch"]
+    Dispatch --> Work["blocking + packing + scheduler"]
+    Work --> Kernel["intrinsic AVX2 6x8\n12 vector accumulator chains + FMA"]
+    Work -. "optional" .-> Affinity["physical worker affinity"]
+    Dispatch -. "unsupported / load failure" .-> Java
+    Dispatch -. "explicit build support only" .-> Experimental["experimental consumers"]
 ```
 
-### Components
+The Java entry point is [`Gemm`](src/main/java/net/faulj/kernels/gemm/Gemm.java).
+`BackendRegistry` probes the native library and
+[`AlgorithmDispatch`](src/main/java/net/faulj/nativeblas/AlgorithmDispatch.java)
+selects a backend for the requested algorithm and shape. A missing library,
+unsupported layout, failed native call, or unsupported operation can return to
+the Java implementation instead of turning an optional native backend into a
+hard application dependency.
 
-| Area | Class | Role |
-| --- | --- | --- |
-| Dispatch policy | [`DispatchPolicy`](src/main/java/net/faulj/compute/DispatchPolicy.java) | Thresholds, parallelism, SIMD/CUDA enable flags |
-| Kernel selection + blocking | [`GemmDispatch`](src/main/java/net/faulj/compute/GemmDispatch.java) | Picks kernel; computes cache-aware MC/KC/NC/MR/NR |
-| Packed SIMD kernels | [`BLAS3Kernels`](src/main/java/net/faulj/compute/BLAS3Kernels.java) | `gemm`, `gemmStrided`, `gemmStridedTransA`, `gemmStridedColMajorA/B`, parallel path |
-| Optimized dispatch path | [`OptimizedBLAS3`](src/main/java/net/faulj/compute/OptimizedBLAS3.java) | Main CPU route; `gemm`, `gemmStrided` |
-| Microkernel | [`MicroKernel`](src/main/java/net/faulj/compute/MicroKernel.java) | Register-blocked FMA inner loop |
-| Specialized kernels | [`SpecializedKernels`](src/main/java/net/faulj/compute/SpecializedKernels.java) | matvec, tiny 2x2/3x3/4x4, outer product |
-| Optional GPU | [`CudaGemm`](src/main/java/net/faulj/compute/CudaGemm.java) | JCublas `dgemm`, only when CUDA is usable |
+| Layer | Current role |
+| --- | --- |
+| GEMM API | [`Gemm.java`](src/main/java/net/faulj/kernels/gemm/Gemm.java) exposes matrix, strided, transposed, column-major, and batched entry points. |
+| Backend policy | [`BackendRegistry.java`](src/main/java/net/faulj/nativeblas/BackendRegistry.java) and [`AlgorithmDispatch.java`](src/main/java/net/faulj/nativeblas/AlgorithmDispatch.java) coordinate availability and algorithm selection. |
+| Native bridge | [`NativeBackend.java`](src/main/java/net/faulj/nativeblas/NativeBackend.java) owns library loading, native calls, direct/off-heap handling, and Java fallback. |
+| Java backend | [`JavaBackend.java`](src/main/java/net/faulj/nativeblas/JavaBackend.java) routes to the in-process Java kernels. |
+| Native implementation | [`gemm.cpp`](native-backend/src/main/cpp/kernels/gemm.cpp) resolves work, runs the worker pool, and exposes the C/JNI-facing GEMM implementation. |
+| Native kernel structure | [`gemm_internal.hpp`](native-backend/src/main/cpp/kernels/gemm_internal.hpp), [`gemm_panel.hpp`](native-backend/src/main/cpp/kernels/gemm_panel.hpp), and [`gemm_compute.hpp`](native-backend/src/main/cpp/kernels/gemm_compute.hpp) separate planning, panel work, and microkernels. |
+| Off-heap storage | [`OffHeapMatrix.java`](src/main/java/net/faulj/matrix/OffHeapMatrix.java) supports Java foreign-memory storage and native-compatible layouts. |
 
-### How the kernels work
+Runtime selection is controlled by `jlc.backend=auto|java|native` (default
+`auto`). Per-algorithm overrides use
+`jlc.algorithm.<name>.backend=auto|java|cpp`; an explicit native request still
+falls back to Java if the library cannot load or the operation is unsupported.
 
-- Packing. B is packed into SIMD-width panels (`packB`); A is packed into
-  `MR`-row strips (`packA`), with `alpha` folded in during the pack. Strided,
-  transposed, and column-major source layouts have their own pack routines so
-  the microkernel always sees a contiguous panel.
-- Microkernel. The inner loop holds up to `MR` rows of C in vector registers,
-  broadcasts A scalars, and issues fused multiply-adds against packed B rows,
-  K-unrolled. The column remainder is handled with a `VectorMask`.
-- Blocking. Block sizes (`MC/KC/NC`) are derived from rough L1/L2/L3 estimates
-  following the BLIS layering, so the working set of each loop level targets a
-  cache level.
+## Native GEMM design
 
----
+The production path computes `C = alpha * A * B + beta * C` through a layered
+GEMM structure rather than sending the whole operation to one monolithic loop.
 
-## Correctness story
+### Blocking and packing
 
-Performance work on numeric kernels is only credible if correctness is pinned
-independently. This repo does that with a test-only oracle and parity tests.
+- The validated `2048³` configuration uses `MC/KC/NC = 2048/256/128` and
+  `MR/NR = 6/8`.
+- A is packed as row-separated strips and B as regular panels. The main path
+  uses worker-private A packing, so each worker can consume its own scratch
+  without a shared-A synchronization cost.
+- The planner resolves cache-oriented block sizes and supports explicit tuning
+  overrides for controlled experiments. The current defaults are documented in
+  [`docs/EXPERIMENTAL_GEMM_PATHS.md`](docs/EXPERIMENTAL_GEMM_PATHS.md).
 
-- Independent oracle:
-  [`GemmReference`](src/test/java/net/faulj/compute/GemmReference.java) is a
-  deliberately simple triple-loop GEMM, plus strided / transposed /
-  column-major reference variants, used only in tests.
-- Parity tests pin every public GEMM surface to the oracle across a grid of
-  shapes and `alpha` / `beta` values, including degenerate dimensions and
-  null / dimension-mismatch error paths:
-  - [`GemmParityTest`](src/test/java/net/faulj/compute/GemmParityTest.java):
-    `BLAS3Kernels.gemm`, `OptimizedBLAS3.gemm`, the Matrix-returning facade,
-    zero / degenerate dimensions, and the wide-SIMD `4x4` regression case.
-  - [`GemmStridedParityTest`](src/test/java/net/faulj/compute/GemmStridedParityTest.java):
-    `gemmStrided`, `gemmStridedTransA`, `gemmStridedColMajorA`,
-    `gemmStridedColMajorB`, and `OptimizedBLAS3.gemmStrided`.
-  - [`GemmOffHeapParityTest`](src/test/java/net/faulj/compute/GemmOffHeapParityTest.java):
-    the off-heap (`OffHeapMatrix`) GEMM path, including post-compute sync.
-  - [`GemmNumericEdgeTest`](src/test/java/net/faulj/compute/GemmNumericEdgeTest.java):
-    documents the current behavior of each CPU path for `beta=0` on NaN-seeded
-    C, `alpha=0`, and `0 x infinity`, rather than asserting an idealized one.
-  - [`GemmCudaParityTest`](src/test/java/net/faulj/compute/GemmCudaParityTest.java)
-    (optional) and
-    [`GemmLargeParityTest`](src/test/java/net/faulj/compute/GemmLargeParityTest.java)
-    (slow, opt-in) cover the CUDA path and large shapes.
+### Microkernel
 
-### The bug this branch's tests caught
+On the validated AVX2 path, the interior tile is an intrinsic 6x8 kernel. It
+keeps six rows by two four-double vectors of C in registers, for twelve vector
+accumulator chains, and advances the K loop with AVX2 fused multiply-adds. The
+production implementation is in
+[`gemm_compute.hpp`](native-backend/src/main/cpp/kernels/gemm_compute.hpp).
 
-`OptimizedBLAS3.gemm` failed parity on a tiny `4x4x4` problem only on machines
-where `DoubleVector.SPECIES_PREFERRED.length() > 4` (for example AVX-512, 8
-lanes).
+### Scheduling, tails, and fallbacks
 
-- Root cause: `SpecializedKernels.gemm4x4` issued full-width vector loads and
-  stores for 4-column rows. On an 8-lane machine each "row" load pulled in 4
-  extra doubles from the next row, and the store wrote them back, corrupting
-  the result and touching out-of-row memory.
-- Fix: mask the 4-column B/C loads and stores with `SPECIES.indexInRange(0, 4)`
-  whenever the preferred width exceeds 4, so the kernel stays within its
-  logical 4 columns regardless of hardware vector width.
-- Outcome: what had been an ignored known-failure case is now an active,
-  passing parity test (`optimizedBlas3WideSimdTiny4x4MatchesReference`).
+The native backend uses a persistent worker pool and a panel scheduler. A
+single resolved runtime configuration supplies scheduler and affinity choices
+to the worker task, so hot loops do not repeatedly parse environment variables.
+The ordinary panel scheduler is the default. Tail panels, partial M/N/K tiles,
+non-AVX2 builds, unsupported layouts, and other edge cases use the corresponding
+generic or scalar path. Worker startup or task failures are handled through the
+native error path and can fall back at the Java boundary.
 
----
+Physical-core affinity is deliberately opt-in with
+`JLC_NATIVE_WORKER_AFFINITY=physical`. It is useful for controlled topology
+experiments and for the benchmark above, but the portable library default is
+`none`. The `shared-tail` scheduler is retained as an optional correctness-
+validated behavior for shapes where it helps; it is not the default contract.
+
+## Optimization story: what was hard
+
+The final kernel is the result of rejecting several plausible ideas when their
+evidence did not generalize to the target workload:
+
+- The production AVX2 path moved from the older 5x4 kernel to the intrinsic
+  6x8 kernel, which retained the best repeatable throughput and code shape.
+- U2 lost about 8.25% at the target size. U4 and the no-inline variant remain
+  useful for code-generation comparisons but did not clear the promotion gate.
+- Handwritten k-major6 assembly was kept behind explicit experimental build
+  support. Its isolated low-thread result was not enough to justify its
+  high-thread behavior as the production default.
+- K-major A layouts, NR8 B packing/prefetch, and shared-A/L3 packing were
+  retained for reproduction or diagnosis after regressing at the important
+  multi-worker points. The current layout keeps the regular panel/private-A
+  path simple and measurable.
+- Blocking searches did not produce a repeatable promotion above the current
+  `2048/256/128` configuration. The exact block controls therefore remain
+  tuning inputs, not promises about a universally optimal tile geometry.
+
+The lesson is not that every experiment failed; it is that a fast isolated
+sample is insufficient evidence for a default numerical kernel. The complete
+classification is in the
+[experimental-path manifest](docs/EXPERIMENTAL_GEMM_PATHS.md).
+
+## Correctness and validation
+
+The native backend is correctness-gated before benchmarking:
+
+| Boundary | Validated milestone |
+| --- | --- |
+| Default native build | Pass |
+| Native CTest contract suite | 2/2 pass |
+| Targeted Java/native integration suite | 14/14 pass across backend, heap, off-heap, and strided tests |
+| Full Gradle test suite | Pass |
+| Experimental selector behavior | Unsupported selectors rejected by the default build |
+| Production code generation | Known-good 6x8 structure retained; no hot-loop calls or vector spills in the audited path |
+
+The targeted integration tests are
+[`BackendRegistryTest`](src/test/java/net/faulj/nativeblas/BackendRegistryTest.java),
+[`NativeGemmIntegrationTest`](src/test/java/net/faulj/nativeblas/NativeGemmIntegrationTest.java),
+[`NativeOffHeapGemmIntegrationTest`](src/test/java/net/faulj/nativeblas/NativeOffHeapGemmIntegrationTest.java),
+and
+[`NativeStridedGemmIntegrationTest`](src/test/java/net/faulj/nativeblas/NativeStridedGemmIntegrationTest.java).
+
+Earlier validation also covered padded and strided operands, transposed inputs,
+tails, alpha/beta behavior, scheduler and persistent-worker behavior, fallback
+workers, concurrency, fault/rollback handling, and affinity/topology
+diagnostics. Those cases are why the README describes the native path as
+correctness-gated rather than as a benchmark-only kernel.
 
 ## Benchmark methodology
 
-A parity-gated backend comparison harness lives in test sources so it can use
-the independent oracle and package-private CUDA helpers without changing
-production code:
-[`GemmBackendComparison`](src/test/java/net/faulj/compute/GemmBackendComparison.java).
+The public number follows a deliberately narrow protocol:
 
-Key properties, with full detail in [BENCHMARKS.md](BENCHMARKS.md):
+- FP64 square GEMM at `2048³` on one AMD Ryzen 9 3950X host;
+- two warmups and five timed calls, with the median used for the headline;
+- the built-in native provider using the intrinsic 6x8 path, panel scheduling,
+  private A packing, and `MC/KC/NC = 2048/256/128`;
+- physical workers selected explicitly for the controlled multi-thread run;
+- a same-host AOCL-BLIS comparison measured under the corresponding controlled
+  physical-core setup;
+- correctness and code-generation checks completed before retaining the
+  performance claim.
 
-- Every backend is parity-checked before it is timed; a failing backend is
-  emitted with `valid=false` and no GFLOPs / speedup.
-- Reports median, mean, sample stddev, min, p10/p25/p75/p90, plus
-  median-based GFLOPs and speedup.
-- Records machine metadata (CPU, JVM, vector lanes, CUDA status, git commit,
-  seed) into the artifacts.
-- Writes CSV + JSON under `build/reports/gemm/`.
-- Has a quick mode (`-Dgemm.quick=true`) and a PowerShell-safe invocation.
+The result is intentionally stated as approximately `520–530 GFLOP/s` and
+approximately `89%` of the controlled reference. It is not the best single
+sample, not a cross-machine guarantee, and not a claim that JLC is faster than
+BLAS. See [`docs/PERFORMANCE_SUMMARY.md`](docs/PERFORMANCE_SUMMARY.md) for the
+public measurement summary.
 
-Backend labels (`blas3-naive`, `blas3-simd-1t`, `blas3-parallel`, `opt-1t`,
-`opt-parallel`, `cuda`) and the property table are documented in
-[BENCHMARKS.md](BENCHMARKS.md). Numbers are intentionally not reproduced here
-because they are host-specific.
+## Production vs experimental paths
 
----
+| Classification | Current contents |
+| --- | --- |
+| **Production** | Intrinsic AVX2 6x8; row-separated A; regular panel B; worker-private A packing; panel scheduler; persistent and per-call fallback worker paths; scalar/generic correctness fallbacks. |
+| **Successful optional** | `JLC_NATIVE_WORKER_AFFINITY=physical`; `JLC_NATIVE_GEMM_SCHEDULER=shared-tail` where its shape and worker balance justify it. |
+| **Experimental, rejected, or historical** | U2/U4/no-inline variants; handwritten k-major6 assembly; k-major6 A layout; NR8 B layout and prefetch; shared-A/L3 packing; exact block overrides; small-K update experiments; legacy kernel selectors. |
 
-## Verify it yourself
+The normal CMake build has
+`JLC_NATIVE_ENABLE_EXPERIMENTAL_GEMM=OFF` and
+`JLC_NATIVE_ENABLE_EXPERIMENTAL_ASM=OFF`. Experimental assembly is not part of
+normal execution. If a selector such as `6x8-u2`, `6x8-u4`, `6x8-u4-asm`, or
+`6x8-noinline` is requested without experimental GEMM support, the configuration
+rejects it; it does not silently select the intrinsic production path. The
+assembly consumers require an explicit
+`-DJLC_NATIVE_ENABLE_EXPERIMENTAL_ASM=ON` build. See the full
+[native GEMM path manifest](docs/EXPERIMENTAL_GEMM_PATHS.md).
 
-GEMM parity + edge tests:
-
-```powershell
-.\gradlew.bat --% test --no-daemon --rerun-tasks --tests net.faulj.compute.Gemm*
-```
-
-Quick parity-gated benchmark run:
-
-```powershell
-.\gradlew.bat --% runGemmBackendComparison -Dgemm.quick=true --no-daemon
-```
-
-Artifacts land in `build/reports/gemm/`. See [BENCHMARKS.md](BENCHMARKS.md) for
-backend labels, properties, and methodology. On Linux/macOS use `./gradlew`
-and drop the `--%` token.
-
-Optional / opt-in suites:
-
-```powershell
-# CUDA parity (requires a working CUDA + JCublas runtime)
-.\gradlew.bat --% gemmCudaTest --no-daemon
-
-# Slow large-shape parity
-.\gradlew.bat --% gemmSlowTest -Dfaulj.gemm.slow=true --no-daemon
-```
-
----
-
-## Known limitations
-
-Stated plainly, because a case study that hides these is not credible:
-
-- Benchmark numbers are machine-specific. They depend on CPU, vector width,
-  JVM, thermal state, and JIT. Do not treat one host's numbers as portable.
-- CUDA may be slower on small matrices. `CudaGemm.gemm` timing includes
-  host/device allocation, transfer, and launch overhead, so small problems can
-  lose to the CPU path even when CUDA is available.
-- `BLAS3Kernels` parallel path is scalar-parallel, not SIMD-parallel. The
-  `blas3-parallel` backend is ForkJoin plus blocked scalar work, not the packed
-  SIMD microkernel.
-- The independent oracle is size-capped (`gemm.independentOracleMaxSize`,
-  default 512). Above that, the harness falls back to using `opt-1t` as a
-  reference backend (`oracle_type=backend_reference`), which is weaker than an
-  independent oracle.
-- This README does not claim a clean full-repo `test` run. The verified surface
-  for this case study is the targeted GEMM suite above plus the quick benchmark
-  harness. A local `.\gradlew.bat --% test --no-daemon` attempt during this
-  final pass was inconclusive because Gradle hit test-output file-lock and
-  long-run issues before I could establish a trustworthy repo-wide result.
-- Some loose `*.out` / `*.log` files at the repo root are historical analysis
-  dumps, not the current source of truth. The current generated root-level
-  performance artifacts are also untracked and outside this README-only change.
-
-### Deliberately not claimed
-
-This README does not claim:
-
-- JNI / C++ native GEMM
-- a hand-written C++ AVX kernel
-- direct `ByteBuffer` GEMM
-- strided batched GEMM
-- column-major-C GEMM output
-- universal CUDA acceleration
-- cross-machine benchmark portability
-
----
-
-## Reviewer guide
-
-If you have ten minutes, read these in order:
-
-| # | File | Why |
-| --- | --- | --- |
-| 1 | [`GemmReference.java`](src/test/java/net/faulj/compute/GemmReference.java) | The independent correctness oracle |
-| 2 | [`GemmParityTest.java`](src/test/java/net/faulj/compute/GemmParityTest.java) | Parity grid + the `4x4` regression test |
-| 3 | [`GemmStridedParityTest.java`](src/test/java/net/faulj/compute/GemmStridedParityTest.java) | Strided / transposed / column-major parity |
-| 4 | [`SpecializedKernels.java`](src/main/java/net/faulj/compute/SpecializedKernels.java) | The fixed `gemm4x4` wide-SIMD masking |
-| 5 | [`OptimizedBLAS3.java`](src/main/java/net/faulj/compute/OptimizedBLAS3.java) + [`GemmDispatch.java`](src/main/java/net/faulj/compute/GemmDispatch.java) | Dispatch + cache-aware blocking |
-| 6 | [`BLAS3Kernels.java`](src/main/java/net/faulj/compute/BLAS3Kernels.java) | Packed SIMD microkernel + strided variants |
-| 7 | [`GemmBackendComparison.java`](src/test/java/net/faulj/compute/GemmBackendComparison.java) + [`BENCHMARKS.md`](BENCHMARKS.md) | Parity-gated harness + methodology |
-| 8 | [`build.gradle`](build.gradle) | Vector API / preview flags, test wiring, `runGemmBackendComparison` task |
-
----
-
-## The wider project
-
-The GEMM core sits inside a numerical-diagnostics web app, which serves as a
-working demo vehicle:
-
-- `src/main/java/net/faulj`: core library (matrix/vector types, decompositions,
-  solvers, eigen / spectral routines, condition / accuracy metrics, benchmark
-  helpers)
-- `src/main/java/net/faulj/web`: Spring Boot API (`/api/diagnostics`,
-  `/api/status`, benchmark / status streams)
-- `frontend`: React + Vite client for matrix input, decomposition and spectral
-  views, history / favorites, and settings
+## Build, run, and verify
 
 ### Requirements
 
-- Java 21 (project toolchain; uses preview features + `jdk.incubator.vector`)
-- Node.js 18+
-- npm 9+
+- Java 21 JDK and the Gradle wrapper;
+- CMake 3.20 or newer and a C++17 compiler for the JNI backend;
+- x86-64 AVX2/FMA for the validated optimized production path;
+- optional BLAS/LAPACK development libraries. CMake can use a detected vendor
+  provider, or the built-in implementation can be forced with
+  `JLC_NATIVE_VENDOR_BLAS=NONE`;
+- Node.js and npm only when running the React frontend.
 
-### Run locally
+The native CMake project requires a JDK path because it includes `jni.h`.
+Gradle selects Java 21 for native configuration and test execution.
 
-```powershell
-# backend (http://localhost:8080)
-.\gradlew.bat --% bootRun
+### Java and native build
 
-# frontend (http://localhost:5173), in a second terminal
+From the repository root on Linux or macOS:
+
+```bash
+./gradlew build
+./gradlew buildNativeBackend
+```
+
+To build the native backend while forcing the built-in provider:
+
+```bash
+./gradlew -Djlc.native.vendor.blas=NONE buildNativeBackend
+```
+
+The corresponding native CMake targets are also available directly:
+
+```bash
+cmake -S native-backend -B build/native-backend-tests \
+  -DJLC_JAVA_HOME="$JAVA_HOME" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DJLC_NATIVE_VENDOR_BLAS=NONE \
+  -DJLC_NATIVE_BUILD_TESTS=ON \
+  -DJLC_NATIVE_ENABLE_TEST_HOOKS=ON
+cmake --build build/native-backend-tests --config Release
+ctest --test-dir build/native-backend-tests --output-on-failure
+```
+
+On Windows, use `gradlew.bat` or the equivalent CMake workflow. The MSVC
+native path must compile with AVX2 enabled; the project configures `/arch:AVX2`
+for that target.
+
+### Verification and benchmark entry points
+
+```bash
+# Native JNI integration tests: backend selection, GEMM, off-heap, and strided paths
+./gradlew testNativeBackend
+
+# Regular Java correctness and unit suite
+./gradlew test
+
+# Standalone native C++ GEMM sweep (benchmark-oriented)
+./gradlew runNativeCppGemmSweep
+```
+
+The native test task builds the shared library first and runs the four focused
+Java integration classes listed in [Correctness and validation](#correctness-and-validation).
+The full CTest command above is the direct native contract check. Benchmark
+entry points are intentionally separate from the ordinary correctness suite.
+
+### Run the web application
+
+```bash
+./gradlew bootRun
+```
+
+The Spring Boot backend listens on `http://localhost:8080` by default. To run
+the frontend in a second terminal:
+
+```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-The Vite dev server proxies `/api` to `http://localhost:8080`
-via `frontend/vite.config.js`.
+The frontend is a diagnostics surface; it is not part of the CPU GEMM
+benchmark claim.
 
-### Build
+## Java fallback and the wider project
 
-```powershell
-.\gradlew.bat --% build
+The Java path remains an important part of JLC. [`JavaBackend.java`](src/main/java/net/faulj/nativeblas/JavaBackend.java)
+routes through [`OptimizedBLAS3.java`](src/main/java/net/faulj/compute/OptimizedBLAS3.java) and
+[`BLAS3Kernels.java`](src/main/java/net/faulj/compute/BLAS3Kernels.java), which
+use Java's Vector API and provide portable, testable alternatives when native
+execution is unavailable or a shape/layout is outside the native contract. The
+Java implementation is therefore a fallback and comparison path, not an
+obsolete artifact and not the sole optimized GEMM engine.
 
-cd frontend
-npm run build
-```
+The repository also contains:
 
-### Deployment notes
+- foreign-memory/off-heap matrix support through
+  [`OffHeapMatrix.java`](src/main/java/net/faulj/matrix/OffHeapMatrix.java);
+- an optional JCuda/JCublas path in
+  [`CudaGemm.java`](src/main/java/net/faulj/compute/CudaGemm.java), guarded by
+  [`CudaSupport.java`](src/main/java/net/faulj/compute/CudaSupport.java);
+- decompositions, eigensolvers, and linear solvers under
+  [`src/main/java/net/faulj/decomposition`](src/main/java/net/faulj/decomposition)
+  and [`src/main/java/net/faulj/solve`](src/main/java/net/faulj/solve);
+- the Spring Boot diagnostics API in
+  [`Application.java`](src/main/java/net/faulj/web/Application.java).
 
-- Contact-form delivery uses a backend-only `DISCORD_WEBHOOK_URL`. Never place
-  webhook secrets in `VITE_*` variables.
-- In production set `APP_SECURITY_HEAVY_ENDPOINT_TOKEN` (backend) and
-  `VITE_HEAVY_ENDPOINT_TOKEN` (frontend) for heavy API routes.
-- The debug Schur endpoint is disabled by default
-  (`app.debug.endpoints.enabled=false`).
-- Large matrices are intentionally capped for synchronous full diagnostics.
+CUDA is optional and was not used for the `2048³` CPU result above. The native
+backend also contains hooks for other numerical routines, but this milestone's
+validated performance story is the built-in CPU GEMM path.
+
+## Known limitations
+
+- The headline is specific to one Ryzen 9 3950X host, build, operating-system
+  state, and thermal/run history. It should not be projected to other CPUs.
+- The validated optimized path assumes AVX2/FMA. Other instruction sets and
+  unsupported layouts use their compiled alternatives or the Java fallback;
+  the headline does not cover those configurations.
+- Native worker affinity defaults to none. Enabling physical affinity can
+  improve repeatability on a controlled machine but is not a portable default.
+- Optional CUDA and vendor BLAS/LAPACK support are real project capabilities,
+  but neither is included in the CPU GEMM headline.
+- Experimental selectors are for reproduction, diagnostics, and future work;
+  they are not production recommendations.
+- The ratio is against a measured same-host AOCL-BLIS reference. It is not a
+  generic percentage of “BLAS” and does not promise superiority.
+
+## Reviewer guide
+
+For a focused review, read the current architecture in this order:
+
+1. [`Gemm.java`](src/main/java/net/faulj/kernels/gemm/Gemm.java) — public GEMM
+   facade and layout variants.
+2. [`BackendRegistry.java`](src/main/java/net/faulj/nativeblas/BackendRegistry.java)
+   and [`AlgorithmDispatch.java`](src/main/java/net/faulj/nativeblas/AlgorithmDispatch.java)
+   — backend availability and algorithm selection.
+3. [`NativeBackend.java`](src/main/java/net/faulj/nativeblas/NativeBackend.java)
+   — JNI loading, direct/off-heap handling, and fallback behavior.
+4. [`gemm.cpp`](native-backend/src/main/cpp/kernels/gemm.cpp) — native planning,
+   worker pool, scheduling, and public native entry points.
+5. [`gemm_internal.hpp`](native-backend/src/main/cpp/kernels/gemm_internal.hpp),
+   [`gemm_panel.hpp`](native-backend/src/main/cpp/kernels/gemm_panel.hpp), and
+   [`gemm_compute.hpp`](native-backend/src/main/cpp/kernels/gemm_compute.hpp) —
+   resolved configuration, packing contract, and microkernel dispatch.
+6. [`gemm_config.cpp`](native-backend/src/main/cpp/kernels/gemm_config.cpp) and
+   [`native-backend/CMakeLists.txt`](native-backend/CMakeLists.txt) — defaults
+   and experimental build gates.
+7. [`NativeGemmIntegrationTest.java`](src/test/java/net/faulj/nativeblas/NativeGemmIntegrationTest.java),
+   [`NativeOffHeapGemmIntegrationTest.java`](src/test/java/net/faulj/nativeblas/NativeOffHeapGemmIntegrationTest.java),
+   and [`NativeStridedGemmIntegrationTest.java`](src/test/java/net/faulj/nativeblas/NativeStridedGemmIntegrationTest.java)
+   — native correctness boundaries.
+8. [`docs/EXPERIMENTAL_GEMM_PATHS.md`](docs/EXPERIMENTAL_GEMM_PATHS.md) and
+   [`docs/PERFORMANCE_SUMMARY.md`](docs/PERFORMANCE_SUMMARY.md) — path
+   classification and public measurement evidence.
+9. [`build.gradle`](build.gradle) — Java 21, native configuration, test, and
+   benchmark entry points.
 
 ## License
 
-See [LICENSE](LICENSE).
+See [`LICENSE`](LICENSE).
