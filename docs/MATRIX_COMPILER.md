@@ -343,16 +343,17 @@ reporting, checksum consumption, and a correctness comparison before timing.
 Compilation and input construction are outside every timed region. Fusion
 compares eager direct `Matrix` operations with an already-compiled fused
 program's `execute()` method. GEMM dispatch is reported per product where the
-chain can mix Java and native selection. The measurements below are a
-single-host observation from Java 21.0.12 on Linux/amd64 with 32 reported
-processors; they are not universal performance claims.
+chain can mix Java and native selection. The measurements below are a fresh,
+isolated publication validation run from Java 21.0.12 on Linux/amd64, on an
+AMD Ryzen 9 3950X with 16 physical cores / 32 logical processors and the
+active native backend. They are not universal performance claims.
 
 | Family | Shapes / comparison | Observed result |
 | --- | --- | --- |
-| Matrix-chain reassociation | `1000x10 * 10x1000 * 1000x10`; STRICT vs RELAXED | Planner cost `20,000,000` vs `200,000`; product backends `[native,native]` vs `[java,native]`; median `6.349 ms` vs `5.436 ms`; observed ratio `1.168x`; correctness passed. |
-| Elementwise fusion | `scale(256x256, 2.5) + 256x256` | Temporary materializations `2` eager vs `1` compiler; estimated temporary bytes `1,048,576` vs `524,288`; median `4.668 ms` eager direct operations vs `15.162 ms` compiled fused execution; correctness passed. |
-| Direct GEMM dispatch boundary | `192x192 * 192x192` | Direct `0.516 ms`; compiled `0.528 ms`; execution delta `2.30%`, classified as measurement noise; selected backend `native`; correctness passed through the same GEMM facade. |
-| Shared DAG | `X = A * B; Y = X + X`, `96x96` | One planned GEMM step, runtime invocation count `not-instrumented`, two logical temporary buffers, median `23.473 ms`; shared plan node represented once; correctness passed. |
+| Matrix-chain reassociation | `1000x10 * 10x1000 * 1000x10`; STRICT vs RELAXED | Planner cost `20,000,000` vs `200,000`; product backends `[native,native]` vs `[java,native]`; median `5.921 ms` vs `5.094 ms`; observed ratio `1.162x`; correctness passed. |
+| Elementwise fusion | `scale(256x256, 2.5) + 256x256` | Temporary materializations `2` eager vs `1` compiler; estimated temporary bytes `1,048,576` vs `524,288`; median `4.403 ms` eager direct operations vs `15.520 ms` compiled fused execution; fusion was slower; correctness passed. |
+| Direct GEMM dispatch boundary | `192x192 * 192x192` | Direct `0.431 ms`; compiled `0.419 ms`; execution delta `-2.66%`, classified as measurement noise under the benchmark's ±5% band; selected backend `native`; correctness passed through the same GEMM facade. |
+| Shared DAG | `X = A * B; Y = X + X`, `96x96` | One planned GEMM step, runtime invocation count `not-instrumented`, two logical temporary buffers, median `22.673 ms`; shared plan node represented once; correctness passed. |
 
 These results distinguish planner arithmetic reduction, temporary
 materialization reduction, and observed execution timing. No result is used as
