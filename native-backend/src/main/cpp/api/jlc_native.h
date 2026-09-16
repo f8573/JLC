@@ -20,6 +20,12 @@ enum jlc_matrix_order : std::uint32_t {
     JLC_MATRIX_COL_MAJOR = 1
 };
 
+enum jlc_svd_algorithm : std::uint32_t {
+    JLC_SVD_ALGORITHM_AUTO = 0,
+    JLC_SVD_ALGORITHM_JACOBI = 1,
+    JLC_SVD_ALGORITHM_BIDIAG_QR = 2
+};
+
 using jlc_context_handle = std::uintptr_t;
 using jlc_matrix_handle = std::uintptr_t;
 
@@ -102,6 +108,13 @@ jlc_status jlc_native_hessenberg_reduce(double* h, int n);
 jlc_status jlc_native_hessenberg_decompose(double* h, int n, double* q);
 jlc_status jlc_native_bidiagonal_decompose(const double* a, int m, int n,
                                            double* u, double* b, double* v);
+jlc_status jlc_native_svd_decompose(const double* a, int m, int n,
+                                     double* u, double* singular_values, int singular_count,
+                                     double* v);
+jlc_status jlc_native_svd_decompose_with_algorithm(const double* a, int m, int n,
+                                                   double* u, double* singular_values,
+                                                   int singular_count, double* v,
+                                                   int algorithm);
 jlc_status jlc_native_gemm(const double* a, int a_rows, int a_cols,
                            const double* b, int b_rows, int b_cols,
                            double* c, int c_rows, int c_cols,

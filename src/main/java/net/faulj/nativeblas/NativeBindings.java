@@ -88,6 +88,12 @@ final class NativeBindings {
     static native void nativeBidiagonalDecompose(double[] a, int m, int n,
                                                  double[] u, double[] b, double[] v);
 
+    static native void nativeSvdDecompose(double[] a, int m, int n,
+                                          double[] u, double[] singularValues, double[] v);
+
+    static native void nativeSvdDecomposeWithAlgorithm(double[] a, int m, int n,
+                                                       double[] u, double[] singularValues,
+                                                       double[] v, int algorithm);
     static native void nativeLuFactor(double[] packedLu, int n, int[] pivots);
 
     static native void nativeLuFactorVendor(double[] packedLu, int n, int[] pivots);
