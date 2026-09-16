@@ -4,8 +4,13 @@ import java.util.List;
 import java.util.Objects;
 
 import net.faulj.compiler.matrix.affine.AffineAccess;
+import net.faulj.compiler.matrix.affine.AffineExpr;
+import net.faulj.compiler.matrix.affine.BufferOwnership;
 import net.faulj.compiler.matrix.affine.LogicalBuffer;
 import net.faulj.compiler.matrix.schedule.ScheduleBand;
+import net.faulj.compiler.matrix.schedule.ScheduleLoop;
+import net.faulj.compiler.matrix.schedule.ScheduleSequence;
+import net.faulj.compiler.matrix.schedule.ScheduleStatement;
 import net.faulj.matrix.Matrix;
 
 /**
@@ -26,6 +31,10 @@ public final class CpuFusedElementwiseStep implements CpuStep {
     private final AffineAccess outputAccess;
     private final AffineAccess scaleAccess;
     private final AffineAccess addAccess;
+    private final boolean canonicalIdentity;
+    private volatile ExecutionPath lastExecutionPath;
+
+    enum ExecutionPath { FAST_REAL_IDENTITY, GENERIC_SCHEDULE }
 
     CpuFusedElementwiseStep(int id,
                             int scaleStatementId,
@@ -57,6 +66,7 @@ public final class CpuFusedElementwiseStep implements CpuStep {
         this.outputAccess = Objects.requireNonNull(outputAccess, "Fused output access must not be null");
         this.scaleAccess = Objects.requireNonNull(scaleAccess, "Fused scale access must not be null");
         this.addAccess = Objects.requireNonNull(addAccess, "Fused add access must not be null");
+        this.canonicalIdentity = isCanonicalIdentity();
     }
 
     @Override
@@ -119,6 +129,10 @@ public final class CpuFusedElementwiseStep implements CpuStep {
         return addAccess;
     }
 
+    ExecutionPath lastExecutionPath() {
+        return lastExecutionPath;
+    }
+
     @Override
     public List<LogicalBuffer> inputBuffers() {
         return List.of(scaledOperand, addOperand);
@@ -142,6 +156,24 @@ public final class CpuFusedElementwiseStep implements CpuStep {
         boolean scaledComplex = scaled.hasImagData();
         boolean addendComplex = addend.hasImagData();
         boolean complex = scaledComplex || addendComplex;
+        if (canUseFastPath(output, scaled, addend)) {
+            double[] out = output.getRawData();
+            double[] a = scaled.getRawData();
+            double[] b = addend.getRawData();
+            int count = out.length;
+            if (scaledOperandFirst) {
+                for (int p = 0; p < count; p++) {
+                    out[p] = factor * a[p] + b[p];
+                }
+            } else {
+                for (int p = 0; p < count; p++) {
+                    out[p] = b[p] + factor * a[p];
+                }
+            }
+            lastExecutionPath = ExecutionPath.FAST_REAL_IDENTITY;
+            return;
+        }
+        lastExecutionPath = ExecutionPath.GENERIC_SCHEDULE;
         if (complex) {
             output.ensureImagData();
         }
@@ -178,5 +210,63 @@ public final class CpuFusedElementwiseStep implements CpuStep {
                 output.set(outputIndices[0], outputIndices[1], real);
             }
         });
+    }
+
+    private boolean canUseFastPath(Matrix output, Matrix scaled, Matrix addend) {
+        if (!canonicalIdentity || output.getClass() != Matrix.class
+            || scaled.getClass() != Matrix.class || addend.getClass() != Matrix.class
+            || output.hasImagData() || scaled.hasImagData() || addend.hasImagData()
+            || output == scaled || output == addend
+            || outputBuffer.ownership() != BufferOwnership.OWNED) {
+            return false;
+        }
+        int rows = output.getRowCount();
+        int columns = output.getColumnCount();
+        if (scaled.getRowCount() != rows || addend.getRowCount() != rows
+            || scaled.getColumnCount() != columns || addend.getColumnCount() != columns) {
+            return false;
+        }
+        long count = (long) rows * columns;
+        return count == output.getRawData().length
+            && count == scaled.getRawData().length
+            && count == addend.getRawData().length;
+    }
+
+    private boolean isCanonicalIdentity() {
+        if (scheduleBand.loops().size() != 2
+            || !(scheduleBand.body() instanceof ScheduleSequence sequence)
+            || sequence.children().size() != 2
+            || !(sequence.children().get(0) instanceof ScheduleStatement scaleStatement)
+            || !(sequence.children().get(1) instanceof ScheduleStatement addStatement)
+            || scaleStatement.id() != scaleStatementId || addStatement.id() != addStatementId
+            || outputAccess.buffer() != outputBuffer
+            || scaleAccess.buffer() != scaledOperand || addAccess.buffer() != addOperand
+            || outputAccess.indices().size() != 2 || scaleAccess.indices().size() != 2
+            || addAccess.indices().size() != 2) {
+            return false;
+        }
+        ScheduleLoop row = scheduleBand.loop(0);
+        ScheduleLoop column = scheduleBand.loop(1);
+        if (!isIdentityLoop(row, outputBuffer.shape().rows())
+            || !isIdentityLoop(column, outputBuffer.shape().columns())) {
+            return false;
+        }
+        AffineExpr rowIndex = AffineExpr.variable(row.inductionVariable());
+        AffineExpr columnIndex = AffineExpr.variable(column.inductionVariable());
+        return hasIdentityIndices(outputAccess, rowIndex, columnIndex)
+            && hasIdentityIndices(scaleAccess, rowIndex, columnIndex)
+            && hasIdentityIndices(addAccess, rowIndex, columnIndex);
+    }
+
+    private static boolean isIdentityLoop(ScheduleLoop loop, int extent) {
+        return loop.inductionVariable().equals(loop.semanticVariable())
+            && loop.lowerBound() == 0 && loop.upperBound() == extent && loop.step() == 1
+            && loop.annotations().isEmpty() && loop.guard() == null
+            && AffineExpr.variable(loop.inductionVariable()).equals(loop.valueExpression());
+    }
+
+    private static boolean hasIdentityIndices(AffineAccess access,
+                                               AffineExpr row, AffineExpr column) {
+        return access.index(0).equals(row) && access.index(1).equals(column);
     }
 }

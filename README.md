@@ -11,8 +11,8 @@ JLC is a Java/C++ dense linear-algebra system combining a hand-optimized native 
 | JLC / controlled reference | **89.3%** |
 | JLC / nominal Zen 2 FP64 peak (896 GFLOP/s) | **58.1%** |
 | Matrix compiler | M1–M4 complete |
-| Full Java test suite | 441 recorded; 431 passed, 10 skipped, 0 failed/error |
-| Focused compiler correctness tests | 114 passed |
+| Full Java test suite | 447 passed, 0 skipped, 0 failed/error |
+| Focused compiler correctness tests | 121 passed |
 | Native-focused Java tests | 14 passed |
 
 The controlled GEMM result used 16 physical workers with physical-core affinity on an AMD Ryzen 9 3950X. The AOCL-BLIS figure is a **controlled same-host reference**, not a current run. Compiler timings below are a separate fresh validation run on that host.
@@ -66,20 +66,20 @@ MatMul calls the existing optimized Gemm facade. Add, Scale, and Transpose use e
 
 ## Fresh compiler benchmark snapshot
 
-The fixed four-family M4 suite used deterministic inputs, two warmups, five measured calls, median execution time, and correctness checks before timing. This isolated run used Java 21.0.12 on Linux, 16 physical / 32 logical Ryzen 9 3950X cores, and the active native backend. Compilation and input construction were outside timed regions.
+The fixed four-family M4 suite uses deterministic inputs, two warmups, five measured calls, median execution time, and correctness checks before timing. The separate fusion measurement independently warmed each path for 5,000/2,000/1,000/500/150 calls at 64²/128²/256²/512²/1024², then took 31 calls per run and the median across three repaired runs. This host used Java 21.0.12 on Linux, 16 physical / 32 logical Ryzen 9 3950X cores, and the active native backend. Compilation and input construction were outside timed regions.
 
 | Case | Fresh observed result |
 | --- | --- |
 | Matrix chain | STRICT 20,000,000 vs RELAXED 200,000 planner multiplications; **5.921 vs 5.094 ms**, 1.162× ratio; product backends [native,native] vs [java,native]; correctness passed. |
-| Scale + add, 256×256 | Eager **2 temporaries / 1,048,576 bytes**, compiled **1 / 524,288 bytes**; **4.403 ms eager vs 15.520 ms fused**. Fusion was slower in this run; correctness passed. |
+| Scale + add, 256×256 | Eager **2 matrix payloads / 1,048,576 bytes**, compiled **1 / 524,288 bytes**. Warmed execution median: **0.089060 ms eager vs 0.047110 ms fused** (1.89× eager/fused); correctness passed. Measured total allocation per execution was 1,048,672 bytes eager and 525,072 bytes fused. |
 | Direct GEMM, 192³ | **0.431 ms direct vs 0.419 ms compiled**, −2.66% execution delta, within the benchmark's ±5% measurement-noise band; native selected; correctness passed. |
 | Shared DAG, 96×96 | **22.673 ms**, one planned GEMM step and two logical temporary buffers; correctness passed. Runtime GEMM call count was not instrumented. |
 
-These are one-host observations, not portable speedup guarantees. The [compiler benchmark section](docs/MATRIX_COMPILER.md#fixed-m4-benchmark-suite) explains the comparison boundaries.
+The chain, GEMM, and DAG rows retain the published fixed-suite observations; the fusion row uses the repaired, independently warmed measurement. These are one-host observations, not portable speedup guarantees. The [compiler benchmark section](docs/MATRIX_COMPILER.md#fixed-m4-benchmark-suite) explains the comparison boundaries and size curve.
 
 ## Correctness and adversarial validation
 
-Post-M4 adversarial audits exposed and repaired cross-iteration fusion legality, alias/dependence conservatism, tile binding safety, mixed real/complex signed-zero semantics, hidden off-heap intermediate ownership, retained-stage provenance, executable-subset validation, and a benchmark boundary mismatch. Final verification found no remaining publication blockers. The full suite recorded 441 tests with zero failures or errors; the focused compiler correctness groups passed 114/114, and the native-focused groups passed 14/14.
+Post-M4 adversarial audits exposed and repaired cross-iteration fusion legality, alias/dependence conservatism, tile binding safety, mixed real/complex signed-zero semantics, hidden off-heap intermediate ownership, retained-stage provenance, executable-subset validation, and a benchmark boundary mismatch. The bounded fused-lowering repair also passed numerical and path-selection tests. The full suite passed 447/447 with zero skips, failures, or errors; the focused compiler suite passed 121/121, and the native-focused suite passed 14/14.
 
 ## Build and run
 
