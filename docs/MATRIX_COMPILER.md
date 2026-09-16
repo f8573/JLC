@@ -337,7 +337,7 @@ symbolic plans fail before any CPU step begins.
 
 ### Fixed M4 benchmark suite
 
-The benchmark suite is one JUnit class with exactly four families. Each case
+The fixed benchmark suite is one JUnit class with exactly four families. Each case
 uses deterministic inputs, two warmups, five measured iterations, median
 reporting, checksum consumption, and a correctness comparison before timing.
 Compilation and input construction are outside every timed region. Fusion
@@ -351,13 +351,43 @@ active native backend. They are not universal performance claims.
 | Family | Shapes / comparison | Observed result |
 | --- | --- | --- |
 | Matrix-chain reassociation | `1000x10 * 10x1000 * 1000x10`; STRICT vs RELAXED | Planner cost `20,000,000` vs `200,000`; product backends `[native,native]` vs `[java,native]`; median `5.921 ms` vs `5.094 ms`; observed ratio `1.162x`; correctness passed. |
-| Elementwise fusion | `scale(256x256, 2.5) + 256x256` | Temporary materializations `2` eager vs `1` compiler; estimated temporary bytes `1,048,576` vs `524,288`; median `4.403 ms` eager direct operations vs `15.520 ms` compiled fused execution; fusion was slower; correctness passed. |
+| Elementwise fusion | `scale(256x256, 2.5) + 256x256` | The repaired identity real heap path elides the scale result and directly loops over row-major arrays. Logical matrix payload is `1,048,576` bytes eager vs `524,288` compiled. With independent warmup, median execution was `0.089060 ms` eager vs `0.047110 ms` compiled (1.89× eager/compiled); correctness passed. |
 | Direct GEMM dispatch boundary | `192x192 * 192x192` | Direct `0.431 ms`; compiled `0.419 ms`; execution delta `-2.66%`, classified as measurement noise under the benchmark's ±5% band; selected backend `native`; correctness passed through the same GEMM facade. |
 | Shared DAG | `X = A * B; Y = X + X`, `96x96` | One planned GEMM step, runtime invocation count `not-instrumented`, two logical temporary buffers, median `22.673 ms`; shared plan node represented once; correctness passed. |
 
+The chain, GEMM, and DAG rows above are the published fixed-suite measurements.
+The fusion row is the current, adequately warmed repair measurement; the old
+two-warmup fusion timing is not a reliable steady-state performance result.
+
+For fusion, an isolated JUnit measurement uses deterministic inputs and checks
+all outputs before timing. Eager and compiled execution are each warmed for
+5,000/2,000/1,000/500/150 calls at 64²/128²/256²/512²/1024²,
+followed by 31 timed calls. Values below are medians across three independent
+repaired runs; the untouched published main was measured once with the same
+warmup protocol. The longer small-shape warmup was needed for both eager and
+compiled code to reach stable optimized execution.
+
+| Size | Published main eager / fused (ms) | Repaired eager / fused (ms) | Repaired eager/fused |
+| --- | --- | --- | --- |
+| 64×64 | 0.006100 / 0.626271 | 0.006160 / 0.003470 | 1.78× |
+| 128×128 | 0.021510 / 2.377655 | 0.022600 / 0.011460 | 1.97× |
+| 256×256 | 0.090790 / 9.484372 | 0.089060 / 0.047110 | 1.89× |
+| 512×512 | 0.406631 / 38.275480 | 0.426281 / 0.203941 | 2.09× |
+| 1024×1024 | 2.423165 / 152.980688 | 2.562306 / 1.469823 | 1.74× |
+
+The former `524,288`-byte compiler figure was an estimate of matrix payload
+only, not total runtime allocation. At 256×256, measured allocation per
+execution was `6,831,056` bytes for the published generic fused interpreter,
+and `525,072` bytes after the fast lowering. The latter comprises `524,288`
+bytes of output payload plus approximately `784` bytes of execution and
+matrix-object overhead; schedule interpretation no longer allocates per
+element. Eager measured `1,048,672` bytes, including `1,048,576` bytes of
+matrix payload.
+
 These results distinguish planner arithmetic reduction, temporary
-materialization reduction, and observed execution timing. No result is used as
-a completion gate or as a reason to begin more performance tuning.
+materialization reduction, and observed execution timing. They describe the
+existing M4 CPU lowering; no new compiler milestone or optimization family
+was added.
 
 ### M4 limitations
 
