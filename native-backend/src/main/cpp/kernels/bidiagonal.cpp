@@ -51,8 +51,42 @@ void apply_householder_right(double* m, int rows, int cols, int start_row, int s
     }
 }
 
+double strided_norm(const double* values, std::size_t start, int count, int stride) {
+    double scale = 0.0;
+    long double sum = 1.0L;
+    for (int i = 0; i < count; ++i) {
+        const double value = std::abs(values[start + static_cast<std::size_t>(i) * stride]);
+        if (!std::isfinite(value)) {
+            return value;
+        }
+        if (value == 0.0) {
+            continue;
+        }
+        if (scale < value) {
+            const long double ratio = scale == 0.0
+                ? 0.0L
+                : static_cast<long double>(scale) / static_cast<long double>(value);
+            sum = 1.0L + sum * ratio * ratio;
+            scale = value;
+        } else {
+            const long double ratio = static_cast<long double>(value)
+                / static_cast<long double>(scale);
+            sum += ratio * ratio;
+        }
+    }
+    if (scale == 0.0) {
+        return 0.0;
+    }
+    return static_cast<double>(static_cast<long double>(scale) * std::sqrt(sum));
+}
+
 jlc_status bidiagonal_upper(const double* a, int m, int n, double* u, double* b, double* v) {
     std::copy(a, a + static_cast<std::size_t>(m) * static_cast<std::size_t>(n), b);
+    for (std::size_t i = 0; i < static_cast<std::size_t>(m) * n; ++i) {
+        if (!std::isfinite(b[i])) {
+            return JLC_STATUS_INVALID_ARGUMENT;
+        }
+    }
     set_identity(u, m);
     set_identity(v, n);
 
@@ -63,16 +97,18 @@ jlc_status bidiagonal_upper(const double* a, int m, int n, double* u, double* b,
     for (int k = 0; k < limit; ++k) {
         const int len = m - k;
         double x0 = b[k * n + k];
-        double norm_sq = 0.0;
-        for (int i = 1; i < len; ++i) {
-            const double value = b[(k + i) * n + k];
-            norm_sq = std::fma(value, value, norm_sq);
+        const double xnorm = strided_norm(
+            b, static_cast<std::size_t>(k + 1) * n + k, len - 1, n);
+        if (!std::isfinite(xnorm)) {
+            return JLC_STATUS_INTERNAL_ERROR;
         }
-        const double xnorm = std::sqrt(norm_sq);
         if (xnorm != 0.0) {
             const double beta = x0 >= 0.0 ? -std::hypot(x0, xnorm) : std::hypot(x0, xnorm);
             const double tau = (beta - x0) / beta;
             const double inv_v0 = 1.0 / (x0 - beta);
+            if (!std::isfinite(beta) || !std::isfinite(tau) || !std::isfinite(inv_v0)) {
+                return JLC_STATUS_INTERNAL_ERROR;
+            }
 
             v_col[0] = 1.0;
             for (int i = 1; i < len; ++i) {
@@ -94,16 +130,18 @@ jlc_status bidiagonal_upper(const double* a, int m, int n, double* u, double* b,
 
         const int len_row = n - k - 1;
         x0 = b[k * n + k + 1];
-        norm_sq = 0.0;
-        for (int j = 1; j < len_row; ++j) {
-            const double value = b[k * n + k + 1 + j];
-            norm_sq = std::fma(value, value, norm_sq);
+        const double xnorm_row = strided_norm(
+            b, static_cast<std::size_t>(k) * n + k + 2, len_row - 1, 1);
+        if (!std::isfinite(xnorm_row)) {
+            return JLC_STATUS_INTERNAL_ERROR;
         }
-        const double xnorm_row = std::sqrt(norm_sq);
         if (xnorm_row != 0.0) {
             const double beta = x0 >= 0.0 ? -std::hypot(x0, xnorm_row) : std::hypot(x0, xnorm_row);
             const double tau = (beta - x0) / beta;
             const double inv_v0 = 1.0 / (x0 - beta);
+            if (!std::isfinite(beta) || !std::isfinite(tau) || !std::isfinite(inv_v0)) {
+                return JLC_STATUS_INTERNAL_ERROR;
+            }
 
             v_row[0] = 1.0;
             for (int j = 1; j < len_row; ++j) {

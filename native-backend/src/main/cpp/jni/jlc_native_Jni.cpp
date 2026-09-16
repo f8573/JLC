@@ -614,6 +614,127 @@ Java_net_faulj_nativeblas_NativeBindings_nativeBidiagonalDecompose(JNIEnv* env, 
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_net_faulj_nativeblas_NativeBindings_nativeSvdDecompose(JNIEnv* env, jclass,
+                                                            jdoubleArray a, jint m, jint n,
+                                                            jdoubleArray u, jdoubleArray singular_values,
+                                                            jdoubleArray v) {
+    if (!validate_non_negative(env, m, "Matrix dimensions must be non-negative")
+        || !validate_non_negative(env, n, "Matrix dimensions must be non-negative")) {
+        return;
+    }
+
+    auto checked_size = [env](jint rows, jint cols) -> jsize {
+        const long long size = static_cast<long long>(rows) * static_cast<long long>(cols);
+        if (size > static_cast<long long>(std::numeric_limits<jsize>::max())) {
+            throw_java_exception(env, "java/lang/IllegalArgumentException",
+                                 "SVD workspace is too large for a Java array");
+            return static_cast<jsize>(-1);
+        }
+        return static_cast<jsize>(size);
+    };
+
+    const jint rank = std::min(m, n);
+    const jsize a_expected = checked_size(m, n);
+    const jsize u_expected = checked_size(m, m);
+    const jsize v_expected = checked_size(n, n);
+    if (a_expected < 0 || u_expected < 0 || v_expected < 0) {
+        return;
+    }
+    if (!validate_array_length(env, a, a_expected, "Array length mismatch for SVD input")
+        || !validate_array_length(env, u, u_expected, "Array length mismatch for SVD U")
+        || !validate_array_length(env, singular_values, rank, "Array length mismatch for SVD singular values")
+        || !validate_array_length(env, v, v_expected, "Array length mismatch for SVD V")) {
+        return;
+    }
+
+    jdouble* a_ptr = static_cast<jdouble*>(env->GetPrimitiveArrayCritical(a, nullptr));
+    jdouble* u_ptr = static_cast<jdouble*>(env->GetPrimitiveArrayCritical(u, nullptr));
+    jdouble* singular_values_ptr =
+        static_cast<jdouble*>(env->GetPrimitiveArrayCritical(singular_values, nullptr));
+    jdouble* v_ptr = static_cast<jdouble*>(env->GetPrimitiveArrayCritical(v, nullptr));
+    if (a_ptr == nullptr || u_ptr == nullptr || singular_values_ptr == nullptr || v_ptr == nullptr) {
+        if (a_ptr != nullptr) env->ReleasePrimitiveArrayCritical(a, a_ptr, JNI_ABORT);
+        if (u_ptr != nullptr) env->ReleasePrimitiveArrayCritical(u, u_ptr, 0);
+        if (singular_values_ptr != nullptr) {
+            env->ReleasePrimitiveArrayCritical(singular_values, singular_values_ptr, 0);
+        }
+        if (v_ptr != nullptr) env->ReleasePrimitiveArrayCritical(v, v_ptr, 0);
+        throw_java_exception(env, "java/lang/IllegalStateException", "Failed to pin Java arrays for native SVD");
+        return;
+    }
+
+    const jlc_status status = jlc_native_svd_decompose(
+        a_ptr, m, n, u_ptr, singular_values_ptr, rank, v_ptr);
+    env->ReleasePrimitiveArrayCritical(a, a_ptr, JNI_ABORT);
+    env->ReleasePrimitiveArrayCritical(u, u_ptr, 0);
+    env->ReleasePrimitiveArrayCritical(singular_values, singular_values_ptr, 0);
+    env->ReleasePrimitiveArrayCritical(v, v_ptr, 0);
+    if (status != JLC_STATUS_SUCCESS) {
+        throw_status_exception(env, status);
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_net_faulj_nativeblas_NativeBindings_nativeSvdDecomposeWithAlgorithm(
+    JNIEnv* env, jclass, jdoubleArray a, jint m, jint n,
+    jdoubleArray u, jdoubleArray singular_values, jdoubleArray v, jint algorithm) {
+    if (!validate_non_negative(env, m, "Matrix dimensions must be non-negative")
+        || !validate_non_negative(env, n, "Matrix dimensions must be non-negative")) {
+        return;
+    }
+
+    auto checked_size = [env](jint rows, jint cols) -> jsize {
+        const long long size = static_cast<long long>(rows) * static_cast<long long>(cols);
+        if (size > static_cast<long long>(std::numeric_limits<jsize>::max())) {
+            throw_java_exception(env, "java/lang/IllegalArgumentException",
+                                 "SVD workspace is too large for a Java array");
+            return static_cast<jsize>(-1);
+        }
+        return static_cast<jsize>(size);
+    };
+
+    const jint rank = std::min(m, n);
+    const jsize a_expected = checked_size(m, n);
+    const jsize u_expected = checked_size(m, m);
+    const jsize v_expected = checked_size(n, n);
+    if (a_expected < 0 || u_expected < 0 || v_expected < 0) {
+        return;
+    }
+    if (!validate_array_length(env, a, a_expected, "Array length mismatch for SVD input")
+        || !validate_array_length(env, u, u_expected, "Array length mismatch for SVD U")
+        || !validate_array_length(env, singular_values, rank, "Array length mismatch for SVD singular values")
+        || !validate_array_length(env, v, v_expected, "Array length mismatch for SVD V")) {
+        return;
+    }
+
+    jdouble* a_ptr = static_cast<jdouble*>(env->GetPrimitiveArrayCritical(a, nullptr));
+    jdouble* u_ptr = static_cast<jdouble*>(env->GetPrimitiveArrayCritical(u, nullptr));
+    jdouble* singular_values_ptr =
+        static_cast<jdouble*>(env->GetPrimitiveArrayCritical(singular_values, nullptr));
+    jdouble* v_ptr = static_cast<jdouble*>(env->GetPrimitiveArrayCritical(v, nullptr));
+    if (a_ptr == nullptr || u_ptr == nullptr || singular_values_ptr == nullptr || v_ptr == nullptr) {
+        if (a_ptr != nullptr) env->ReleasePrimitiveArrayCritical(a, a_ptr, JNI_ABORT);
+        if (u_ptr != nullptr) env->ReleasePrimitiveArrayCritical(u, u_ptr, 0);
+        if (singular_values_ptr != nullptr) {
+            env->ReleasePrimitiveArrayCritical(singular_values, singular_values_ptr, 0);
+        }
+        if (v_ptr != nullptr) env->ReleasePrimitiveArrayCritical(v, v_ptr, 0);
+        throw_java_exception(env, "java/lang/IllegalStateException", "Failed to pin Java arrays for native SVD");
+        return;
+    }
+
+    const jlc_status status = jlc_native_svd_decompose_with_algorithm(
+        a_ptr, m, n, u_ptr, singular_values_ptr, rank, v_ptr, algorithm);
+    env->ReleasePrimitiveArrayCritical(a, a_ptr, JNI_ABORT);
+    env->ReleasePrimitiveArrayCritical(u, u_ptr, 0);
+    env->ReleasePrimitiveArrayCritical(singular_values, singular_values_ptr, 0);
+    env->ReleasePrimitiveArrayCritical(v, v_ptr, 0);
+    if (status != JLC_STATUS_SUCCESS) {
+        throw_status_exception(env, status);
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_net_faulj_nativeblas_NativeBindings_nativeLuFactor(JNIEnv* env, jclass,
                                                         jdoubleArray packed_lu, jint n,
                                                         jintArray pivots) {

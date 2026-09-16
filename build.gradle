@@ -450,6 +450,14 @@ tasks.register('testNativeBackend', Test) {
     include 'net/faulj/nativeblas/**'
 }
 
+tasks.register('benchmarkNativeSvd', JavaExec) {
+    group = 'verification'
+    description = 'Benchmark Java, native Jacobi, and native bidiagonal-QR SVD paths'
+    dependsOn 'buildNativeBackend', 'testClasses'
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'net.faulj.nativeblas.NativeSvdBenchmarkRunner'
+}
+
 // Run test main benchmark class from test sources
 tasks.register('runDiagnostic', JavaExec) {
     group = 'benchmark'

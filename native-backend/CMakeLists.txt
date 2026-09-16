@@ -43,6 +43,7 @@ add_library(jlc_native_kernel OBJECT
   src/main/cpp/kernels/lapack_factorizations.cpp
   src/main/cpp/kernels/lapack_hessenberg.cpp
   src/main/cpp/kernels/bidiagonal.cpp
+  src/main/cpp/kernels/svd.cpp
 )
 
 # R4 generated-kernel registry is compiled with strict floating-point flags.

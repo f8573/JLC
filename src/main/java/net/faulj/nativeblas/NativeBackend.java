@@ -1,6 +1,7 @@
 package net.faulj.nativeblas;
 
 import net.faulj.compute.DispatchPolicy;
+import net.faulj.decomposition.result.SVDResult;
 import net.faulj.matrix.Matrix;
 import net.faulj.matrix.OffHeapMatrix;
 
@@ -18,6 +19,9 @@ import java.util.logging.Logger;
 public final class NativeBackend implements ComputeBackend {
     private static final Logger LOGGER = Logger.getLogger(NativeBackend.class.getName());
     private static final String LIBRARY_NAME = "jlc_native";
+    private static final int SVD_ALGORITHM_AUTO = 0;
+    private static final int SVD_ALGORITHM_JACOBI = 1;
+    private static final int SVD_ALGORITHM_BIDIAG_QR = 2;
     private static final AtomicReference<NativeContext> CONTEXT = new AtomicReference<>(NativeContext.notRequested());
     private static final Object LOAD_LOCK = new Object();
 
@@ -175,6 +179,50 @@ public final class NativeBackend implements ComputeBackend {
         }
     }
 
+    /**
+     * Attempt the built-in native SVD. A null result asks the caller to use its
+     * existing Java implementation, including after a native convergence or
+     * linkage failure.
+     */
+    public SVDResult svd(Matrix a, boolean thin) {
+        if (a == null || a.getRawImagData() != null) {
+            return null;
+        }
+        NativeContext context = probe(true);
+        if (!context.isAvailable()) {
+            return null;
+        }
+
+        int m = a.getRowCount();
+        int n = a.getColumnCount();
+        int rank = Math.min(m, n);
+        try {
+            syncFromOffHeap(a);
+            double[] uData = new double[m * m];
+            double[] singularValues = new double[rank];
+            double[] vData = new double[n * n];
+            int nativeAlgorithm = resolveSvdAlgorithm(m, n);
+            NativeBindings.nativeSvdDecomposeWithAlgorithm(
+                a.getRawData(), m, n, uData, singularValues, vData, nativeAlgorithm);
+
+            if (!isValidSvdOutput(uData, singularValues, vData, m, n)) {
+                reportSvdFallback("native result failed structural validation", null);
+                return null;
+            }
+            reportSvdAlgorithm(nativeAlgorithm);
+
+            Matrix u = Matrix.wrap(uData, m, m);
+            Matrix v = Matrix.wrap(vData, n, n);
+            if (thin) {
+                u = firstColumns(u, rank);
+                v = firstColumns(v, rank);
+            }
+            return new SVDResult(a, u, singularValues, v);
+        } catch (RuntimeException | UnsatisfiedLinkError ex) {
+            reportSvdFallback("native invocation failed", ex);
+            return null;
+        }
+    }
     @Override
     public void gemmStrided(double[] a, int aOffset, int lda,
                             double[] b, int bOffset, int ldb,
@@ -437,6 +485,104 @@ public final class NativeBackend implements ComputeBackend {
         return a != null && b != null && c != null;
     }
 
+    private static Matrix firstColumns(Matrix matrix, int columnCount) {
+        if (columnCount == matrix.getColumnCount()) {
+            return matrix;
+        }
+        int rows = matrix.getRowCount();
+        double[] data = new double[rows * columnCount];
+        for (int row = 0; row < rows; row++) {
+            System.arraycopy(matrix.getRawData(), row * matrix.getColumnCount(),
+                data, row * columnCount, columnCount);
+        }
+        return Matrix.wrap(data, rows, columnCount);
+    }
+
+    /**
+     * Resolve the native SVD implementation in one place. The dimension cutoff
+     * is intentionally an internal development policy, not a calibrated public
+     * performance promise. It can be overridden by tests and benchmarks with
+     * {@code jlc.algorithm.svd.nativeAlgorithm=jacobi|bidiag_qr}.
+     */
+    private static int resolveSvdAlgorithm(int rows, int cols) {
+        String configured = System.getProperty("jlc.algorithm.svd.nativeAlgorithm");
+        if (configured != null && !configured.isBlank()) {
+            return switch (configured.trim().toLowerCase(java.util.Locale.ROOT)) {
+                case "jacobi" -> SVD_ALGORITHM_JACOBI;
+                case "bidiag_qr", "bidiagonal_qr", "bidiag-qr" -> SVD_ALGORITHM_BIDIAG_QR;
+                case "auto" -> SVD_ALGORITHM_AUTO;
+                default -> SVD_ALGORITHM_AUTO;
+            };
+        }
+        int jacobiMaxDimension = nonNegativeIntProperty(
+            "jlc.algorithm.svd.jacobiMaxDimension", 0);
+        return Math.max(rows, cols) <= jacobiMaxDimension
+            ? SVD_ALGORITHM_JACOBI : SVD_ALGORITHM_BIDIAG_QR;
+    }
+
+    private static int nonNegativeIntProperty(String name, int fallback) {
+        String configured = System.getProperty(name);
+        if (configured == null || configured.isBlank()) {
+            return fallback;
+        }
+        try {
+            int value = Integer.parseInt(configured.trim());
+            return value >= 0 ? value : fallback;
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private static boolean isValidSvdOutput(double[] u, double[] singularValues, double[] v,
+                                            int rows, int cols) {
+        for (double value : u) {
+            if (!Double.isFinite(value)) {
+                return false;
+            }
+        }
+        for (double value : v) {
+            if (!Double.isFinite(value)) {
+                return false;
+            }
+        }
+        double previous = Double.POSITIVE_INFINITY;
+        double orderTolerance = 128.0 * Math.ulp(1.0)
+            * Math.max(1, Math.max(rows, cols));
+        for (double value : singularValues) {
+            if (!Double.isFinite(value) || value < 0.0) {
+                return false;
+            }
+            if (value > previous && value - previous
+                > orderTolerance * Math.max(1.0, Math.max(value, previous))) {
+                return false;
+            }
+            previous = value;
+        }
+        return true;
+    }
+
+    private static void reportSvdFallback(String reason, Throwable cause) {
+        if (!Boolean.getBoolean("jlc.algorithm.svd.debug")) {
+            return;
+        }
+        if (cause == null) {
+            LOGGER.log(Level.FINE, "Native SVD fallback: {0}", reason);
+        } else {
+            LOGGER.log(Level.FINE, "Native SVD fallback: " + reason, cause);
+        }
+    }
+
+    private static void reportSvdAlgorithm(int algorithm) {
+        if (!Boolean.getBoolean("jlc.algorithm.svd.debug")) {
+            return;
+        }
+        String name = switch (algorithm) {
+            case SVD_ALGORITHM_JACOBI -> "JACOBI";
+            case SVD_ALGORITHM_BIDIAG_QR -> "BIDIAG_QR";
+            default -> "AUTO (native default)";
+        };
+        LOGGER.log(Level.FINE, "Native SVD completed with algorithm: {0}", name);
+    }
     private static boolean usesOffHeapStorage(Matrix a, Matrix b, Matrix c) {
         return a instanceof OffHeapMatrix || b instanceof OffHeapMatrix || c instanceof OffHeapMatrix;
     }
