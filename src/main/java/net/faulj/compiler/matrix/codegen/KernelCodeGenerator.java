@@ -24,4 +24,16 @@ public final class KernelCodeGenerator {
     public static GeneratedKernelSource avx2(PseudokernelPlan plan, CppEmissionOptions options) {
         return Avx2CppEmitter.emit(plan, options);
     }
+
+    /** Emit the exact implementation described by an R5 variant signature. */
+    public static GeneratedKernelSource variant(PseudokernelPlan plan,
+                                                KernelVariantSignature variant) {
+        return variant(plan, variant, CppEmissionOptions.standalone());
+    }
+
+    public static GeneratedKernelSource variant(PseudokernelPlan plan,
+                                                KernelVariantSignature variant,
+                                                CppEmissionOptions options) {
+        return VariantCppEmitter.emit(plan, variant, options);
+    }
 }

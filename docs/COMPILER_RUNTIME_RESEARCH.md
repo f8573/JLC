@@ -1676,3 +1676,448 @@ flags, opt-in backend selection, safe R2 fallback, correctness/compile/ASAN
 evidence, benchmark output, a measured JNI bridge probe, and this audit. The
 remaining scope boundary is that shapes the current lowerer does not represent
 as fused regions remain on the R2/R3 side of its contract.
+
+## R5 — Empirical Kernel and Schedule Autotuning
+
+R5 is the empirical selection layer after R4; it is not M5 and it does not
+rewrite R1–R4 history:
+
+```text
+R1 storage planning
+  -> R2 legality-aware fusion
+  -> R3 verified Kernel IR
+  -> R4 generated scalar/AVX2 artifacts
+  -> R5 correctness-gated measurement and profile dispatch
+```
+
+### Base and environment
+
+The R5 work was performed in an isolated worktree and was not merged into
+`main`.
+
+| Item | Value |
+|---|---|
+| R5 base SHA | `10a29053dbc63ddc02518e572692eb783b75cb65` |
+| implementation SHA | \`9085de5\` (\`9085de5960f519349c08e708d8c310b75f514289\`) |
+| branch | `feature/compiler-autotuning` |
+| worktree | `/home/james/Projects/JLC-r5` |
+| date | 2026-09-17 |
+| CPU | AMD Ryzen 9 3950X 16-Core Processor |
+| CPU identity | AuthenticAMD, family 23, model 113 |
+| ISA used | x86-64, AVX2 and FMA present |
+| OS/kernel | Linux 7.0.0-31-generic |
+| native compiler | Ubuntu GNU `c++` 15.2.0 |
+| JVM | OpenJDK 25.0.4 |
+| generated strict flags | `-O2 -fno-fast-math -ffp-contract=off` |
+| direct benchmark flags | `-std=c++17 -O3 -fno-fast-math -ffp-contract=off -mavx2` |
+
+The exact host facts are recorded by `KernelMachineIdentity`; the build key
+also records the JLC SHA, KernelSignature/KernelVariantSignature versions,
+codegen ABI, native compiler identity, and strict floating-point flags. The
+current profile path is explicit (`jlc.compiler.autotune.profile`); normal
+matrix execution does not write a profile under the user's home directory.
+
+### Candidate model
+
+R5 consumes only a verified `PseudokernelPlan`. It does not mutate
+`MatrixExpr`, redo R2 legality, or invent alias facts. The bounded initial
+search space is:
+
+| dimension | candidates |
+|---|---|
+| backend | `SCALAR_CPP`, `AVX2` |
+| AVX2 width | exactly 4 FP64 lanes |
+| AVX2 unroll | 1, 2, 4, 8 |
+| loop form | `FLAT` and `NESTED` where contiguous legality permits both |
+| tail | scalar |
+| semantic mode | `STRICT` by default |
+
+The default enumeration is at most ten candidates: scalar nested/flat plus
+AVX2 u1/u2/u4/u8 in flat/nested form. The fixed R4 u1 flat AVX2 variant is
+named `BASELINE_AVX2` and is always retained when the AVX2 plan is eligible,
+even when a caller sets a smaller candidate cap. `unroll=4` means four
+independent `__m256d` instances, or 16 FP64 elements per loop body; it is not
+a 16-lane vector.
+
+`KernelVariantSignature` canonically includes the semantic KernelSignature,
+backend, ISA, vector width, unroll, loop form, tail policy, semantic mode, and
+FMA policy. Its SHA-256 is used only for a deterministic symbol suffix; timing
+never participates in code identity. The registry key is now
+`(KernelSignature, KernelVariantSignature)`, so all exact variants can coexist.
+
+Register pressure is an explanatory structural gate, not a claim about the
+compiler allocator:
+
+```text
+estimatedLiveVectorRegisters =
+    maxLiveVectorValues * unroll + constantCount + 2
+```
+
+Candidates over 32 estimated vector registers, unavailable ISAs, or an
+unroll larger than the available vector iterations are retained as `PRUNED`
+evidence with a reason. This keeps the search bounded without pretending that
+the estimate predicts every spill.
+
+The initial R5 implementation deliberately does not include tiled transpose
+variants, software prefetch, thread-count tuning, GPU backends, AVX-512, or
+ML/Bayesian search. The layout-aware family remains a documented follow-up.
+
+### Correctness gate
+
+The order is fixed:
+
+```text
+generate -> compile -> deterministic validation corpus
+         -> PASS -> benchmark
+         -> FAIL -> quarantine and persist diagnostics
+```
+
+`KernelCorrectnessGate` uses the verified R3 `KernelReferenceExecutor` as its
+oracle. It copies inputs and output for every case, so a candidate cannot
+poison the next case. The corpus contains deterministic finite data and IEEE
+edge data including NaN, both infinities, +0.0, -0.0, tiny values, and huge
+finite values. Strict comparisons use raw double bits, while accepting NaN
+payload differences as NaN results; no strict MUL+ADD is contracted.
+
+The native coexistence test exercises all eligible scalar/AVX2 variants for a
+3x17 tail-sensitive shape in one registry and invokes every exact variant.
+The benchmark driver checks every output before reporting timing. Zero-size
+and small/tail shapes remain guarded by the exact shape descriptor and scalar
+tail path. A failed candidate is never passed to the timing runner.
+
+### Benchmark methodology
+
+The reusable `KernelBenchmark` defaults are five warmups, nine measured
+samples, at most ten candidates, a 10% relative-MAD noise threshold, and a 3%
+minimum promotion threshold. The property-based sample count is clamped to at
+least seven. The opt-in direct-native experiment uses ten warmups and eleven
+samples per candidate so its output is easy to inspect.
+
+For each candidate, R5 records:
+
+* raw samples, median, minimum, maximum, MAD, and relative MAD;
+* sample count and an explicit `PASS`/`NOISY` outcome;
+* source-generation, compilation, and benchmark wall time; and
+* generated source bytes plus pressure and pruning evidence.
+
+Median plus MAD is used without arbitrary outlier deletion. A candidate is
+stable only when relative MAD is at most 0.10. The selector chooses the
+lowest stable median only after correctness and the 3% promotion threshold.
+Equal medians use the stable variant ID as a deterministic tie-break. If the
+trusted generated baseline is not stable or no candidate clears the threshold,
+the baseline is retained. A bounded `maxBenchmarkMillis` can terminate a
+session, but it gives the baseline a chance to establish the comparison point.
+
+Compilation is outside the timed kernel region. The direct-native report
+(`build/reports/r5/variant-benchmark.txt`) recorded approximately 1.2–7.2 ms
+of source generation and 4.69–5.89 s to compile one translation unit
+containing the ten registered candidates; these are calibration costs, not
+steady-state costs. The JNI crossover harness measures Java and native
+execution separately from profile parsing and selector lookup.
+
+### Calibration profile
+
+`KernelCalibrationProfile` is schema version 1 with methodology
+`r5-median-mad-v1`. It stores machine/build identity, timestamp, exact
+KernelSignature, baseline, winner, measured speedup, decision reason, every
+candidate outcome, raw samples, correctness/stability status, code-generation
+costs, compiled source size, and trusted baselines. The tuner automatically
+retains the R2 Java fused baseline (with timing supplied by the end-to-end
+harness) and the R4 scalar and fixed AVX2 evidence; callers can supply measured
+trusted-baseline samples as well.
+
+The profile is deterministic, pretty JSON using the project's existing
+Jackson dependency. A sanitized excerpt has this shape:
+
+```json
+{
+  "schemaVersion" : 1,
+  "methodologyVersion" : "r5-median-mad-v1",
+  "machine" : {
+    "key" : "<sha256>",
+    "cpuVendor" : "AuthenticAMD",
+    "cpuFamily" : "23",
+    "cpuModel" : "113",
+    "isaFeatures" : "avx,avx2,fma,sse4_1,sse4_2"
+  },
+  "build" : {
+    "key" : "<sha256>",
+    "codegenAbiVersion" : "jlc-r5-codegen-abi-v1",
+    "strictFlags" : "-O2,-fno-fast-math,-ffp-contract=off"
+  },
+  "entries" : [ {
+    "kernelSha256" : "<sha256>",
+    "baselineVariant" : "<canonical BASELINE_AVX2 signature>",
+    "winnerVariant" : "<canonical winning signature>",
+    "winnerSpeedup" : 1.08,
+    "candidates" : [ {
+      "variantId" : "avx2_u8_flat",
+      "outcome" : "PASS",
+      "correctnessPassed" : true,
+      "stable" : true,
+      "medianNanos" : 880.0,
+      "madNanos" : 0.0,
+      "rawSamplesNanos" : [ 880, 881, 879 ]
+    } ],
+    "trustedBaselines" : [ {
+      "name" : "R2_JAVA_FUSED",
+      "backend" : "java",
+      "correctnessPassed" : true
+    } ]
+  } ]
+}
+```
+
+The angle-bracket values in this excerpt are intentionally sanitized; the
+writer emits the full canonical signatures and full hashes. A corrupt,
+partial, schema-mismatched, machine-mismatched, build-mismatched, missing,
+unregistered, or ISA-incompatible entry is ignored and falls back safely.
+
+### Runtime selector and modes
+
+`KernelDispatchSelector` loads and validates a profile once, then caches
+resolved selections by exact KernelSignature in a concurrent map. The hot path
+does not parse JSON, compile, benchmark, or acquire a tuning lock. A profile
+hit requires an exact signature, registered variant, available ISA,
+correctness-passed evidence, and stable evidence. The explain surface reports
+the source, selected variant, profile/machine match, median, speedup, and
+fallback reason.
+
+The explicit operating modes are:
+
+| property | behavior |
+|---|---|
+| `jlc.compiler.autotune=off` | unchanged R2 execution by default |
+| `...=profile` | profile/calibration tooling mode; no implicit application-thread tuning |
+| `...=tune` | explicit `KernelVariantTuner` mode; compilation and measurement are caller-controlled |
+| `...=use` | load the configured profile and dispatch only to already-registered variants |
+
+Cold start selects the registered R4 `BASELINE_AVX2` when legal and supported,
+then generated scalar C++, then returns false so the existing R2 path runs.
+The runtime `CpuFusedRegionStep` only enters the tuned path for `use`; normal
+execution never starts a C++ compiler or benchmark. The end-to-end crossover
+runner keeps R2 Java as a trusted comparator, while a missing generated
+selection still reaches the R2 fallback.
+
+### AVX2 unroll experiment
+
+The direct-native experiment used 64x64 and 256x256 exact shapes with 2, 10,
+and 25 arithmetic operations per element. The following medians are
+nanoseconds per complete kernel call; they are intentionally kernel-only and
+exclude JNI. The full report retains min/max/MAD and every eligible variant.
+
+| workload | shape | baseline u1 flat | representative u2 | representative u4 | representative u8 | observation |
+|---|---:|---:|---:|---:|---:|---|
+| 2-op | 64² | 1040 | u2 flat 1000 | u4 nested 990 | u8 flat/nested 880 | u8 clears 3% promotion margin |
+| 10-op | 64² | 1580 | u2 nested 1520 | u4 flat 1540 | u8 flat 1510 | u8 is fastest in this run |
+| 25-op | 64² | 6000 | u2 nested 5940 | u4 flat 5950 | u8 pruned | gain is below 3%; retain baseline |
+| 2-op | 256² | 15600 | u2 flat 15540 | u4 flat 15440 | u8 flat 15630 | bandwidth-sensitive differences are small |
+| 10-op | 256² | 22340 | u2 flat 22411 | u4 flat 22771 | u8 flat 22840 | no clear promotion over baseline |
+| 25-op | 256² | 92721 | u2 flat 93081 | u4 flat 93121 | u8 pruned | u8 pressure estimate is 39; retained as pruned evidence |
+
+The 25-op plan has three live vector values and 13 constants, so the pressure
+estimate is `3*U+13+2`: u1=18, u2=21, u4=27, and u8=39. This is an
+explicit example of the pressure gate preventing a large fused DAG from
+blindly compiling u8. Results move with system noise; the table is evidence
+from this host, not a hard-coded universal choice.
+
+### Backend crossover including JNI
+
+`R5GeneratedJniCrossoverTest` builds one temporary JNI library containing all
+eligible variants for five shapes (1, 4, 16, 64, and 256 square) and the
+2/10/25-operation graphs. It times the existing R2 Java program, the R4
+generated scalar variant, and the R4 baseline AVX2 variant through one
+whole-region JNI call. Compilation is outside every timing loop.
+
+| kernel | shape | R2 Java ns | scalar JNI ns | AVX2 JNI ns | selected |
+|---|---:|---:|---:|---:|---|
+| 2-op | 1² | 36090 | 1900 | 1910 | scalar JNI |
+| 10-op | 1² | 37450 | 2510 | 2450 | AVX2 JNI |
+| 25-op | 4² | 35630 | 3610 | 3530 | AVX2 JNI |
+| 2-op | 16² | 37920 | 2310 | 1790 | AVX2 JNI |
+| 10-op | 64² | 359931 | 7760 | 3960 | AVX2 JNI |
+| 25-op | 64² | 431011 | 29320 | 9350 | AVX2 JNI |
+| 2-op | 256² | 1060983 | 28380 | 21390 | AVX2 JNI |
+| 10-op | 256² | 2650448 | 85580 | 26850 | AVX2 JNI |
+| 25-op | 256² | 6466589 | 361191 | 96630 | AVX2 JNI |
+
+On this host, the R2 Java implementation did not win the sampled points, but
+the native floor is visible: scalar and AVX2 are effectively tied at 1–4
+elements, and AVX2 separates from scalar at 16 elements and above. The prior
+R4 bridge probe measured approximately 1.47 µs for an empty whole-region JNI
+call and 21.75 µs for a 256x256 AVX2 call. These are end-to-end bridge
+measurements, not a cost subtracted from kernel timings. The crossover harness
+is therefore the evidence used when a calibration client supplies trusted
+R2/scalar/AVX2 baselines to the tuner; standalone native ns/element is not
+presented as a Java/native dispatch rule.
+
+### Arithmetic intensity
+
+`KernelWorkloadAnalysis` derives FP operations per element and estimated
+loaded/stored bytes per element from verified R3 operations:
+
+| graph | FP ops/element | bytes/element | intensity | class |
+|---|---:|---:|---:|---|
+| 2-op | 2 | 24 | 0.0833 | bandwidth-sensitive |
+| 10-op | 10 | 56 | 0.1786 | mixed |
+| 25-op | 25 | 112 | 0.2232 | mixed |
+
+These thresholds are an explanation aid, not a formal roofline model. The
+low-intensity 2-op rows show small schedule differences and a useful u8 win
+at 64², while the 10-op rows expose more ILP variation. The 25-op rows expose
+pressure/noise and the u8 structural prune. No thread-count tuning is mixed
+into these results.
+
+### Register pressure
+
+Pressure is recorded per candidate and serialized even when the candidate is
+pruned. For the 25-op plan, `maxLiveVectors=3`, `constantCount=13`, and the
+candidate values are:
+
+| unroll | estimated live vector registers | result |
+|---:|---:|---|
+| 1 | 18 | eligible |
+| 2 | 21 | eligible |
+| 4 | 27 | eligible |
+| 8 | 39 | pruned before compilation |
+
+The implementation does not claim that every eligible u4/u8 loss is a spill
+without assembly or hardware-counter evidence. It preserves the losing
+timings, code size, and noise so a later assembly/perf pass can distinguish
+spills from frequency, cache, or measurement effects.
+
+### Layout and schedule experiment
+
+The implemented schedule family is backend traversal only: flat contiguous
+address progression versus nested row/column loops, with the same verified
+SSA operation order and scalar tail. It does not alter polyhedral legality.
+Non-contiguous/transpose-like layouts remain outside the AVX2 candidate family;
+R4's scalar/R2 fallback remains authoritative. The requested tiled transpose
+family (8/16/32/64) was not forced into this milestone, so there is no
+unmeasured layout claim.
+
+### FMA experiment
+
+The default generator is strictly non-FMA. `KernelVariantSignature` rejects
+explicit FMA under `STRICT`, and the default tuner always enumerates
+`OptimizationSemantics.STRICT` with `FMA_CONTRACTION=OFF`. An opt-in
+`enumerateWithFma` API exists only for an explicit `RELAXED` or `FAST` caller,
+requires the `avx2+fma` ISA, and emits `_mm256_fmadd_pd`/`std::fma`. No FMA
+candidate was used in the R5 strict benchmark, and no semantic permission was
+inferred from expression shape or absent metadata.
+
+### Roofline/perf analysis
+
+The intensity calculation above is deliberately lightweight. R5 does not
+pretend to have a calibrated DRAM roofline, does not depend on `perf`, and
+does not make correctness depend on hardware counters. No perf-counter run or
+assembly golden test is part of this checkpoint; that is a remaining evidence
+gap rather than a fabricated spill claim. The source audit confirms strict
+compile flags, scalar tails, constants hoisted for AVX2, and no `fmadd` in
+strict generated sources.
+
+### Negative results
+
+The negative evidence is retained instead of only reporting the fastest row:
+
+* 2-op 256² u4's approximately 1% kernel-only improvement is below the 3%
+  promotion threshold.
+* 25-op 64² u2/u4 variants are close to baseline and do not earn promotion.
+* 25-op u8 is rejected before compilation at estimated pressure 39.
+* Several nested/flat differences are inside the 10% relative-MAD policy;
+  they are not converted into universal schedule rules.
+* Scalar JNI ties or beats AVX2 at the smallest crossover points.
+* The initial implementation does not claim a tiled-transpose or prefetch win.
+
+### Existing JLC calibration patterns
+
+R5 follows the existing JLC calibration ideas in
+`src/main/java/net/faulj/autotune/persist/MachineFingerprint.java`,
+`ProfileValidator`, and `ProfileStore`: explicit fingerprints, versioned
+profiles, correctness/sanity validation, and conservative fallback. It keeps a
+separate profile type because exact generated KernelSignatures, variant
+availability, native ISA, and raw candidate samples are different contracts.
+Unlike the existing GEMM convenience store, R5 does not write to a home
+directory during normal execution.
+
+### Required audit questions
+
+1. **What dimensions are tuned?** Backend, AVX2 u1/u2/u4/u8, flat/nested
+   traversal, scalar tail, ISA, and semantic/FMA policy.
+2. **How many candidates exist?** Ten by default per exact KernelSignature;
+   the caller can lower the cap and explicit families remain bounded.
+3. **How are they identified?** Canonical `KernelVariantSignature` text and
+   SHA-256; timing is absent from identity.
+4. **How are illegal candidates pruned?** Verified plan eligibility, ISA,
+   available vector iterations, and the documented pressure estimate.
+5. **How is correctness gated?** Every compiled candidate runs against the
+   R3 reference on finite and IEEE-edge fixtures before timing.
+6. **What statistic chooses?** Lowest stable median, with raw samples and
+   min/max/MAD retained.
+7. **What noise threshold is used?** Relative MAD at most 10%.
+8. **What promotion margin is required?** At least 3% over the trusted
+   generated baseline.
+9. **How are ties resolved?** Median first, then stable variant ID.
+10. **What identifies a machine?** Architecture, vendor, family/model/model
+    name, ISA bits, OS, JVM, native compiler, and processor count.
+11. **What identifies a build?** JLC version/SHA, signature versions, codegen
+    ABI, compiler identity, and strict FP flags.
+12. **What invalidates a profile?** Schema, machine, build, exact kernel
+    signature, registered symbol, correctness/stability, or ISA mismatch.
+13. **How are profiles persisted?** Human-readable deterministic JSON at an
+    explicit configured path.
+14. **How is parsing kept out of the hot path?** The selector loads once and
+    caches resolved exact-signature selections.
+15. **What is lookup overhead?** `measureLookupNanos` exists on the selector;
+    the focused cache probe measured 141 ns per cached lookup in this JVM run.
+    Lookup is an in-memory map operation and never benchmarks a kernel; the
+    crossover report keeps it separate from kernel timing.
+16. **What is the Java/native JNI crossover?** In this sample, native is
+    already faster at 1–4 elements, scalar ties at the floor, and AVX2 wins
+    consistently from 16 elements upward; the measured result is host-specific.
+17. **Which unroll wins for low intensity?** u8 flat/nested was 880 ns at 64²
+    for the 2-op direct-native case; at 256² the approximately 1% u4 result
+    was below promotion margin.
+18. **Which wins for arithmetic-heavy kernels?** 25-op u2/u4 remained close;
+    25-op u8 was pressure-pruned, so R5 does not invent a heavy-kernel win.
+19. **Where does pressure reverse gains?** The first clear structural boundary
+    in the measured 25-op plan is u8: estimate 39 exceeds the 32 gate.
+20. **Does flat versus nested matter?** Sometimes by a few percent, but many
+    differences fall inside noise; the report retains both.
+21. **Which ideas were negative?** High unroll on the 25-op DAG, below-threshold
+    bandwidth wins, and unmeasured transpose/prefetch assumptions.
+22. **Is FMA implemented?** Only explicit RELAXED/FAST `avx2+fma`; never default
+    and never STRICT.
+23. **How do winners generalize across shapes?** This evidence is exact-shape;
+    the 64² and 256² winners differ, so no family heuristic is installed.
+24. **What justifies future family heuristics?** Repeated wins across 64, 128,
+    256, 512, and 1024 shapes for the same graph, with stable margins and
+    end-to-end JNI evidence, would justify an analysis-only family study.
+25. **What comes next?** A controlled calibration CLI/task can add profile
+    entries, assembly/perf evidence, layout-aware tiling, and a typed option
+    for choosing R2 fallback versus a generated variant.
+
+### Remaining weaknesses
+
+The honest R5 boundaries are exact-shape profiles, AVX2-only vector code,
+finite candidate space, no thread-count tuning, no production runtime JIT,
+limited layout-aware scheduling, no GPU/distributed tuning, no mixed
+precision, no optional perf counters, and no assembly-backed spill diagnosis.
+The JNI crossover harness measures the three backends end-to-end but the
+current profile winner type is a generated `KernelVariantSignature`; R2
+remains the safe fallback rather than being encoded as a generated variant.
+This preserves the R2/R4 cold-start path while leaving a clear follow-up for a
+typed multi-backend dispatch choice.
+
+### Definition-of-done mapping
+
+R5 now has multiple registered variants per semantic kernel, deterministic
+bounded generation, structural pruning, correctness-before-timing, repeated
+median/min/max/MAD statistics, explicit noise and promotion policies, losing
+candidate evidence, machine/build/schema-validated JSON persistence, cached
+runtime profile selection, conservative cold start, strict non-FMA semantics,
+u1/u2/u4/u8 experiments, arithmetic-intensity and pressure analysis, and
+end-to-end JNI crossover evidence. The opt-in native tests prove variant
+coexistence and exact invocation; ordinary execution remains R2-safe and does
+not compile or benchmark. The final commit records the implementation SHA
+against this R5 base, and `main` remains untouched.

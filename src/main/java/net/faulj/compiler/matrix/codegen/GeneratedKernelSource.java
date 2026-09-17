@@ -5,6 +5,7 @@ import java.util.Objects;
 /** Immutable generated C++ translation unit and its backend metadata. */
 public final class GeneratedKernelSource {
     private final PseudokernelPlan plan;
+    private final KernelVariantSignature variantSignature;
     private final CodegenBackend backend;
     private final String symbol;
     private final String source;
@@ -16,9 +17,34 @@ public final class GeneratedKernelSource {
                           String source,
                           CppEmissionOptions options,
                           long generationTimeNanos) {
+        this(plan, new KernelVariantSignature(
+                plan.signature(), backend, backend.requiredCpuFeature(), backend.vectorWidth(),
+                backend == CodegenBackend.AVX2 ? 1 : 1,
+                backend == CodegenBackend.AVX2 ? KernelLoopForm.FLAT : KernelLoopForm.NESTED,
+                KernelTailPolicy.SCALAR, net.faulj.compiler.matrix.OptimizationSemantics.STRICT,
+                FmaContraction.OFF), source, options, generationTimeNanos,
+            plan.signature().generatedSymbol());
+    }
+
+    GeneratedKernelSource(PseudokernelPlan plan,
+                          KernelVariantSignature variantSignature,
+                          String source,
+                          CppEmissionOptions options,
+                          long generationTimeNanos) {
+        this(plan, variantSignature, source, options, generationTimeNanos,
+            variantSignature.generatedSymbol());
+    }
+
+    private GeneratedKernelSource(PseudokernelPlan plan,
+                                  KernelVariantSignature variantSignature,
+                                  String source,
+                                  CppEmissionOptions options,
+                                  long generationTimeNanos,
+                                  String symbol) {
         this.plan = Objects.requireNonNull(plan, "Pseudokernel plan");
-        this.backend = Objects.requireNonNull(backend, "Codegen backend");
-        this.symbol = plan.signature().generatedSymbol();
+        this.variantSignature = Objects.requireNonNull(variantSignature, "Variant signature");
+        this.backend = variantSignature.backend();
+        this.symbol = Objects.requireNonNull(symbol, "Generated symbol");
         this.source = Objects.requireNonNull(source, "Generated source");
         this.sourceProvenance = Objects.requireNonNull(options, "Emission options").sourceProvenance();
         this.generationTimeNanos = Math.max(0L, generationTimeNanos);
@@ -30,6 +56,10 @@ public final class GeneratedKernelSource {
 
     public KernelSignature signature() {
         return plan.signature();
+    }
+
+    public KernelVariantSignature variantSignature() {
+        return variantSignature;
     }
 
     public CodegenBackend backend() {

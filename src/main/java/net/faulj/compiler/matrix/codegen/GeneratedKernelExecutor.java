@@ -41,6 +41,26 @@ public final class GeneratedKernelExecutor {
         }
     }
 
+    /** Profile-only dispatch path. It never compiles or benchmarks on a miss. */
+    public static boolean tryExecuteTuned(KernelLoweringResult lowering,
+                                          KernelBinding binding) {
+        if (lowering == null || binding == null || !lowering.isEligible()) {
+            return false;
+        }
+        try {
+            if (binding.function() != lowering.program().function()
+                || !heapRealNoAliasBinding(binding)) {
+                return false;
+            }
+            PseudokernelPlan plan = PseudokernelPlanner.plan(lowering.program().function());
+            KernelDispatchSelector.Selection selection = KernelDispatchSelector.global()
+                .select(plan.signature());
+            return selection.entry() != null && selection.entry().invoke(binding);
+        } catch (RuntimeException | LinkageError failure) {
+            return false;
+        }
+    }
+
     private static boolean heapRealNoAliasBinding(KernelBinding binding) {
         KernelBuffer outputBuffer = binding.function().outputBuffers().get(0);
         Matrix output = binding.matrix(outputBuffer);

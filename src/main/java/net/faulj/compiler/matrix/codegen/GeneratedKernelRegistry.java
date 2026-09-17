@@ -1,5 +1,8 @@
 package net.faulj.compiler.matrix.codegen;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
@@ -31,7 +34,7 @@ public final class GeneratedKernelRegistry {
         if (descriptor == null || invoker == null) {
             throw new IllegalArgumentException("Generated descriptor and invoker are required");
         }
-        Key key = new Key(descriptor.signature(), descriptor.backend());
+        Key key = new Key(descriptor.variantSignature());
         Entry previous = entries.putIfAbsent(key, new Entry(descriptor, invoker));
         if (previous != null && !previous.descriptor.symbol().equals(descriptor.symbol())) {
             throw new IllegalArgumentException(
@@ -47,11 +50,45 @@ public final class GeneratedKernelRegistry {
         register(descriptor, binding -> invokeNative(descriptor, binding));
     }
 
+    public Entry lookup(KernelVariantSignature variant) {
+        if (variant == null) {
+            return null;
+        }
+        return entries.get(new Key(variant));
+    }
+
+    /**
+     * Compatibility lookup for R4 callers. Prefer the fixed baseline variant;
+     * otherwise choose the simplest registered variant deterministically.
+     */
     public Entry lookup(KernelSignature signature, CodegenBackend backend) {
         if (signature == null || backend == null) {
             return null;
         }
-        return entries.get(new Key(signature, backend));
+        Entry baseline = lookup(backend == CodegenBackend.AVX2
+            ? KernelVariantSignature.baselineAvx2(signature)
+            : KernelVariantSignature.legacyScalar(signature));
+        if (baseline != null) {
+            return baseline;
+        }
+        return entriesFor(signature).stream()
+            .filter(entry -> entry.descriptor().backend() == backend)
+            .min(Comparator.comparing(entry -> entry.descriptor().variantSignature()))
+            .orElse(null);
+    }
+
+    public List<Entry> entriesFor(KernelSignature signature) {
+        if (signature == null) {
+            return List.of();
+        }
+        List<Entry> result = new ArrayList<>();
+        for (Entry entry : entries.values()) {
+            if (signature.equals(entry.descriptor().signature())) {
+                result.add(entry);
+            }
+        }
+        result.sort(Comparator.comparing(entry -> entry.descriptor().variantSignature()));
+        return List.copyOf(result);
     }
 
     public int size() {
@@ -96,8 +133,9 @@ public final class GeneratedKernelRegistry {
             && !RuntimeCpuFeatures.avx2Supported()) {
             return false;
         }
-        return NativeGeneratedKernelSupport.execute(
-            descriptor.signature().canonicalText(), inputs, output.getRawData(),
+        return NativeGeneratedKernelSupport.executeVariant(
+            descriptor.signature().canonicalText(), descriptor.variantSignature().canonicalText(),
+            inputs, output.getRawData(),
             output.getRowCount(), output.getColumnCount());
     }
 
@@ -127,6 +165,6 @@ public final class GeneratedKernelRegistry {
         }
     }
 
-    private record Key(KernelSignature signature, CodegenBackend backend) {
+    private record Key(KernelVariantSignature variant) {
     }
 }

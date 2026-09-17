@@ -7,11 +7,15 @@ import net.faulj.compiler.matrix.kernel.KernelValueType;
 /** Registry metadata for one compiled generated function. */
 public final class GeneratedKernelDescriptor {
     private final KernelSignature signature;
+    private final KernelVariantSignature variantSignature;
     private final String symbol;
     private final CodegenBackend backend;
     private final String requiredCpuFeature;
     private final KernelValueType valueType;
     private final int vectorWidth;
+    private final int unroll;
+    private final KernelLoopForm loopForm;
+    private final KernelTailPolicy tailPolicy;
     private final String sourceProvenance;
     private final int sourceSizeBytes;
     private final int maxLiveVectorValues;
@@ -19,22 +23,30 @@ public final class GeneratedKernelDescriptor {
     private final long columns;
 
     private GeneratedKernelDescriptor(KernelSignature signature,
+                                      KernelVariantSignature variantSignature,
                                       String symbol,
                                       CodegenBackend backend,
                                       String requiredCpuFeature,
                                       KernelValueType valueType,
                                       int vectorWidth,
+                                      int unroll,
+                                      KernelLoopForm loopForm,
+                                      KernelTailPolicy tailPolicy,
                                       String sourceProvenance,
                                       int sourceSizeBytes,
                                       int maxLiveVectorValues,
                                       long rows,
                                       long columns) {
         this.signature = Objects.requireNonNull(signature, "Signature");
+        this.variantSignature = Objects.requireNonNull(variantSignature, "Variant signature");
         this.symbol = Objects.requireNonNull(symbol, "Symbol");
         this.backend = Objects.requireNonNull(backend, "Backend");
         this.requiredCpuFeature = Objects.requireNonNull(requiredCpuFeature, "CPU feature");
         this.valueType = Objects.requireNonNull(valueType, "Value type");
         this.vectorWidth = vectorWidth;
+        this.unroll = unroll;
+        this.loopForm = Objects.requireNonNull(loopForm, "Loop form");
+        this.tailPolicy = Objects.requireNonNull(tailPolicy, "Tail policy");
         this.sourceProvenance = Objects.requireNonNull(sourceProvenance, "Source provenance");
         this.sourceSizeBytes = sourceSizeBytes;
         this.maxLiveVectorValues = maxLiveVectorValues;
@@ -47,9 +59,11 @@ public final class GeneratedKernelDescriptor {
             throw new IllegalArgumentException("Generated source must not be null");
         }
         return new GeneratedKernelDescriptor(
-            source.signature(), source.symbol(), source.backend(),
-            source.backend().requiredCpuFeature(), KernelValueType.FP64,
-            source.plan().vectorWidth(), source.sourceProvenance(), source.sourceSizeBytes(),
+            source.signature(), source.variantSignature(), source.symbol(), source.backend(),
+            source.variantSignature().requiredCpuFeature(), KernelValueType.FP64,
+            source.plan().vectorWidth(), source.variantSignature().unroll(),
+            source.variantSignature().loopForm(), source.variantSignature().tailPolicy(),
+            source.sourceProvenance(), source.sourceSizeBytes(),
             source.plan().maxLiveVectorValues(),
             source.plan().function().loops().get(0).upperBound()
                 - source.plan().function().loops().get(0).lowerBound(),
@@ -59,6 +73,14 @@ public final class GeneratedKernelDescriptor {
 
     public KernelSignature signature() {
         return signature;
+    }
+
+    public KernelVariantSignature variantSignature() {
+        return variantSignature;
+    }
+
+    public String variantId() {
+        return variantSignature.variantId();
     }
 
     public String symbol() {
@@ -79,6 +101,18 @@ public final class GeneratedKernelDescriptor {
 
     public int vectorWidth() {
         return vectorWidth;
+    }
+
+    public int unroll() {
+        return unroll;
+    }
+
+    public KernelLoopForm loopForm() {
+        return loopForm;
+    }
+
+    public KernelTailPolicy tailPolicy() {
+        return tailPolicy;
     }
 
     public String sourceProvenance() {
@@ -105,6 +139,7 @@ public final class GeneratedKernelDescriptor {
     public String toString() {
         return "generated-kernel " + signature.shortHash()
             + " symbol=" + symbol + " backend=" + backend
+            + " variant=" + variantId()
             + " isa=" + requiredCpuFeature + " source=" + sourceProvenance;
     }
 }

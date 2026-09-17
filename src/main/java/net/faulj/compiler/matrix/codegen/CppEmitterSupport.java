@@ -138,14 +138,23 @@ final class CppEmitterSupport {
     static void appendRegistryRegistration(StringBuilder source,
                                            PseudokernelPlan plan,
                                            CodegenBackend backend) {
+        appendRegistryRegistration(source, plan,
+            backend == CodegenBackend.AVX2
+                ? KernelVariantSignature.baselineAvx2(plan.signature())
+                : KernelVariantSignature.legacyScalar(plan.signature()));
+    }
+
+    static void appendRegistryRegistration(StringBuilder source,
+                                           PseudokernelPlan plan,
+                                           KernelVariantSignature variant) {
         KernelFunction function = plan.function();
         source.append("\nextern \"C\" void ")
-            .append(plan.signature().generatedSymbol()).append("_registry_entry(")
+            .append(variant.generatedSymbol()).append("_registry_entry(")
             .append("const double* const* inputs, std::size_t inputCount, double* out, ")
             .append("std::size_t rows, std::size_t cols) {\n")
             .append("    if (inputCount != ").append(function.inputBuffers().size())
             .append(") return;\n    ")
-            .append(plan.signature().generatedSymbol()).append('(');
+            .append(variant.generatedSymbol()).append('(');
         for (int index = 0; index < function.inputBuffers().size(); index++) {
             if (index > 0) {
                 source.append(", ");
@@ -157,24 +166,28 @@ final class CppEmitterSupport {
         }
         source.append("out, rows, cols);\n}\n\n")
             .append("namespace {\nstruct ")
-            .append(plan.signature().generatedSymbol()).append("_registrar {\n")
-            .append("    ").append(plan.signature().generatedSymbol()).append("_registrar() {\n")
+            .append(variant.generatedSymbol()).append("_registrar {\n")
+            .append("    ").append(variant.generatedSymbol()).append("_registrar() {\n")
             .append("        const jlc_generated_kernel_descriptor descriptor{\n")
             .append("            \"").append(escape(plan.signature().canonicalText())).append("\",\n")
-            .append("            \"").append(plan.signature().generatedSymbol()).append("\",\n")
+            .append("            \"").append(escape(variant.canonicalText())).append("\",\n")
+            .append("            \"").append(variant.generatedSymbol()).append("\",\n")
             .append("            jlc_generated_backend::")
-            .append(backend == CodegenBackend.AVX2 ? "AVX2" : "SCALAR_CPP").append(",\n")
-            .append("            ").append(backend.vectorWidth()).append(",\n")
+            .append(variant.backend() == CodegenBackend.AVX2 ? "AVX2" : "SCALAR_CPP").append(",\n")
+            .append("            ").append(variant.vectorWidth()).append(",\n")
             .append("            \"FP64\",\n")
             .append("            ").append(function.loops().get(0).upperBound()
                 - function.loops().get(0).lowerBound()).append(",\n")
             .append("            ").append(function.loops().get(1).upperBound()
-                - function.loops().get(1).lowerBound()).append("\n        };\n")
+                - function.loops().get(1).lowerBound()).append(",\n")
+            .append("            ").append(variant.unroll()).append(",\n")
+            .append("            \"").append(variant.loopForm().propertyValue()).append("\",\n")
+            .append("            \"").append(variant.tailPolicy().propertyValue()).append("\"\n        };\n")
             .append("        jlc_generated_register(descriptor, ")
-            .append(plan.signature().generatedSymbol()).append("_registry_entry);\n")
+            .append(variant.generatedSymbol()).append("_registry_entry);\n")
             .append("    }\n};\n")
-            .append("const ").append(plan.signature().generatedSymbol()).append("_registrar ")
-            .append(plan.signature().generatedSymbol()).append("_registrar_instance{};\n}\n");
+            .append("const ").append(variant.generatedSymbol()).append("_registrar ")
+            .append(variant.generatedSymbol()).append("_registrar_instance{};\n}\n");
     }
 
     static String escape(String value) {

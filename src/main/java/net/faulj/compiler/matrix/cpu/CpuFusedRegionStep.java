@@ -20,6 +20,7 @@ import net.faulj.compiler.matrix.kernel.KernelLowerer;
 import net.faulj.compiler.matrix.kernel.KernelLoweringResult;
 import net.faulj.compiler.matrix.kernel.KernelReferenceExecutor;
 import net.faulj.compiler.matrix.codegen.GeneratedKernelExecutor;
+import net.faulj.compiler.matrix.codegen.KernelAutotuneMode;
 import net.faulj.compiler.matrix.codegen.KernelBackendMode;
 import net.faulj.compiler.matrix.codegen.PseudokernelPlan;
 import net.faulj.compiler.matrix.codegen.PseudokernelPlanner;
@@ -39,7 +40,8 @@ public final class CpuFusedRegionStep implements CpuStep {
         GENERIC_SCHEDULE,
         KERNEL_IR_REFERENCE,
         GENERATED_SCALAR_CPP,
-        GENERATED_AVX2
+        GENERATED_AVX2,
+        GENERATED_TUNED
     }
 
     private final int id;
@@ -49,6 +51,7 @@ public final class CpuFusedRegionStep implements CpuStep {
     private final FastProgram fastProgram;
     private final KernelIrMode kernelIrMode;
     private final KernelBackendMode kernelBackendMode;
+    private final KernelAutotuneMode kernelAutotuneMode;
     private final KernelLoweringResult kernelLowering;
     private final PseudokernelPlan pseudokernelPlan;
     private volatile ExecutionPath lastExecutionPath;
@@ -64,7 +67,9 @@ public final class CpuFusedRegionStep implements CpuStep {
         this.fastProgram = FastProgram.tryCompile(regionPlan);
         this.kernelIrMode = KernelIrMode.fromSystemProperty();
         this.kernelBackendMode = KernelBackendMode.fromSystemProperty();
-        boolean lowerKernel = kernelIrMode.isEnabled() || kernelBackendMode.isGenerated();
+        this.kernelAutotuneMode = KernelAutotuneMode.fromSystemProperty();
+        boolean lowerKernel = kernelIrMode.isEnabled() || kernelBackendMode.isGenerated()
+            || kernelAutotuneMode.usesProfile();
         this.kernelLowering = lowerKernel
             ? KernelLowerer.lower(regionPlan) : null;
         this.pseudokernelPlan = kernelLowering != null && kernelLowering.verified()
@@ -124,6 +129,10 @@ public final class CpuFusedRegionStep implements CpuStep {
         return kernelBackendMode;
     }
 
+    public KernelAutotuneMode kernelAutotuneMode() {
+        return kernelAutotuneMode;
+    }
+
     /** Null when the optional R3 selector is off. */
     public KernelLoweringResult kernelLowering() {
         return kernelLowering;
@@ -174,6 +183,21 @@ public final class CpuFusedRegionStep implements CpuStep {
             KernelReferenceExecutor.executeVerified(kernelLowering.program(), binding);
             lastExecutionPath = ExecutionPath.KERNEL_IR_REFERENCE;
             return;
+        }
+
+        if (kernelAutotuneMode.usesProfile()
+            && !kernelBackendMode.isGenerated()
+            && kernelLowering != null
+            && kernelLowering.eligibility() == KernelEligibility.ELIGIBLE
+            && kernelLowering.verified()
+            && allReal(leaves, output)) {
+            KernelBinding binding = KernelBinding.fromLogicalBuffers(
+                kernelLowering.program().function(), context.values(),
+                context.physicalMemoryPlan());
+            if (GeneratedKernelExecutor.tryExecuteTuned(kernelLowering, binding)) {
+                lastExecutionPath = ExecutionPath.GENERATED_TUNED;
+                return;
+            }
         }
 
         if (kernelBackendMode.isGenerated()

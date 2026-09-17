@@ -226,10 +226,9 @@ Java_net_faulj_nativeblas_NativeBindings_nativeGeneratedAvx2Supported(JNIEnv*, j
     return jlc_generated_avx2_supported() ? JNI_TRUE : JNI_FALSE;
 }
 
-extern "C" JNIEXPORT jboolean JNICALL
-Java_net_faulj_nativeblas_NativeBindings_nativeGeneratedKernelExecute(
-    JNIEnv* env, jclass, jstring signature, jobjectArray inputs,
-    jdoubleArray output, jint rows, jint cols) {
+static jboolean execute_generated_kernel(JNIEnv* env, jstring signature, jstring variant,
+                                         jobjectArray inputs, jdoubleArray output,
+                                         jint rows, jint cols) {
     if (signature == nullptr || inputs == nullptr || output == nullptr || rows < 0 || cols < 0) {
         throw_java_exception(env, "java/lang/IllegalArgumentException",
                              "Generated kernel binding is invalid");
@@ -245,6 +244,12 @@ Java_net_faulj_nativeblas_NativeBindings_nativeGeneratedKernelExecute(
 
     const char* signature_chars = env->GetStringUTFChars(signature, nullptr);
     if (signature_chars == nullptr) {
+        return JNI_FALSE;
+    }
+    const char* variant_chars = variant == nullptr
+        ? nullptr : env->GetStringUTFChars(variant, nullptr);
+    if (variant != nullptr && variant_chars == nullptr) {
+        env->ReleaseStringUTFChars(signature, signature_chars);
         return JNI_FALSE;
     }
     std::vector<const double*> input_pointers(static_cast<std::size_t>(input_count), nullptr);
@@ -279,17 +284,26 @@ Java_net_faulj_nativeblas_NativeBindings_nativeGeneratedKernelExecute(
                                          "Unable to pin generated-kernel output");
                     break;
                 }
-                ok = jlc_generated_execute(signature_chars, input_pointers.data(),
-                    static_cast<std::size_t>(input_count), output_pointer,
-                    static_cast<std::size_t>(rows), static_cast<std::size_t>(cols));
+                ok = variant_chars == nullptr
+                    ? jlc_generated_execute(signature_chars, input_pointers.data(),
+                        static_cast<std::size_t>(input_count), output_pointer,
+                        static_cast<std::size_t>(rows), static_cast<std::size_t>(cols))
+                    : jlc_generated_execute_variant(signature_chars, variant_chars,
+                        input_pointers.data(), static_cast<std::size_t>(input_count),
+                        output_pointer, static_cast<std::size_t>(rows),
+                        static_cast<std::size_t>(cols));
             }
         }
         if (input_count == 0) {
             output_pointer = static_cast<jdouble*>(
                 env->GetPrimitiveArrayCritical(output, nullptr));
             if (output_pointer != nullptr || elements == 0) {
-                ok = jlc_generated_execute(signature_chars, nullptr, 0, output_pointer,
-                    static_cast<std::size_t>(rows), static_cast<std::size_t>(cols));
+                ok = variant_chars == nullptr
+                    ? jlc_generated_execute(signature_chars, nullptr, 0, output_pointer,
+                        static_cast<std::size_t>(rows), static_cast<std::size_t>(cols))
+                    : jlc_generated_execute_variant(signature_chars, variant_chars,
+                        nullptr, 0, output_pointer, static_cast<std::size_t>(rows),
+                        static_cast<std::size_t>(cols));
             }
         }
     } catch (...) {
@@ -309,7 +323,24 @@ Java_net_faulj_nativeblas_NativeBindings_nativeGeneratedKernelExecute(
         }
     }
     env->ReleaseStringUTFChars(signature, signature_chars);
+    if (variant_chars != nullptr) {
+        env->ReleaseStringUTFChars(variant, variant_chars);
+    }
     return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_net_faulj_nativeblas_NativeBindings_nativeGeneratedKernelExecute(
+    JNIEnv* env, jclass, jstring signature, jobjectArray inputs,
+    jdoubleArray output, jint rows, jint cols) {
+    return execute_generated_kernel(env, signature, nullptr, inputs, output, rows, cols);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_net_faulj_nativeblas_NativeBindings_nativeGeneratedKernelExecuteVariant(
+    JNIEnv* env, jclass, jstring signature, jstring variant, jobjectArray inputs,
+    jdoubleArray output, jint rows, jint cols) {
+    return execute_generated_kernel(env, signature, variant, inputs, output, rows, cols);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

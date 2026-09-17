@@ -34,4 +34,28 @@ public final class RuntimeCpuFeatures {
         // Unknown operating systems do not get an optimistic AVX2 guess.
         return false;
     }
+
+    public static boolean fmaSupported() {
+        if (Boolean.getBoolean("jlc.compiler.fma.disabled")) {
+            return false;
+        }
+        String architecture = System.getProperty("os.arch", "")
+            .toLowerCase(Locale.ROOT);
+        if (!(architecture.equals("amd64") || architecture.equals("x86_64")
+            || architecture.equals("x86"))) {
+            return false;
+        }
+        if ("linux".equalsIgnoreCase(System.getProperty("os.name", ""))) {
+            try {
+                String cpuInfo = Files.readString(Path.of("/proc/cpuinfo"))
+                    .toLowerCase(Locale.ROOT);
+                return cpuInfo.lines()
+                    .filter(line -> line.startsWith("flags") || line.startsWith("features"))
+                    .anyMatch(line -> line.matches(".*(^|\\s)fma($|\\s).*"));
+            } catch (IOException | SecurityException ignored) {
+                return false;
+            }
+        }
+        return false;
+    }
 }

@@ -19,6 +19,13 @@ final class NativeBindings {
                                                        int rows,
                                                        int cols);
 
+    static native boolean nativeGeneratedKernelExecuteVariant(String signature,
+                                                              String variant,
+                                                              double[][] inputs,
+                                                              double[] output,
+                                                              int rows,
+                                                              int cols);
+
     static native boolean nativeVendorLapackAvailable();
 
     static native String nativeRuntimeDescription();

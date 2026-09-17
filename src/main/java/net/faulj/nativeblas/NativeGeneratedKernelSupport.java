@@ -32,4 +32,22 @@ public final class NativeGeneratedKernelSupport {
         }
         return NativeBindings.nativeGeneratedKernelExecute(signature, inputs, output, rows, cols);
     }
+
+    /** Execute an exact R5 variant without collapsing it into the R4 signature key. */
+    public static boolean executeVariant(String signature,
+                                         String variant,
+                                         double[][] inputs,
+                                         double[] output,
+                                         int rows,
+                                         int cols) {
+        if (signature == null || variant == null || inputs == null || output == null
+            || rows < 0 || cols < 0) {
+            return false;
+        }
+        if (!isAvailable()) {
+            return false;
+        }
+        return NativeBindings.nativeGeneratedKernelExecuteVariant(
+            signature, variant, inputs, output, rows, cols);
+    }
 }
