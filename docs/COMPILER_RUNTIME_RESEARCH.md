@@ -2061,22 +2061,23 @@ are not promoted.
 
 | workload | R2 Java median (MAD; stable) ns | scalar-native median (MAD; stable) ns | best stable AVX2 median (MAD; stable) ns | persisted winner |
 |---|---:|---:|---:|---|
-| 1x1 / 2 ops | 72,650 (9,650; no) | 50,720 (5,169; no) | 34,100 (3,050; yes; `avx2_u8_flat`) | `NO_STABLE_WINNER` |
-| 16x16 / 2 ops | 224,700 (11,241; yes) | 49,780 (6,370; no) | 32,350 (930; yes; `baseline_avx2`) | `CALIBRATED:GENERATED_AVX2(baseline_avx2)` |
-| 64x64 / 2 ops | 278,871 (30,120; no) | 30,140 (640; yes) | 24,310 (1,500; yes; `baseline_avx2`) | `CALIBRATED:GENERATED_AVX2(baseline_avx2)` |
+| 1x1 / 2 ops | 71,661 (5,549; yes) | 53,441 (10,471; no) | 32,580 (3,180; yes; `baseline_avx2`) | `CALIBRATED:GENERATED_AVX2(baseline_avx2)` |
+| 16x16 / 2 ops | 226,281 (12,971; yes) | 43,760 (5,439; no) | 24,460 (740; yes; `avx2_u4_flat`) | `NO_STABLE_WINNER` |
+| 64x64 / 2 ops | 271,471 (13,511; yes) | 31,380 (2,840; yes) | 25,030 (1,490; yes; `baseline_avx2`) | `CALIBRATED:GENERATED_AVX2(baseline_avx2)` |
 
 The run reports all peers and does not hard-code backend diversity. At 1×1,
-the trusted AVX2 baseline was noisy, so the profile intentionally records no
-empirical winner even though another AVX2 candidate was stable. At 16×16 and
-64×64 the AVX2 baseline is retained as a stable calibrated winner. The profile
-records exact variant signatures, all raw samples, and losing/noisy evidence at
+the trusted AVX2 baseline was stable and persisted as the calibrated winner. At
+16×16, the trusted AVX2 baseline was noisy, so the profile intentionally records
+no empirical winner even though other AVX2 candidates were stable. At 64×64 the
+AVX2 baseline is retained as a stable calibrated winner. The profile records
+exact variant signatures, all raw samples, and losing/noisy evidence at
 `build/profiles/cpu-checkpoint-avx-enabled.json` in the local evidence bundle.
 
 With the runtime AVX2 gate disabled, the 1×1 smoke calibration omitted all
-AVX2 candidates and recorded Java at 85,641 ns (MAD 8,141; stable) and
-scalar-native at 44,950 ns (MAD 4,030; stable). It persisted
-`CALIBRATED:SCALAR_NATIVE(scalar_cpp_nested)` with `baselineChoice` set to the
-scalar choice. This verifies the no-AVX2 path; the separate focused test
+AVX2 candidates and recorded Java at 83,820 ns (MAD 7,259; stable) and
+scalar-native at 57,560 ns (MAD 10,280; noisy). It persisted
+`NO_STABLE_WINNER` with `baselineChoice` set to the scalar choice and no
+`winnerChoice`. This verifies the no-AVX2 path; the separate focused test
 `noStableWinnerRoundTripsWithoutReconstructingBaselineAsWinner` demonstrates
 that a profile with no stable peer instead persists `NO_STABLE_WINNER` and a
 null `winnerChoice`.
