@@ -19,6 +19,10 @@ import net.faulj.compiler.matrix.kernel.KernelIrMode;
 import net.faulj.compiler.matrix.kernel.KernelLowerer;
 import net.faulj.compiler.matrix.kernel.KernelLoweringResult;
 import net.faulj.compiler.matrix.kernel.KernelReferenceExecutor;
+import net.faulj.compiler.matrix.codegen.GeneratedKernelExecutor;
+import net.faulj.compiler.matrix.codegen.KernelBackendMode;
+import net.faulj.compiler.matrix.codegen.PseudokernelPlan;
+import net.faulj.compiler.matrix.codegen.PseudokernelPlanner;
 import net.faulj.matrix.Matrix;
 
 /**
@@ -33,7 +37,9 @@ public final class CpuFusedRegionStep implements CpuStep {
     public enum ExecutionPath {
         FAST_REAL_DENSE,
         GENERIC_SCHEDULE,
-        KERNEL_IR_REFERENCE
+        KERNEL_IR_REFERENCE,
+        GENERATED_SCALAR_CPP,
+        GENERATED_AVX2
     }
 
     private final int id;
@@ -42,7 +48,9 @@ public final class CpuFusedRegionStep implements CpuStep {
     private final CompiledProgram compiledProgram;
     private final FastProgram fastProgram;
     private final KernelIrMode kernelIrMode;
+    private final KernelBackendMode kernelBackendMode;
     private final KernelLoweringResult kernelLowering;
+    private final PseudokernelPlan pseudokernelPlan;
     private volatile ExecutionPath lastExecutionPath;
 
     CpuFusedRegionStep(int id, FusedRegionPlan regionPlan) {
@@ -55,8 +63,12 @@ public final class CpuFusedRegionStep implements CpuStep {
         this.compiledProgram = CompiledProgram.compile(regionPlan);
         this.fastProgram = FastProgram.tryCompile(regionPlan);
         this.kernelIrMode = KernelIrMode.fromSystemProperty();
-        this.kernelLowering = kernelIrMode.isEnabled()
+        this.kernelBackendMode = KernelBackendMode.fromSystemProperty();
+        boolean lowerKernel = kernelIrMode.isEnabled() || kernelBackendMode.isGenerated();
+        this.kernelLowering = lowerKernel
             ? KernelLowerer.lower(regionPlan) : null;
+        this.pseudokernelPlan = kernelLowering != null && kernelLowering.verified()
+            ? PseudokernelPlanner.plan(kernelLowering.program().function()) : null;
     }
 
     @Override
@@ -108,6 +120,10 @@ public final class CpuFusedRegionStep implements CpuStep {
         return kernelIrMode;
     }
 
+    public KernelBackendMode kernelBackendMode() {
+        return kernelBackendMode;
+    }
+
     /** Null when the optional R3 selector is off. */
     public KernelLoweringResult kernelLowering() {
         return kernelLowering;
@@ -116,6 +132,11 @@ public final class CpuFusedRegionStep implements CpuStep {
     /** Null when the optional R3 selector is off or lowering was rejected. */
     public net.faulj.compiler.matrix.kernel.KernelProgram kernelProgram() {
         return kernelLowering == null ? null : kernelLowering.program();
+    }
+
+    /** Backend policy facts derived from the verified R3 function, if present. */
+    public PseudokernelPlan pseudokernelPlan() {
+        return pseudokernelPlan;
     }
 
     @Override
@@ -142,6 +163,7 @@ public final class CpuFusedRegionStep implements CpuStep {
         }
 
         if (kernelIrMode == KernelIrMode.EXECUTE
+            && !kernelBackendMode.isGenerated()
             && kernelLowering != null
             && kernelLowering.eligibility() == KernelEligibility.ELIGIBLE
             && kernelLowering.verified()
@@ -152,6 +174,21 @@ public final class CpuFusedRegionStep implements CpuStep {
             KernelReferenceExecutor.executeVerified(kernelLowering.program(), binding);
             lastExecutionPath = ExecutionPath.KERNEL_IR_REFERENCE;
             return;
+        }
+
+        if (kernelBackendMode.isGenerated()
+            && kernelLowering != null
+            && kernelLowering.eligibility() == KernelEligibility.ELIGIBLE
+            && kernelLowering.verified()
+            && allReal(leaves, output)) {
+            KernelBinding binding = KernelBinding.fromLogicalBuffers(
+                kernelLowering.program().function(), context.values(),
+                context.physicalMemoryPlan());
+            if (GeneratedKernelExecutor.tryExecute(kernelLowering, binding, kernelBackendMode)) {
+                lastExecutionPath = kernelBackendMode == KernelBackendMode.AVX2
+                    ? ExecutionPath.GENERATED_AVX2 : ExecutionPath.GENERATED_SCALAR_CPP;
+                return;
+            }
         }
 
         if (allRealDense && fastProgram != null) {

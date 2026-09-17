@@ -11,6 +11,14 @@ final class NativeBindings {
 
     static native boolean nativeIsAvailable();
 
+    static native boolean nativeGeneratedAvx2Supported();
+
+    static native boolean nativeGeneratedKernelExecute(String signature,
+                                                       double[][] inputs,
+                                                       double[] output,
+                                                       int rows,
+                                                       int cols);
+
     static native boolean nativeVendorLapackAvailable();
 
     static native String nativeRuntimeDescription();
