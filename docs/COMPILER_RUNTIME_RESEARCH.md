@@ -838,3 +838,569 @@ The opt-in benchmark test defaults to the requested A/B/C/D/E/F size sets;
 `jlc.compiler.r2.gemm-sizes` can select a bounded smoke run, and
 `jlc.compiler.r2.benchmark.memory=legacy` separates R2 mode behavior from
 R1 reuse when desired. `git diff --check` is part of final verification.
+
+# R3 — Portable Kernel IR
+
+## Status and branch provenance
+
+R3 is a separate post-M4 research milestone. It does not rename M4, does not
+create M5, and does not rewrite the M1–M4 history. The historical and research
+sequences remain:
+
+```text
+M1 Graph IR + whole-expression optimization
+M2 Memory semantics + affine/dependence IR
+M3 Bounded affine/polyhedral-style scheduling
+M4 CPU lowering + end-to-end benchmark proof
+
+R1 Liveness-Aware Physical Buffer Planning
+R2 Generalized Legality-Aware Fusion
+R3 Portable Kernel IR
+R4 Generated SIMD Pseudokernels
+R5 Empirical Kernel/Schedule Autotuning
+```
+
+The implementation was developed in this isolated worktree:
+
+```text
+branch:       feature/compiler-kernel-ir
+worktree:     /tmp/jlc-compiler-kernel-ir
+R3 base SHA:  45fdd7aca34ccd31783416631989c19bf43deec6
+implementation SHA: e3af92eb7a5f38654e24eb891a21fe4cc4b05749
+main:         untouched; no merge performed
+```
+
+The base is the actual clean HEAD of `feature/compiler-generalized-fusion`,
+including the completed R1 and R2 work. The primary checkout had unrelated
+uncommitted changes and was not used for R3 edits.
+
+## Motivation
+
+R2 and R3 intentionally answer different questions:
+
+```text
+R2: semantic fused scalar computation
+R3: portable explicit kernel computation
+```
+
+`FusedRegionPlan` and `ScalarFusionProgram` already prove what scalar value is
+needed at each output point. R3 adds the explicit machine-oriented boundary:
+which logical buffers are read and written, which affine addresses are used,
+which loops execute, which scalar values are defined, and which effects are
+observable. That representation can be consumed later by scalar Java, the
+Java Vector API, generated C++, AVX2/AVX-512, NEON/SVE, or CUDA backends
+without rebuilding expression semantics.
+
+R3 contains no vector register names, ISA instructions, tile search, FMA
+selection, unrolling policy, or generated native code. It is portable kernel
+IR, not AVX IR.
+
+## IR model
+
+The public immutable model is in
+`net.faulj.compiler.matrix.kernel`:
+
+| Object | Responsibility |
+| ------ | -------------- |
+| `KernelProgram` | Immutable container of kernel functions. |
+| `KernelFunction` | Stable function ID/name, buffers, rectangular loops, flat body, SSA values, alias facts, and R2 provenance. |
+| `KernelBuffer` | Logical buffer identity, M2 storage class, role, shape, storage/compute/accumulator types, layout, memory space, and ownership. |
+| `KernelLoop` | One explicit loop range and semantic induction binding. |
+| `KernelAccess` | A buffer plus explicit affine index expressions. |
+| `KernelValue` | Stable SSA-like scalar value ID, name, and type. |
+| `KernelOp` | One ordered scalar/load/store operation and source provenance. |
+| `KernelBlock` | Immutable ordered operation list. |
+| `KernelAliasFact` | Conservative pairwise alias fact. |
+| `KernelProvenance` | Fused-region ID, source statements, source scalar nodes, eliminated buffers, and R2 legality/profitability evidence. |
+| `KernelBinding` | Runtime-only map to `Matrix` objects and optional R1 physical slots. |
+
+`KernelProgram` and all contained descriptors copy their collections and have
+no mutators. A `KernelBuffer` retains its M2 `LogicalBuffer` source but never
+retains a mutable `Matrix`; allocations stay in R1's execution arena. R3 v1
+uses one output per function, matching the R2 `FusedRegionPlan` contract.
+
+The flat body is deliberately more explicit than an expression tree: every
+load, constant, arithmetic definition, and output store is ordered inside an
+explicit loop nest. It is still above backend choices such as vector width,
+register allocation, and instruction selection.
+
+The exact v1 opcode set is:
+
+| Opcode | Result | Effect |
+| ------ | ------ | ------ |
+| `LOAD` | one `FP64` SSA value | reads one buffer through a `KernelAccess` |
+| `CONSTANT` | one `FP64` SSA value | pure |
+| `ADD` | one `FP64` SSA value | pure |
+| `MUL` | one `FP64` SSA value | pure |
+| `STORE` | none | writes one output buffer through a `KernelAccess` |
+
+An R2 `SCALE` node becomes `CONSTANT alpha` followed by `MUL`. The lowerer
+places the constant before the multiplication and uses `(alpha, value)` as
+the multiplication operand order to retain R2's scalar operation ordering.
+There is no R3 `TRANSPOSE` opcode.
+
+## Type model
+
+The type architecture has separate `storageType`, `computeType`, and
+`accumulatorType` fields on every `KernelBuffer`, plus a type on every
+`KernelValue`. R3 currently emits and verifies only:
+
+```text
+storage type:    FP64
+compute type:    FP64
+accumulator:     FP64
+```
+
+`COMPLEX_FP64` is named in `KernelValueType` as an explicit future extension,
+but complex arithmetic is deliberately not eligible for the initial R3
+reference backend. Current JLC `Matrix` values can acquire an optional
+imaginary lane dynamically, so the runtime binding audit rejects a complex
+leaf with the deterministic reason `complex FP64 storage is unsupported by
+R3; fallback to R2`. R2 remains in control and preserves all complex lanes,
+including mixed real/complex cases, NaNs, infinities, and signed zero. No
+imaginary lane is silently dropped.
+
+FP32, FP16, BF16, mixed precision, and accumulator promotion are not claimed
+implemented. Their future addition is localized to the type descriptors and
+typed backend rules rather than requiring a new expression-level IR.
+
+## Memory model
+
+Each kernel buffer records:
+
+* the original logical identity and name;
+* its M2 logical storage class (`EXTERNAL_INPUT`, `TEMPORARY`, or `SYMBOLIC`);
+* `INPUT` or `OUTPUT` role;
+* shape;
+* storage, compute, and accumulator value types;
+* `KernelLayout`;
+* `MemorySpace` (`HEAP`, `OFF_HEAP`, or `UNKNOWN`); and
+* logical ownership.
+
+For the current `Matrix` and `OffHeapMatrix` contract, non-symbolic buffers
+are row-major dense; symbolic buffers retain `UNKNOWN` layout. R3 does not
+invent column-major views, zero-copy transformations, arbitrary strides, or
+allocation ownership. `KernelLayout` still has `COLUMN_MAJOR_DENSE`,
+`STRIDED`, and `UNKNOWN` extension points, but the lowerer only claims what
+the current runtime contract proves.
+
+`KernelOp.effect()` makes effects explicit: loads read, stores write, and
+constants/arithmetic are pure. The verifier requires input loads to be
+read-only and output stores to target the declared execution-owned output.
+
+Alias facts are copied from the existing conservative M2 analysis. Distinct
+external logical buffers are `MAY_ALIAS`; a temporary versus an external
+buffer is `NO_ALIAS`; and the same logical identity is `MUST_ALIAS`. R3 never
+turns an absent or `MAY_ALIAS` fact into `NO_ALIAS`. The verifier rejects an
+alias fact that is stronger than its logical provenance permits.
+
+## Iteration model
+
+R3 v1 represents a flat ordered body under a canonical two-dimensional static
+rectangular loop nest:
+
+```text
+for i = 0 .. rows, step 1
+for j = 0 .. columns, step 1
+```
+
+Loop variables are explicit `AffineVariable` objects. Each v1 loop has an
+identity semantic binding, zero lower bound, unit step, and bounds equal to
+the R2 final iteration domain. There is no unrestricted control-flow graph,
+branch, while loop, recursion, exception, or dynamic allocation in a kernel.
+
+R2 tiled/guarded schedules remain valid R2 inputs but are conservatively
+ineligible for this initial lowerer. The lowerer rejects them before creating
+an executable Kernel IR rather than dropping the tail guard or claiming
+rectangular coverage. This is the safe extension point for a future structured
+tail predicate.
+
+## Operations and SSA
+
+`KernelValue` IDs are stable non-negative integers assigned in deterministic
+operation order. Every value-producing operation defines exactly one ID;
+operations can refer only to earlier definitions. `KernelVerifier` checks
+that every declared value is defined once, operands exist, operands dominate
+uses, and scalar types agree.
+
+R2's cached `(source statement, composed affine indices)` sharing is preserved
+by lowering each R2 scalar node once. If a shared R2 producer has three users,
+the R3 producer has one SSA ID and three operand references; no computation is
+duplicated. R3 performs no algebraic reassociation, `x + 0`, `x * 1`, FMA,
+constant folding, or other optimization rewrite.
+
+## R2 lowering
+
+`KernelLowerer.lower(FusedRegionPlan)` is a dedicated compile-time pass. It
+consumes:
+
+* the region's final iteration domain and schedule band;
+* its leaf buffers and final output;
+* `ScalarFusionProgram` nodes and their order;
+* R2 composed load maps;
+* eliminated/internal-value evidence; and
+* region statement IDs and legality evidence.
+
+The pass creates one `KernelBuffer` for every leaf and the final output. It
+creates one `KernelOp.LOAD` for each R2 load, one constant plus one multiply
+for each scale, one add for each add, and one final store. A semantic R2
+transpose node is mapped to its already-composed input value; it creates no
+runtime operation. The result is verified before the lowering result is
+returned.
+
+The pass is never called from the per-element executor. When the optional
+selector is enabled, lowering and verification happen while
+`CpuFusedRegionStep` is constructed. Runtime execution only creates a
+`KernelBinding` from already-existing matrices and R1 slots.
+
+## Transpose and affine indexing
+
+Transpose is an index transformation, not a scalar computation. For example,
+the R2 chain
+
+```text
+T = transpose(A)
+Z = scale(T, 2)
+```
+
+lowers to a load such as:
+
+```text
+k0 = load %A[j,i]
+k1 = const 2.0
+k2 = mul k1, k0
+store %Z[i,j], k2
+```
+
+The R2 builder has already inverted producer write maps and composed them into
+the load. A second transpose composes back to an identity load. The R3
+verifier accepts only the proven v1 unit-variable affine subset: each access
+dimension is one bound variable with coefficient `+1` and zero constant, and
+the variable's extent matches that buffer dimension. Rank, variable binding,
+injectivity, and output coverage are checked; arbitrary coefficients,
+nonlinear expressions, and unproven maps are rejected.
+
+## Verification
+
+`KernelVerifier.verify` returns an immutable `KernelVerificationResult` with
+deterministically ordered diagnostics. `requireValid` raises
+`KernelVerificationException` with the same diagnostics. Before execution or
+future code generation it verifies:
+
+1. stable function/program IDs and unique function IDs;
+2. unique buffer IDs and buffer membership;
+3. logical-buffer provenance and shape agreement;
+4. declared input/output roles, ownership, and one-output v1 contract;
+5. explicit FP64 type compatibility;
+6. valid two-dimensional canonical loop bounds and domain coverage;
+7. no undefined loop variables in loop bindings or accesses;
+8. access rank equals matrix shape rank;
+9. supported unit-variable affine access maps and matching extents;
+10. unique SSA value IDs and exactly-once definitions;
+11. operand references are defined earlier in the block;
+12. supported opcode arity, access, immediate, and result-shape rules;
+13. stores target the writable declared output, never an input;
+14. exactly one output store provides a bijective output coverage map;
+15. alias facts are complete, pairwise unique, and not illegally strengthened;
+16. all operation and buffer source provenance points back to R2.
+
+Examples of deterministic rejection text include:
+
+```text
+undefined or non-dominating SSA operand: 99
+duplicate SSA value ID: 0
+undefined loop variable in access: k
+STORE target is not a writable OUTPUT buffer
+access rank 1 does not match matrix rank 2
+unsupported affine access expression at dimension 0: 2*i
+illegal alias strengthening for %0<->%1: claimed=NO_ALIAS, proven=MAY_ALIAS
+```
+
+## R1 integration
+
+R3 describes computation and logical/storage facts; it does not plan or own
+allocations. `KernelBinding` is the explicit boundary:
+
+```text
+KernelBuffer -> Matrix
+KernelBuffer -> PhysicalBufferSlot (optional R1 fact)
+```
+
+The R1 `PhysicalMemoryPlan` still decides which non-overlapping logical
+temporary lifetimes share a physical slot. Borrowed leaves normally have no
+slot; the fused output maps to its R1 slot. The binding is created per
+execution and is not stored in the immutable `KernelProgram`. This keeps
+`logical value != physical storage` intact while giving a future backend the
+slot/layout/alias facts it needs.
+
+## Reference executor
+
+`KernelReferenceExecutor` is a correctness backend. It executes verified real
+FP64 kernels with nested scalar loops, `Matrix.get`, and `Matrix.set`. It
+compiles all affine expressions into reusable coefficient/slot arrays and
+allocates one scalar value array per invocation, not per matrix element. The
+executor has no vector width, register, FMA, JIT, native, GPU, or tiling
+policy.
+
+The developer selector is opt-in and defaults to the R2 path:
+
+```text
+jlc.compiler.kernelIr=off      # existing R2 execution
+jlc.compiler.kernelIr=verify   # lower + verify, execute R2
+jlc.compiler.kernelIr=execute  # lower + verify, execute R3 reference when real FP64
+```
+
+If runtime lanes are complex or the structural lowerer returns
+`INELIGIBLE`/`UNKNOWN`, `execute` falls back to R2. The R2 fast path remains
+available and is still the production/default baseline.
+
+## Canonical dump and diagnostics
+
+`KernelProgram.dump()` is stable across repeated lowerings. A representative
+shape is:
+
+```text
+kernel-program kernel-program-F0
+function F0 fp64
+source:
+  fused-region=F0
+  statements=[S0, S1]
+  scalar-nodes=[0, 1, 2]
+  eliminated=[%2]
+buffers:
+  %0 A input class=EXTERNAL_INPUT storage=FP64 compute=FP64 accumulator=FP64 memory=heap layout=row_major_dense ownership=borrowed
+  %1 B input class=EXTERNAL_INPUT storage=FP64 compute=FP64 accumulator=FP64 memory=heap layout=row_major_dense ownership=borrowed
+  %2 C output class=TEMPORARY storage=FP64 compute=FP64 accumulator=FP64 memory=unknown layout=row_major_dense ownership=owned
+loops:
+  for i = 0..M step 1
+  for j = 0..N step 1
+body:
+  k0 = load %0[i,j]
+  k1 = const 2.0
+  k2 = mul k1, k0
+  k3 = load %1[i,j]
+  k4 = add k2, k3
+  store %2[i,j], k4
+```
+
+The actual dump uses concrete bounds and IDs. There is no transpose operation
+in the body. A compact lowering diagnostic reports eligibility, buffer/loop/
+operation/load/store counts, and verification status, for example:
+
+```text
+kernel IR: eligible=eligible, buffers=3, loops=2, scalarOps=6,
+loads=2, stores=1, verification=PASS, reason=verified Kernel IR
+```
+
+The aggregate `KernelIrMetrics` exposes:
+
+```text
+kernelCount, eligibleRegionCount, rejectedRegionCount
+bufferCount, loopCount, scalarValueCount, operationCount
+loadCount, storeCount, arithmeticOpCount, sharedValueCount
+loweringTimeNanos, verificationTimeNanos
+```
+
+No normal execution path prints diagnostics.
+
+## Numerical validation
+
+`KernelIrTest` covers direct ADD and SCALE kernels plus R2 lowering for scale,
+add, long chains, shared producers with three uses, transpose and double
+transpose composition, both `37x11` and `11x37`, zero-size dimensions, `1x1`,
+NaN, `+Inf`, `-Inf`, `+0.0`, `-0.0`, strict ordering, complex rejection/R2
+fallback, malformed SSA/loop/access/store/alias cases, R1 slot binding,
+provenance, escaping R2 candidates, opaque GEMM boundaries, and the optional
+selector. Real R3 results are compared to eager results and R2 results with
+zero-tolerance real-array checks; bit patterns are checked for edge values.
+
+The complex cases intentionally validate fallback rather than pretending the
+real-only kernel has complex semantics. Every valid R2 generalized-fusion
+case that fits the R3 canonical subset is cross-checked as:
+
+```text
+eager result == R2 result == R3 reference result
+```
+
+## Compiler-scaling benchmark
+
+`R3KernelIrBenchmarkTest` is opt-in and measures only R2-to-R3 lowering and
+verification. It uses valid scalar scale chains with 2, 10, 25, 50, and 100
+source operations. The following median internal timings are from the smoke
+run on the R3 worktree; small absolute values are naturally noisy, while the
+IR structure is exactly linear:
+
+| Ops | Lowering µs | Verification µs | IR values | IR operations |
+| --: | ----------: | ---------------: | --------: | -------------: |
+| 2 | 192 | 169 | 5 | 6 |
+| 10 | 182 | 262 | 21 | 22 |
+| 25 | 121 | 195 | 51 | 52 |
+| 50 | 135 | 294 | 101 | 102 |
+| 100 | 167 | 466 | 201 | 202 |
+
+Each scale contributes one constant and one multiply; the single load and
+single store are fixed. Therefore values and operations grow linearly, and
+the verifier's work follows the ordered flat lists rather than a quadratic
+pairwise graph algorithm. The benchmark command is:
+
+```text
+bash ./gradlew test --tests net.faulj.compiler.matrix.kernel.R3KernelIrBenchmarkTest \
+  --no-daemon -q -Djlc.compiler.r3.benchmark=true
+```
+
+## Execution comparison
+
+The execution benchmark is informational only. It compares the existing R2
+specialized raw-array path with the R3 scalar reference and includes the
+different reference/backend setup costs. It makes no hardware-performance
+claim and does not define R3 success:
+
+| Workload | R2 fast path µs | R3 scalar reference µs | Ratio | Correct |
+| -------- | ---------------: | ---------------------: | ----: | :------ |
+| scale-add 37x11 | 415.2 | 207.4 | 0.50 | yes |
+| transpose 37x11 | 353.7 | 122.1 | 0.35 | yes |
+| shared producer 64x64 | 328.6 | 835.5 | 2.54 | yes |
+
+The execution benchmark is opt-in:
+
+```text
+bash ./gradlew test --tests net.faulj.compiler.matrix.kernel.R3KernelIrExecutionBenchmarkTest \
+  --no-daemon -q -Djlc.compiler.r3.executionBenchmark=true
+```
+
+The shared-DAG row shows the expected interpreter overhead; later generated
+backend work in R4 is responsible for vector/code-generation performance.
+
+## Rejections and fallback
+
+R3 does not need to lower every R2 region. Safe fallback is part of the
+contract. Current rejections include:
+
+* complex runtime storage for the real-only v1 executor;
+* tiled or guarded schedules outside the canonical rectangular subset;
+* unsupported affine coefficients, ranks, or non-bijective maps;
+* reductions and generic control flow;
+* escaping internal R2 producers;
+* GEMM initialization/update bodies; and
+* incomplete or unknown runtime storage facts when runtime eligibility is
+  requested.
+
+An ineligible or unknown result never becomes an executable kernel by
+optimistic assumption. R2 remains the fallback. GEMM remains an opaque
+`CpuGemmStep`; R3 may describe a future epilogue boundary but emits no GEMM
+body or microkernel.
+
+## Architecture audit answers
+
+1. **What does R3 add beyond `ScalarFusionProgram`?** Explicit loops,
+   explicit LOAD/CONSTANT/MUL/ADD/STORE operations, output effects, buffer
+   layout/memory/ownership/type facts, alias facts, verification, bindings,
+   and a backend-neutral executable boundary.
+2. **Why is it not another expression tree?** The body is an ordered flat SSA
+   block under explicit loops with explicit memory addresses and stores; it
+   has no tree-only implicit traversal or materialization semantics.
+3. **What are the opcodes?** `LOAD`, `CONSTANT`, `ADD`, `MUL`, and `STORE`.
+4. **How are values represented?** Immutable `KernelValue` declarations with
+   stable IDs; operands reference earlier IDs, preserving sharing.
+5. **How are loops represented?** Ordered immutable `KernelLoop` descriptors
+   with induction variable, semantic variable, static half-open bounds, and
+   step.
+6. **How are affine accesses represented?** `KernelAccess` pairs a buffer
+   with immutable `AffineExpr` index lists.
+7. **How is transpose represented?** R2 composes its permutation into LOAD
+   maps such as `%A[j,i]`; no runtime transpose opcode exists.
+8. **How is layout represented?** `KernelLayout`, currently proven
+   row-major dense for current concrete Matrix storage and unknown for
+   symbolic storage.
+9. **How is memory space represented?** Existing M2 `MemorySpace` is carried
+   on every buffer: heap, off-heap, or unknown.
+10. **How are alias facts represented?** Pairwise `KernelAliasFact` values
+    preserve `MUST_ALIAS`, `NO_ALIAS`, or `MAY_ALIAS` from M2 analysis.
+11. **How is R1 storage separate?** `KernelBinding` optionally maps buffers to
+    R1 `PhysicalBufferSlot` objects; the immutable IR owns no allocations.
+12. **How is provenance retained?** `KernelProvenance` stores fused-region,
+    statement, source-scalar, and eliminated-buffer IDs plus R2
+    legality/profitability evidence; each op retains source IDs.
+13. **How does verification work?** `KernelVerifier` walks functions,
+    buffers, loops, alias facts, and the ordered body in a fixed order and
+    returns all deterministic diagnostics.
+14. **What malformed kernels are rejected?** Duplicate IDs, undefined or
+    forward SSA operands, unknown buffers, rank/map/domain failures, illegal
+    stores, missing output coverage, type mismatches, invalid loop bounds,
+    unsupported opcodes/arity, illegal alias strengthening, and missing R2
+    provenance.
+15. **Is complex FP64 supported?** No: it is explicitly ineligible in v1;
+    complex runtime regions fall back to R2, which preserves their lanes.
+16. **How is strict ordering preserved?** R2 node/read order is retained;
+    scale expands to constant-then-multiply with factor-first operands; no
+    reassociation or algebraic rewrite is performed.
+17. **What is lowering complexity?** For a valid flat R2 scalar program,
+    lowering is O(V + A + O), where V is scalar nodes, A is affine terms, and
+    O is emitted operations; each R2 node is visited once.
+18. **What is verifier complexity?** The main validation pass is O(B + L +
+    O + A + F), with B buffers, L loops, O operations, A affine terms, and F
+    alias facts. Alias coverage adds the explicit O(B²) pair check for the
+    small kernel boundary; it is not proportional to matrix elements.
+19. **How large are realistic R2 regions?** The benchmark emits 5, 21, 51,
+    101, and 201 SSA values for 2, 10, 25, 50, and 100 scale operations;
+    typical matrix fused regions are tens of scalar operations and three to
+    dozens of boundary buffers.
+20. **What should R4 consume?** A verified `KernelProgram`/`KernelFunction`,
+    its ordered `KernelBlock`, `KernelValue` graph, `KernelLoop` nest,
+    `KernelAccess` maps, buffer type/layout/memory/ownership facts, alias
+    facts, output effect, and R2 provenance. R4 should not need to revisit
+    MatrixExpr semantics or R2 legality.
+
+## Tests and build evidence
+
+The focused R3 run added 21 `KernelIrTest` cases and one benchmark smoke test;
+the execution benchmark is also one opt-in test. Final exact counts for all
+required regression suites are recorded here after the full validation run:
+
+| Suite | Tests | Skipped | Failed |
+| ----- | ----: | ------: | ------: |
+| New `KernelIrTest` | 21 | 0 | 0 |
+| New `R3KernelIrBenchmarkTest` smoke | 1 | 0 | 0 |
+| New `R3KernelIrExecutionBenchmarkTest` smoke | 1 | 0 | 0 |
+| R2 `GeneralizedFusionTest` | 17 | 0 | 0 |
+| R2 benchmark smoke test | 1 | 0 | 0 |
+| R1 `MatrixMemoryPlanningTest` | 15 | 0 | 0 |
+| CPU lowering tests (`MatrixCpuLoweringTest` + `CpuFusedFastPathTest`) | 28 | 0 | 0 |
+| Affine/schedule tests (`MatrixAffineCompilerTest` + `MatrixScheduleTest`) | 45 | 0 | 0 |
+| Compiler audit regression tests | 27 | 0 | 0 |
+| Full project test | 495 | 24 | 1 pre-existing |
+
+The final run must also include:
+
+```text
+git diff --check: PASS (no whitespace errors)
+```
+
+The one full-suite failure is the pre-existing
+`net.faulj.nativeblas.AlgorithmDispatchTest.coldStartAllowsCppOnlyForFoundationAlgorithmsAboveThreshold`
+assertion at line 84. The same isolated test fails on the clean R2 baseline
+(`feature/compiler-generalized-fusion`, `45fdd7aca34ccd31783416631989c19bf43deec6`),
+so it is not attributed to R3.
+
+## Remaining weaknesses
+
+These are deliberate post-R3 boundaries, not failures:
+
+* no vector code generation;
+* no reductions;
+* no GEMM body lowering;
+* no GPU backend;
+* no FMA selection;
+* no ISA selection;
+* no unrolling;
+* no tile search;
+* no autotuning; and
+* the reference executor may be slower than R2's specialized fast path.
+
+R3 establishes the intended final separation:
+
+```text
+R1: logical value != physical storage
+R2: logical matrix intermediate != mandatory runtime Matrix
+R3: fused semantic computation != backend-specific implementation
+```
