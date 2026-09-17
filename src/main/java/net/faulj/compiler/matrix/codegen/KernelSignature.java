@@ -96,6 +96,26 @@ public final class KernelSignature {
         return new KernelSignature(text.toString());
     }
 
+    /**
+     * Reconstitute a semantic identity from its persisted canonical text.
+     * The text is validated and hashed exactly as it was when emitted; it is
+     * never interpreted as an execution/backend decision.
+     */
+    public static KernelSignature fromCanonicalText(String canonicalText) {
+        if (canonicalText == null || canonicalText.isBlank()) {
+            throw new IllegalArgumentException("Kernel signature text is empty");
+        }
+        if (!canonicalText.startsWith("jlc-kernel-signature-v1\n")) {
+            throw new IllegalArgumentException("Unsupported kernel signature version");
+        }
+        return new KernelSignature(canonicalText);
+    }
+
+    /** Alias for callers that use parser terminology. */
+    public static KernelSignature parse(String canonicalText) {
+        return fromCanonicalText(canonicalText);
+    }
+
     public String canonicalText() {
         return canonicalText;
     }

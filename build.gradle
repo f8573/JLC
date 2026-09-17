@@ -181,7 +181,8 @@ def static isSingleConfigCmakeGenerator(String generator) {
 def static getNativeCxxCompiler() {
     return firstNonBlank(
         System.getProperty("jlc.native.cxx.compiler"),
-        System.getenv("JLC_NATIVE_CXX_COMPILER")
+        System.getenv("JLC_NATIVE_CXX_COMPILER"),
+        System.getenv("CXX")
     )
 }
 
@@ -194,6 +195,82 @@ def static getNativeMakeProgram() {
 
 def static getNativeCmakeOption(String propertyName, String envName) {
     return firstNonBlank(System.getProperty(propertyName), System.getenv(envName))
+}
+
+// Persist build identity in the application resources.  Runtime code never
+// shells out to Git or a compiler; it only reads this generated resource.
+def buildIdentityDirProvider = layout.buildDirectory.dir("generated-resources/jlc-build-identity")
+def buildIdentityCommand = { List<String> command ->
+    ByteArrayOutputStream output = new ByteArrayOutputStream()
+    ByteArrayOutputStream errors = new ByteArrayOutputStream()
+    try {
+        exec {
+            commandLine command
+            standardOutput = output
+            errorOutput = errors
+            ignoreExitValue = true
+        }
+        String stdout = output.toString("UTF-8").trim()
+        String stderr = errors.toString("UTF-8").trim()
+        return firstNonBlank(stdout, stderr) ?: ""
+    } catch (Exception ignored) {
+        return ""
+    }
+}
+def buildIdentityFirstLine = { String value ->
+    String text = value == null ? "" : value.readLines().find { !it.isBlank() } ?: ""
+    return text.replace("\\", "/").replace("\r", "").replace("\n", "").trim()
+}
+
+tasks.register('generateBuildIdentity') {
+    group = 'build setup'
+    description = 'Generate reproducible Git/compiler identity for calibration profiles'
+    outputs.dir(buildIdentityDirProvider)
+    // Git dirtiness is part of the identity, so this must be refreshed for
+    // every build rather than being treated as an ordinary up-to-date output.
+    outputs.upToDateWhen { false }
+    doLast {
+        File outputDirectory = buildIdentityDirProvider.get().asFile
+        outputDirectory.mkdirs()
+        String gitSha = buildIdentityFirstLine(buildIdentityCommand(['git', 'rev-parse', 'HEAD']))
+        String gitStatus = buildIdentityCommand(['git', 'status', '--porcelain', '--untracked-files=all'])
+        String gitDirty = gitSha.isBlank() ? 'unknown' : (gitStatus.isBlank() ? 'false' : 'true')
+        String compiler = firstNonBlank(getNativeCxxCompiler(),
+            getOsString() == 'windows' ? 'cl' : 'c++')
+        String compilerVersion = buildIdentityFirstLine(buildIdentityCommand([compiler, '--version']))
+        String javaHome = System.getProperty('java.home')
+        String javacName = getOsString() == 'windows' ? 'javac.exe' : 'javac'
+        String javac = new File(javaHome, "bin/${javacName}").absolutePath
+        String javaCompiler = buildIdentityFirstLine(buildIdentityCommand([javac, '-version']))
+        String javaRuntime = [System.getProperty('java.version', 'unknown'),
+                              System.getProperty('java.vendor', 'unknown'),
+                              System.getProperty('java.vm.name', 'unknown')].join('|')
+        String nativeVendor = firstNonBlank(
+            getNativeCmakeOption('jlc.native.vendor.blas', 'JLC_NATIVE_VENDOR_BLAS'), 'AUTO')
+        boolean verified = !gitSha.isBlank() && gitDirty == 'false'
+            && !compilerVersion.isBlank() && !javaCompiler.isBlank()
+        List<String> lines = [
+            "jlc.version=${project.version}",
+            "git.sha=${gitSha ?: 'unknown'}",
+            "git.dirty=${gitDirty}",
+            "kernel.signature.version=jlc-kernel-signature-v1",
+            "kernel.variant.signature.version=jlc-kernel-variant-v1",
+            "codegen.abi=jlc-r5-codegen-abi-v1",
+            "java.compiler=${javaCompiler ?: 'unknown'}",
+            "java.runtime=${javaRuntime}",
+            "native.compiler=${compiler ?: 'unknown'}",
+            "native.compiler.version=${compilerVersion ?: 'unknown'}",
+            "native.vendor=${nativeVendor}",
+            "strict.flags=-O2,-fno-fast-math,-ffp-contract=off",
+            "identity.verified=${verified}"
+        ]
+        new File(outputDirectory, 'jlc-build.properties').text = lines.join('\n') + '\n'
+    }
+}
+
+sourceSets.main.resources.srcDir(buildIdentityDirProvider)
+tasks.named('processResources') {
+    dependsOn 'generateBuildIdentity'
 }
 
 //
@@ -383,6 +460,25 @@ tasks.register('runDiagnostic', JavaExec) {
         languageVersion = JavaLanguageVersion.of(21)
     }
     main = 'net.faulj.benchmark.Diagnostic512'
+    standardInput = System.in
+}
+
+// Calibrate the typed R2 Java/scalar-native/generated-AVX2 backend choices.
+// The Java entry point builds its generated JNI sources in an isolated
+// temporary directory and atomically updates the explicit profile path.
+tasks.register('calibrateBackends', JavaExec) {
+    group = 'benchmark'
+    description = 'Calibrate R2 Java, scalar-native, and generated AVX2 kernel backends'
+    dependsOn 'classes'
+    classpath = sourceSets.main.runtimeClasspath
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    main = 'net.faulj.compiler.matrix.codegen.BackendCalibrationCli'
+    if (project.hasProperty('calibrationArgs')) {
+        args project.property('calibrationArgs').toString().split('\\s+')
+            .findAll { !it.isBlank() }
+    }
     standardInput = System.in
 }
 

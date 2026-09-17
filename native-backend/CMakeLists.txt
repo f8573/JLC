@@ -66,13 +66,31 @@ if(JLC_R4_GENERATED_SOURCE_DIR)
   if(JLC_R4_GENERATED_SOURCES)
     target_sources(jlc_native_codegen PRIVATE ${JLC_R4_GENERATED_SOURCES})
     foreach(JLC_R4_SOURCE IN LISTS JLC_R4_GENERATED_SOURCES)
-      if(MSVC)
-        set_source_files_properties(${JLC_R4_SOURCE} PROPERTIES
-          COMPILE_OPTIONS "/O2;/fp:strict;/arch:AVX2")
-      else()
-        set_source_files_properties(${JLC_R4_SOURCE} PROPERTIES
-          COMPILE_OPTIONS "-O2;-fno-fast-math;-ffp-contract=off;-mavx2")
+      # Typed R5 sources declare their backend in a deterministic comment.
+      # Compile scalar-native artifacts without AVX2 so they remain a safe
+      # fallback on hosts where the generated AVX2 peer cannot execute. Older
+      # R4 sources have no marker; retain the historical AVX2 compile flags
+      # for those compatibility artifacts.
+      file(STRINGS "${JLC_R4_SOURCE}" JLC_R4_BACKEND_MARKER
+        REGEX "^// variant-backend=" LIMIT_COUNT 1)
+      set(JLC_R4_SOURCE_IS_AVX2 ON)
+      if(JLC_R4_BACKEND_MARKER MATCHES "^// variant-backend=SCALAR_CPP")
+        set(JLC_R4_SOURCE_IS_AVX2 OFF)
       endif()
+      if(MSVC)
+        if(JLC_R4_SOURCE_IS_AVX2)
+          set(JLC_R4_SOURCE_OPTIONS "/O2;/fp:strict;/arch:AVX2")
+        else()
+          set(JLC_R4_SOURCE_OPTIONS "/O2;/fp:strict")
+        endif()
+      else()
+        set(JLC_R4_SOURCE_OPTIONS "-O2;-fno-fast-math;-ffp-contract=off")
+        if(JLC_R4_SOURCE_IS_AVX2)
+          list(APPEND JLC_R4_SOURCE_OPTIONS "-mavx2")
+        endif()
+      endif()
+      set_source_files_properties(${JLC_R4_SOURCE} PROPERTIES
+        COMPILE_OPTIONS "${JLC_R4_SOURCE_OPTIONS}")
     endforeach()
     target_include_directories(jlc_native_codegen PRIVATE
       "${JLC_R4_GENERATED_SOURCE_DIR}")

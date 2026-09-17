@@ -13,6 +13,21 @@ extend the completed compiler milestones:
 
 M4 remains the terminal matrix-compiler milestone; this work is not M5.
 
+The frozen CPU/runtime path is therefore:
+
+```text
+MatrixExpr -> M1 -> M2 -> M3 -> M4 CPU lowering
+           -> R1 -> R2 -> R3 -> R4 -> R5
+           -> typed backend calibration -> KernelDispatchSelector
+                |-> R2 Java
+                |-> scalar native
+                `-> generated AVX2
+```
+
+R1–R5 are post-M4 research layers. The typed backend boundary is a narrow
+production integration pass; it does not add a compiler milestone, and there
+is no R6 in this checkpoint.
+
 R1 was implemented on `feature/compiler-buffer-reuse` in the isolated
 worktree `/home/james/Projects/JLC-compiler-buffer-reuse`. The actual
 canonical development base was:
@@ -1512,9 +1527,10 @@ flags.
 
 ### Registry, JNI, and runtime gate
 
-The Java registry key is `(KernelSignature, CodegenBackend)`. A native entry
-contains the canonical signature, generated symbol, backend, value type, width,
-and exact rows/columns. The C++ registry is function-local-static and mutex
+The Java registry key is the exact `KernelVariantSignature`; the older
+`(KernelSignature, CodegenBackend)` lookup remains only as a compatibility
+helper for baseline callers. A native entry contains the canonical signature,
+generated symbol, backend, value type, width, and exact rows/columns. The C++ registry is function-local-static and mutex
 protected, which avoids cross-translation-unit initialization-order hazards.
 Generated registration adapters expose one whole-region function:
 
@@ -1687,7 +1703,8 @@ R1 storage planning
   -> R2 legality-aware fusion
   -> R3 verified Kernel IR
   -> R4 generated scalar/AVX2 artifacts
-  -> R5 correctness-gated measurement and profile dispatch
+  -> R5 correctness-gated measurement
+  -> typed post-R5 backend calibration and profile dispatch
 ```
 
 ### Base and environment
@@ -1698,7 +1715,7 @@ The R5 work was performed in an isolated worktree and was not merged into
 | Item | Value |
 |---|---|
 | R5 base SHA | `10a29053dbc63ddc02518e572692eb783b75cb65` |
-| implementation SHA | \`76ff6c8\` |
+| implementation SHA | final checkpoint commit (`git HEAD` on this branch) |
 | branch | `feature/compiler-autotuning` |
 | worktree | `/home/james/Projects/JLC-r5` |
 | date | 2026-09-17 |
@@ -1707,15 +1724,17 @@ The R5 work was performed in an isolated worktree and was not merged into
 | ISA used | x86-64, AVX2 and FMA present |
 | OS/kernel | Linux 7.0.0-31-generic |
 | native compiler | Ubuntu GNU `c++` 15.2.0 |
-| JVM | OpenJDK 25.0.4 |
+| JVM | OpenJDK 21.0.12 |
 | generated strict flags | `-O2 -fno-fast-math -ffp-contract=off` |
 | direct benchmark flags | `-std=c++17 -O3 -fno-fast-math -ffp-contract=off -mavx2` |
 
 The exact host facts are recorded by `KernelMachineIdentity`; the build key
-also records the JLC SHA, KernelSignature/KernelVariantSignature versions,
-codegen ABI, native compiler identity, and strict floating-point flags. The
-current profile path is explicit (`jlc.compiler.autotune.profile`); normal
-matrix execution does not write a profile under the user's home directory.
+also records the JLC SHA, clean/dirty state, verified-identity flag, JLC
+version, KernelSignature/KernelVariantSignature versions, codegen ABI, Java
+compiler/runtime, native compiler family/version/vendor, and strict
+floating-point flags. The current profile path is explicit
+(`jlc.compiler.autotune.profile`); normal matrix execution does not write a
+profile under the user's home directory.
 
 ### Candidate model
 
@@ -1817,14 +1836,15 @@ execution separately from profile parsing and selector lookup.
 
 ### Calibration profile
 
-`KernelCalibrationProfile` is schema version 1 with methodology
-`r5-median-mad-v1`. It stores machine/build identity, timestamp, exact
-KernelSignature, baseline, winner, measured speedup, decision reason, every
-candidate outcome, raw samples, correctness/stability status, code-generation
-costs, compiled source size, and trusted baselines. The tuner automatically
-retains the R2 Java fused baseline (with timing supplied by the end-to-end
-harness) and the R4 scalar and fixed AVX2 evidence; callers can supply measured
-trusted-baseline samples as well.
+`KernelCalibrationProfile` keeps the R5 schema version at 1 and uses
+`dispatchSchemaVersion: 3` for typed backend decisions with explicit winner
+semantics. It stores
+machine/build identity, timestamp, exact `KernelSignature`, workload bucket,
+typed baseline and winner, measured speedup, decision reason, every backend
+candidate outcome, raw samples, correctness/stability status, and the existing
+R5 generated-variant evidence. `R2_JAVA`, scalar-native, and generated AVX2
+are represented as real `BackendChoice` values; Java is no longer an implicit
+only-at-the-end fallback in calibration data.
 
 The profile is deterministic, pretty JSON using the project's existing
 Jackson dependency. A sanitized excerpt has this shape:
@@ -1832,6 +1852,7 @@ Jackson dependency. A sanitized excerpt has this shape:
 ```json
 {
   "schemaVersion" : 1,
+  "dispatchSchemaVersion" : 3,
   "methodologyVersion" : "r5-median-mad-v1",
   "machine" : {
     "key" : "<sha256>",
@@ -1842,16 +1863,59 @@ Jackson dependency. A sanitized excerpt has this shape:
   },
   "build" : {
     "key" : "<sha256>",
+    "jlcVersion" : "1.0-SNAPSHOT",
+    "gitSha" : "<40-hex-sha>",
+    "gitDirty" : false,
+    "identityVerified" : true,
+    "kernelSignatureVersion" : "jlc-kernel-signature-v1",
+    "variantSignatureVersion" : "jlc-kernel-variant-v1",
     "codegenAbiVersion" : "jlc-r5-codegen-abi-v1",
+    "compilerIdentity" : "c++",
+    "javaCompiler" : "javac 21.0.12",
+    "javaRuntime" : "21.0.12|Ubuntu|OpenJDK 64-Bit Server VM",
+    "nativeCompilerVersion" : "c++ (GNU ...) ...",
+    "nativeVendor" : "NONE",
     "strictFlags" : "-O2,-fno-fast-math,-ffp-contract=off"
   },
   "entries" : [ {
     "kernelSha256" : "<sha256>",
+    "workloadBucket" : "64x64/ops=10",
+    "baselineChoice" : {
+      "kind" : "GENERATED_AVX2",
+      "variantId" : "baseline_avx2",
+      "variantSha256" : "<sha256>",
+      "variantSignature" : "<canonical variant signature>"
+    },
+    "selectionStatus" : "CALIBRATED",
+    "stable" : true,
+    "winnerChoice" : {
+      "kind" : "R2_JAVA"
+    },
     "baselineVariant" : "<canonical BASELINE_AVX2 signature>",
-    "winnerVariant" : "<canonical winning signature>",
+    "winnerVariant" : null,
     "winnerSpeedup" : 1.08,
     "candidates" : [ {
       "variantId" : "avx2_u8_flat",
+      "outcome" : "PASS",
+      "correctnessPassed" : true,
+      "stable" : true,
+      "medianNanos" : 880.0,
+      "madNanos" : 0.0,
+      "rawSamplesNanos" : [ 880, 881, 879 ]
+    } ],
+    "backendCandidates" : [ {
+      "choice" : { "kind" : "R2_JAVA" },
+      "outcome" : "PASS",
+      "correctnessPassed" : true,
+      "stable" : true,
+      "medianNanos" : 910.0,
+      "madNanos" : 2.0,
+      "rawSamplesNanos" : [ 908, 910, 912 ]
+    }, {
+      "choice" : { "kind" : "GENERATED_AVX2",
+        "variantId" : "avx2_u8_flat",
+        "variantSha256" : "<sha256>",
+        "variantSignature" : "<canonical variant signature>" },
       "outcome" : "PASS",
       "correctnessPassed" : true,
       "stable" : true,
@@ -1870,18 +1934,53 @@ Jackson dependency. A sanitized excerpt has this shape:
 
 The angle-bracket values in this excerpt are intentionally sanitized; the
 writer emits the full canonical signatures and full hashes. A corrupt,
-partial, schema-mismatched, machine-mismatched, build-mismatched, missing,
-unregistered, or ISA-incompatible entry is ignored and falls back safely.
+partial, old-R5-only, schema-mismatched, machine-mismatched, build-mismatched,
+missing, unregistered, or ISA-incompatible entry is ignored and falls back
+safely.
+
+#### Winner semantics
+
+`selectionStatus=CALIBRATED` is the only state with an empirical winner:
+`stable=true`, `winnerChoice` is non-null, and `winnerSpeedup` is finite and
+positive. A stable baseline may be the calibrated winner when it is the best
+correctness-gated choice within the promotion policy.
+
+`selectionStatus=NO_STABLE_WINNER` means that no correctness-gated candidate
+provided usable stability evidence. Its invariant is:
+
+```json
+{
+  "baselineChoice" : {
+    "kind" : "GENERATED_AVX2",
+    "variantId" : "baseline_avx2",
+    "variantSha256" : "<sha256>",
+    "variantSignature" : "<canonical variant signature>"
+  },
+  "winnerChoice" : null,
+  "selectionStatus" : "NO_STABLE_WINNER",
+  "stable" : false,
+  "winnerSpeedup" : 0.0,
+  "decisionReason" : "no stable correctness-gated backend; use fallback baseline"
+}
+```
+
+Runtime treats that entry as a miss and applies the normal baseline-AVX2,
+scalar-native, then R2-Java fallback hierarchy; it does not claim that the
+baseline won empirically. The dispatch schema was bumped from 2 to 3 because
+older typed profiles cannot distinguish this state from a retained calibrated
+baseline and are therefore rejected conservatively.
 
 ### Runtime selector and modes
 
-`KernelDispatchSelector` loads and validates a profile once, then caches
-resolved selections by exact KernelSignature in a concurrent map. The hot path
-does not parse JSON, compile, benchmark, or acquire a tuning lock. A profile
-hit requires an exact signature, registered variant, available ISA,
+`KernelDispatchSelector` is the single runtime authority. It loads and validates
+a profile once, captures `RuntimeEnvironment` once, and caches resolved typed
+choices by exact `KernelSignature` in a concurrent map. The hot path does not
+parse JSON, compile, benchmark, enumerate variants, or acquire a tuning lock.
+A native profile hit requires an exact signature, matching build/machine
+metadata, an exact registered variant, a loaded native runtime, available ISA,
 correctness-passed evidence, and stable evidence. The explain surface reports
-the source, selected variant, profile/machine match, median, speedup, and
-fallback reason.
+the typed choice, exact variant when present, profile/machine match, median,
+speedup, and fallback reason.
 
 The explicit operating modes are:
 
@@ -1892,12 +1991,95 @@ The explicit operating modes are:
 | `...=tune` | explicit `KernelVariantTuner` mode; compilation and measurement are caller-controlled |
 | `...=use` | load the configured profile and dispatch only to already-registered variants |
 
-Cold start selects the registered R4 `BASELINE_AVX2` when legal and supported,
-then generated scalar C++, then returns false so the existing R2 path runs.
-The runtime `CpuFusedRegionStep` only enters the tuned path for `use`; normal
-execution never starts a C++ compiler or benchmark. The end-to-end crossover
-runner keeps R2 Java as a trusted comparator, while a missing generated
-selection still reaches the R2 fallback.
+Cold start and invalid-profile behavior is an explicit hierarchy:
+
+```text
+calibrated BackendChoice
+  -> baseline AVX2, if exact artifact/native runtime/ISA are valid
+  -> scalar-native, if its exact artifact/native runtime are valid
+  -> R2 Java
+```
+
+`CpuFusedRegionStep` asks the selector for a typed choice in `use` mode. A
+calibrated native choice is passed directly to `GeneratedKernelExecutor`, so
+there is no second R5 variant selection. A Java choice continues through the
+existing R2 fused fast/generic implementation. Native execution exceptions are
+not silently classified as calibration misses; only established availability
+misses return to the Java path. Ordinary execution never starts a compiler or
+benchmark.
+
+### Post-R5 production backend integration
+
+This is a narrow post-M4/R5 runtime integration, not a new compiler milestone
+and not R6. The type boundaries are:
+
+```text
+KernelSignature          semantic kernel/workload identity
+KernelVariantSignature   one generated implementation identity
+BackendChoice            runtime execution decision
+  R2JavaBackend()
+  ScalarNativeBackend(variant)
+  GeneratedAvx2Backend(variant)
+```
+
+`BackendCalibrationRunner` reuses R5's median/MAD policy but times a
+`BackendInvocation` for the complete execution boundary. The CLI task
+`bash gradlew calibrateBackends` discovers exact-shape workloads, emits and
+builds temporary registry-backed sources, correctness-gates native choices,
+times R2 Java and JNI calls with the same warmup/sample policy, and atomically
+merges the result at `jlc.compiler.autotune.profile` (or the explicit
+`--profile` path). The profile keeps unrelated exact kernels when metadata
+matches; incompatible old profiles are deliberately not migrated.
+
+The JNI crossover is therefore a selector input rather than a detached
+benchmark claim: small workloads may select Java or scalar-native, while a
+larger workload may select a particular AVX2 variant. No compiler pass chooses
+hardware, and no CUDA, AVX-512, JIT, or dynamic recompilation is added.
+
+### Public numerical algorithm status
+
+The CPU checkpoint distinguishes an implemented and validated path from a
+claim of vendor-library competitiveness:
+
+| algorithm | Java implementation | native implementation | production dispatch | fallback | validation status | known performance limitation |
+|---|---|---|---|---|---|---|
+| GEMM | canonical `Gemm` facade and Java kernels | built-in C++/JNI GEMM, including guarded layouts | backend registry plus algorithm policy; native provider is optional | Java GEMM | Java/native correctness and JNI integration coverage | 2048² FP64 control measured 89.3% of same-host AOCL-BLIS; not a universal parity claim |
+| SVD | Golub–Kahan QR and divide-and-conquer Java solvers | optional guarded native bidiagonal stage; remaining SVD stages are Java | sensitivity-critical policy defaults to Java until calibrated or explicitly selected | Java SVD | SVD reconstruction, orthogonality, rank-deficient, and edge-case tests | no claim of vendor-LAPACK throughput; full SVD remains primarily Java |
+| QR | Householder QR, thin/full and factorization-only modes | C++/JNI QR paths with shape/mode guards | calibrated policy and conservative cold-start rules | Java QR | QR reconstruction/orthogonality and native phase tests | tall thin/full cold-start paths stay Java; coverage is guarded rather than universal |
+| Hessenberg | Java Householder reduction | optional C++/JNI reduction/decomposition for validated square sizes | algorithm policy, including Schur/SVD stage overrides | Java Hessenberg | Hessenberg and native decomposition integration tests | native size/shape coverage is bounded; no vendor-competitive claim |
+| Schur | implicit Francis double-shift QR | no separate native Schur iteration; may use native Hessenberg stage when explicitly/calibrated | sensitivity-critical policy defaults to Java | Java Schur | Schur reconstruction/eigenvalue tests | the iterative Schur stage remains Java and is not benchmarked as a vendor replacement |
+| eigenvalue path | symmetric eigen decomposition through real Schur | may inherit an allowed native Hessenberg stage through Schur | same conservative Schur policy | Java Schur/eigen path | symmetric eigenvalue/eigenvector and spectral tests | no general native eigensolver or vendor-performance claim |
+
+This table is a runtime-status statement. It does not promote an algorithm to
+the generated Kernel IR path merely because a lower-level native helper exists.
+
+A fresh three-bucket calibration on the local AMD Ryzen 9 3950X used two
+warmups and seven measured samples. Each row is a complete R2 Java or JNI
+region invocation. The value in parentheses is MAD in nanoseconds; `stable`
+means relative MAD ≤ 0.10. Noisy candidates remain in the JSON evidence but
+are not promoted.
+
+| workload | R2 Java median (MAD; stable) ns | scalar-native median (MAD; stable) ns | best stable AVX2 median (MAD; stable) ns | persisted winner |
+|---|---:|---:|---:|---|
+| 1x1 / 2 ops | 72,650 (9,650; no) | 50,720 (5,169; no) | 34,100 (3,050; yes; `avx2_u8_flat`) | `NO_STABLE_WINNER` |
+| 16x16 / 2 ops | 224,700 (11,241; yes) | 49,780 (6,370; no) | 32,350 (930; yes; `baseline_avx2`) | `CALIBRATED:GENERATED_AVX2(baseline_avx2)` |
+| 64x64 / 2 ops | 278,871 (30,120; no) | 30,140 (640; yes) | 24,310 (1,500; yes; `baseline_avx2`) | `CALIBRATED:GENERATED_AVX2(baseline_avx2)` |
+
+The run reports all peers and does not hard-code backend diversity. At 1×1,
+the trusted AVX2 baseline was noisy, so the profile intentionally records no
+empirical winner even though another AVX2 candidate was stable. At 16×16 and
+64×64 the AVX2 baseline is retained as a stable calibrated winner. The profile
+records exact variant signatures, all raw samples, and losing/noisy evidence at
+`build/profiles/cpu-checkpoint-avx-enabled.json` in the local evidence bundle.
+
+With the runtime AVX2 gate disabled, the 1×1 smoke calibration omitted all
+AVX2 candidates and recorded Java at 85,641 ns (MAD 8,141; stable) and
+scalar-native at 44,950 ns (MAD 4,030; stable). It persisted
+`CALIBRATED:SCALAR_NATIVE(scalar_cpp_nested)` with `baselineChoice` set to the
+scalar choice. This verifies the no-AVX2 path; the separate focused test
+`noStableWinnerRoundTripsWithoutReconstructingBaselineAsWinner` demonstrates
+that a profile with no stable peer instead persists `NO_STABLE_WINNER` and a
+null `winnerChoice`.
 
 ### AVX2 unroll experiment
 
@@ -2031,10 +2213,10 @@ The negative evidence is retained instead of only reporting the fastest row:
 
 ### Regression evidence
 
-The focused R4/R5 suite passed, including `R4CodegenTest`,
+The focused R4/R5/post-R5 suite passed, including `R4CodegenTest`,
 `R4GeneratedNativeExecutionTest`, `R5AutotuningTest`, native variant
 coexistence, the direct-native benchmark, and the opt-in JNI crossover
-harness. A full `bash gradlew test` run executed 511 tests with five skips and
+harness. A full `bash gradlew test` run executed 519 tests with five skips and
 two failures. Both failures reproduce on the clean R4 base
 `feature/compiler-generated-simd` at `10a2905`: the environment-sensitive
 `AlgorithmDispatchTest.coldStartAllowsCppOnlyForFoundationAlgorithmsAboveThreshold`
@@ -2083,7 +2265,8 @@ directory during normal execution.
 14. **How is parsing kept out of the hot path?** The selector loads once and
     caches resolved exact-signature selections.
 15. **What is lookup overhead?** `measureLookupNanos` exists on the selector;
-    the focused cache probe measured 141 ns per cached lookup in this JVM run.
+    the final full-suite probe reported a microsecond-scale cached lookup in this
+    JVM run; this is a diagnostic, host-sensitive measurement.
     Lookup is an in-memory map operation and never benchmarks a kernel; the
     crossover report keeps it separate from kernel timing.
 16. **What is the Java/native JNI crossover?** In this sample, native is
@@ -2107,31 +2290,28 @@ directory during normal execution.
 24. **What justifies future family heuristics?** Repeated wins across 64, 128,
     256, 512, and 1024 shapes for the same graph, with stable margins and
     end-to-end JNI evidence, would justify an analysis-only family study.
-25. **What comes next?** A controlled calibration CLI/task can add profile
-    entries, assembly/perf evidence, layout-aware tiling, and a typed option
-    for choosing R2 fallback versus a generated variant.
+25. **What is the production integration?** `BackendChoice` and
+    `KernelDispatchSelector` make R2 Java, scalar-native, and exact generated
+    AVX2 variants peers; `calibrateBackends` records the comparable evidence.
 
 ### Remaining weaknesses
 
-The honest R5 boundaries are exact-shape profiles, AVX2-only vector code,
-finite candidate space, no thread-count tuning, no production runtime JIT,
-limited layout-aware scheduling, no GPU/distributed tuning, no mixed
-precision, no optional perf counters, and no assembly-backed spill diagnosis.
-The JNI crossover harness measures the three backends end-to-end but the
-current profile winner type is a generated `KernelVariantSignature`; R2
-remains the safe fallback rather than being encoded as a generated variant.
-This preserves the R2/R4 cold-start path while leaving a clear follow-up for a
-typed multi-backend dispatch choice.
+The honest post-R5 boundaries are exact-shape profiles, AVX2-only generated
+native code, finite candidate space, no thread-count tuning, no production
+runtime JIT, limited layout-aware scheduling, no GPU/distributed tuning, no
+mixed precision, no optional perf counters, and no assembly-backed spill
+diagnosis. These are explicit non-goals of this integration; the typed choice
+boundary is ready for later backends without changing semantic signatures.
 
 ### Definition-of-done mapping
 
-R5 now has multiple registered variants per semantic kernel, deterministic
+R5 retains multiple registered variants per semantic kernel, deterministic
 bounded generation, structural pruning, correctness-before-timing, repeated
 median/min/max/MAD statistics, explicit noise and promotion policies, losing
-candidate evidence, machine/build/schema-validated JSON persistence, cached
-runtime profile selection, conservative cold start, strict non-FMA semantics,
-u1/u2/u4/u8 experiments, arithmetic-intensity and pressure analysis, and
-end-to-end JNI crossover evidence. The opt-in native tests prove variant
-coexistence and exact invocation; ordinary execution remains R2-safe and does
-not compile or benchmark. The final commit records the implementation SHA
-against this R5 base, and `main` remains untouched.
+candidate evidence, and strict non-FMA semantics. The post-R5 integration adds
+typed `BackendChoice` persistence, comparable end-to-end Java/JNI calibration,
+cached exact-choice dispatch, atomic profile updates, and the
+baseline-AVX2-to-scalar-to-R2-Java fallback. The opt-in native tests prove
+variant coexistence and exact invocation; ordinary execution remains R2-safe
+and does not compile or benchmark. This remains outside the M1–M4 milestone
+path and does not begin R6.

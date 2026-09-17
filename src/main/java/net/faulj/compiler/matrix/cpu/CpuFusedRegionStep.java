@@ -20,8 +20,14 @@ import net.faulj.compiler.matrix.kernel.KernelLowerer;
 import net.faulj.compiler.matrix.kernel.KernelLoweringResult;
 import net.faulj.compiler.matrix.kernel.KernelReferenceExecutor;
 import net.faulj.compiler.matrix.codegen.GeneratedKernelExecutor;
+import net.faulj.compiler.matrix.codegen.BackendChoice;
+import net.faulj.compiler.matrix.codegen.GeneratedAvx2Backend;
 import net.faulj.compiler.matrix.codegen.KernelAutotuneMode;
 import net.faulj.compiler.matrix.codegen.KernelBackendMode;
+import net.faulj.compiler.matrix.codegen.KernelDispatchSelector;
+import net.faulj.compiler.matrix.codegen.R2JavaBackend;
+import net.faulj.compiler.matrix.codegen.ScalarNativeBackend;
+import net.faulj.compiler.matrix.codegen.KernelVariantSignature;
 import net.faulj.compiler.matrix.codegen.PseudokernelPlan;
 import net.faulj.compiler.matrix.codegen.PseudokernelPlanner;
 import net.faulj.matrix.Matrix;
@@ -41,7 +47,8 @@ public final class CpuFusedRegionStep implements CpuStep {
         KERNEL_IR_REFERENCE,
         GENERATED_SCALAR_CPP,
         GENERATED_AVX2,
-        GENERATED_TUNED
+        GENERATED_TUNED,
+        R2_JAVA
     }
 
     private final int id;
@@ -55,6 +62,7 @@ public final class CpuFusedRegionStep implements CpuStep {
     private final KernelLoweringResult kernelLowering;
     private final PseudokernelPlan pseudokernelPlan;
     private volatile ExecutionPath lastExecutionPath;
+    private volatile BackendChoice lastBackendChoice;
 
     CpuFusedRegionStep(int id, FusedRegionPlan regionPlan) {
         if (id < 0) {
@@ -121,6 +129,11 @@ public final class CpuFusedRegionStep implements CpuStep {
         return lastExecutionPath;
     }
 
+    /** The typed backend used by the last execution, when one was selected. */
+    public BackendChoice lastBackendChoice() {
+        return lastBackendChoice;
+    }
+
     public KernelIrMode kernelIrMode() {
         return kernelIrMode;
     }
@@ -157,6 +170,7 @@ public final class CpuFusedRegionStep implements CpuStep {
     }
 
     void execute(CpuExecutionContext context) {
+        lastBackendChoice = null;
         Matrix output = context.allocate(outputBuffer());
         Matrix[] leaves = new Matrix[inputBuffers.size()];
         boolean allRealDense = output.getClass() == Matrix.class
@@ -173,6 +187,7 @@ public final class CpuFusedRegionStep implements CpuStep {
 
         if (kernelIrMode == KernelIrMode.EXECUTE
             && !kernelBackendMode.isGenerated()
+            && !kernelAutotuneMode.usesProfile()
             && kernelLowering != null
             && kernelLowering.eligibility() == KernelEligibility.ELIGIBLE
             && kernelLowering.verified()
@@ -185,6 +200,8 @@ public final class CpuFusedRegionStep implements CpuStep {
             return;
         }
 
+        BackendChoice selectedBackend = null;
+        boolean profileSelectedJava = false;
         if (kernelAutotuneMode.usesProfile()
             && !kernelBackendMode.isGenerated()
             && kernelLowering != null
@@ -194,9 +211,19 @@ public final class CpuFusedRegionStep implements CpuStep {
             KernelBinding binding = KernelBinding.fromLogicalBuffers(
                 kernelLowering.program().function(), context.values(),
                 context.physicalMemoryPlan());
-            if (GeneratedKernelExecutor.tryExecuteTuned(kernelLowering, binding)) {
+            selectedBackend = KernelDispatchSelector.global().selectChoice(pseudokernelPlan.signature());
+            if (selectedBackend instanceof R2JavaBackend) {
+                profileSelectedJava = true;
+            } else if (GeneratedKernelExecutor.tryExecuteChoice(
+                kernelLowering, binding, selectedBackend, pseudokernelPlan)) {
+                lastBackendChoice = selectedBackend;
                 lastExecutionPath = ExecutionPath.GENERATED_TUNED;
                 return;
+            } else {
+                // A selected native artifact can disappear between profile
+                // resolution and invocation; finish this execution through
+                // the explicit Java peer.
+                profileSelectedJava = true;
             }
         }
 
@@ -208,7 +235,14 @@ public final class CpuFusedRegionStep implements CpuStep {
             KernelBinding binding = KernelBinding.fromLogicalBuffers(
                 kernelLowering.program().function(), context.values(),
                 context.physicalMemoryPlan());
-            if (GeneratedKernelExecutor.tryExecute(kernelLowering, binding, kernelBackendMode)) {
+            BackendChoice explicitChoice = kernelBackendMode == KernelBackendMode.AVX2
+                ? new GeneratedAvx2Backend(KernelVariantSignature.baselineAvx2(
+                    pseudokernelPlan.signature()))
+                : new ScalarNativeBackend(KernelVariantSignature.legacyScalar(
+                    pseudokernelPlan.signature()));
+            if (GeneratedKernelExecutor.tryExecuteChoice(
+                kernelLowering, binding, explicitChoice, pseudokernelPlan)) {
+                lastBackendChoice = explicitChoice;
                 lastExecutionPath = kernelBackendMode == KernelBackendMode.AVX2
                     ? ExecutionPath.GENERATED_AVX2 : ExecutionPath.GENERATED_SCALAR_CPP;
                 return;
@@ -217,11 +251,18 @@ public final class CpuFusedRegionStep implements CpuStep {
 
         if (allRealDense && fastProgram != null) {
             fastProgram.execute(output, leaves);
-            lastExecutionPath = ExecutionPath.FAST_REAL_DENSE;
+            lastBackendChoice = new R2JavaBackend();
+            lastExecutionPath = profileSelectedJava
+                ? ExecutionPath.R2_JAVA : ExecutionPath.FAST_REAL_DENSE;
             return;
         }
 
-        lastExecutionPath = ExecutionPath.GENERIC_SCHEDULE;
+        lastBackendChoice = new R2JavaBackend();
+        if (profileSelectedJava) {
+            lastExecutionPath = ExecutionPath.R2_JAVA;
+        } else {
+            lastExecutionPath = ExecutionPath.GENERIC_SCHEDULE;
+        }
         boolean complex = false;
         for (Matrix leaf : leaves) {
             complex |= leaf.hasImagData();

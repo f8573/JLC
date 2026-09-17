@@ -21,6 +21,42 @@ Live site: https://lambdacompute.org/
 - `JNI_CPP_LIBRARY_PROPOSAL.md`: proposed JNI-loaded C++ compute backend design
 - `frontend`: React + Vite client for matrix input, analysis views, decompositions, spectral reports, favorites/history, and settings
 
+## Current CPU/compiler/runtime scope
+
+The current checkpoint is the CPU-focused compiler and numerical runtime:
+
+```text
+MatrixExpr
+  -> M1 graph optimization
+  -> M2 affine/dependence IR
+  -> M3 legality-aware scheduling
+  -> M4 CPU lowering
+  -> R1 physical buffer planning
+  -> R2 generalized fusion
+  -> R3 verified Kernel IR
+  -> R4 scalar/AVX2 code generation
+  -> R5 empirical candidate tuning
+  -> typed backend calibration
+  -> KernelDispatchSelector
+       |-> R2 Java
+       |-> scalar native
+       `-> generated AVX2
+```
+
+The runtime combines Java numerical implementations, optimized native algorithms,
+JNI/native registry execution, correctness-gated generated kernels, and a
+correctness-preserving Java fallback. M4 is the terminal matrix-compiler
+milestone; R1–R5 are post-M4 research, and typed backend dispatch is the
+production integration pass. There is no R6 in this checkpoint.
+
+The public design and evidence are documented in
+[`docs/COMPILER_RUNTIME_RESEARCH.md`](docs/COMPILER_RUNTIME_RESEARCH.md) and
+[`docs/MATRIX_COMPILER.md`](docs/MATRIX_COMPILER.md).
+
+Future work is intentionally outside this CPU checkpoint: CUDA/GPU execution,
+AVX-512, heterogeneous CPU/GPU placement, broader shape-family calibration,
+thread-count tuning, mixed precision, and runtime JIT.
+
 ## Primary use cases
 
 - Run matrix diagnostics from raw matrix input

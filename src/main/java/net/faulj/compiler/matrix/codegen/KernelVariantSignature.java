@@ -4,7 +4,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 
 import net.faulj.compiler.matrix.OptimizationSemantics;
@@ -74,6 +76,63 @@ public final class KernelVariantSignature implements Comparable<KernelVariantSig
     /** Compatibility identity for the original R4 scalar source shape. */
     public static KernelVariantSignature legacyScalar(KernelSignature signature) {
         return scalar(signature, KernelLoopForm.NESTED);
+    }
+
+    /**
+     * Parse and validate the exact canonical identity persisted by R5.
+     * Unknown, duplicated, missing, or contradictory fields are rejected.
+     */
+    public static KernelVariantSignature fromCanonicalText(KernelSignature signature,
+                                                            String canonicalText) {
+        Objects.requireNonNull(signature, "Kernel signature");
+        if (canonicalText == null || canonicalText.isBlank()) {
+            throw new IllegalArgumentException("Kernel variant signature text is empty");
+        }
+        String[] lines = canonicalText.split("\\n", -1);
+        if (lines.length == 0 || !("jlc-kernel-variant-v" + CURRENT_VERSION).equals(lines[0])) {
+            throw new IllegalArgumentException("Unsupported kernel variant signature version");
+        }
+        Map<String, String> fields = new HashMap<>();
+        for (int index = 1; index < lines.length; index++) {
+            String line = lines[index];
+            if (line.isEmpty()) {
+                if (index != lines.length - 1) {
+                    throw new IllegalArgumentException("Blank field in kernel variant signature");
+                }
+                continue;
+            }
+            int separator = line.indexOf('=');
+            if (separator <= 0) {
+                throw new IllegalArgumentException("Malformed kernel variant field: " + line);
+            }
+            String key = line.substring(0, separator);
+            String value = line.substring(separator + 1);
+            if (fields.putIfAbsent(key, value) != null) {
+                throw new IllegalArgumentException("Duplicate kernel variant field: " + key);
+            }
+        }
+        requireField(fields, "kernel-sha256", signature.sha256());
+        requireField(fields, "kernel-canonical-sha256", signature.sha256());
+        CodegenBackend backend = enumValue(fields, "backend", CodegenBackend.class);
+        String isa = requiredField(fields, "isa");
+        int vectorWidth = integerField(fields, "vector-width");
+        int unroll = integerField(fields, "unroll");
+        KernelLoopForm loopForm = enumValue(fields, "loop-form", KernelLoopForm.class);
+        KernelTailPolicy tailPolicy = enumValue(fields, "tail-policy", KernelTailPolicy.class);
+        OptimizationSemantics semantics = enumValue(fields, "semantics", OptimizationSemantics.class);
+        FmaContraction fma = enumValue(fields, "fma-contraction", FmaContraction.class);
+        KernelVariantSignature parsed = new KernelVariantSignature(
+            signature, backend, isa, vectorWidth, unroll, loopForm, tailPolicy, semantics, fma);
+        if (!parsed.canonicalText().equals(canonicalText)) {
+            throw new IllegalArgumentException("Kernel variant canonical text is not normalized");
+        }
+        return parsed;
+    }
+
+    /** Alias for callers that use parser terminology. */
+    public static KernelVariantSignature parse(KernelSignature signature,
+                                                String canonicalText) {
+        return fromCanonicalText(signature, canonicalText);
     }
 
     public KernelSignature kernelSignature() {
@@ -239,6 +298,40 @@ public final class KernelVariantSignature implements Comparable<KernelVariantSig
             throw new IllegalArgumentException(label + " must not be blank");
         }
         return value.trim();
+    }
+
+    private static String requiredField(Map<String, String> fields, String key) {
+        String value = fields.get(key);
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException("Missing kernel variant field: " + key);
+        }
+        return value;
+    }
+
+    private static void requireField(Map<String, String> fields, String key, String expected) {
+        String actual = requiredField(fields, key);
+        if (!expected.equals(actual)) {
+            throw new IllegalArgumentException("Kernel variant " + key + " does not match kernel");
+        }
+    }
+
+    private static int integerField(Map<String, String> fields, String key) {
+        try {
+            return Integer.parseInt(requiredField(fields, key));
+        } catch (NumberFormatException failure) {
+            throw new IllegalArgumentException("Invalid integer kernel variant field: " + key,
+                failure);
+        }
+    }
+
+    private static <T extends Enum<T>> T enumValue(Map<String, String> fields,
+                                                   String key,
+                                                   Class<T> type) {
+        try {
+            return Enum.valueOf(type, requiredField(fields, key));
+        } catch (IllegalArgumentException failure) {
+            throw new IllegalArgumentException("Invalid kernel variant field: " + key, failure);
+        }
     }
 
     private static String sha256(String value) {

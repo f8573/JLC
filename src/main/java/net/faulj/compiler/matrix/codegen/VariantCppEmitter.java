@@ -62,6 +62,7 @@ final class VariantCppEmitter {
             .append("// kernel-signature-sha256=").append(plan.signature().sha256()).append('\n')
             .append("// variant-sha256=").append(variant.sha256()).append('\n')
             .append("// variant=").append(variant.variantId()).append('\n')
+            .append("// variant-backend=").append(variant.backend().name()).append('\n')
             .append("// provenance=").append(CppEmitterSupport.escape(options.sourceProvenance()))
                 .append("\n")
             .append("#include <cstddef>\n#include <cmath>\n#include <limits>\n");

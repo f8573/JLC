@@ -138,23 +138,22 @@ public final class KernelVariantTuner {
                     -> item.variantSignature().variantId()))
             .orElse(null);
 
-        KernelVariantSignature winner = baseline;
-        double speedup = 1.0;
+        KernelVariantSignature winner = null;
+        double speedup = 0.0;
         String reason;
         if (fastest == null) {
-            reason = "no correctness-passing stable candidate; trusted baseline fallback";
+            reason = "no correctness-passing stable candidate; use fallback baseline";
         } else if (baselineEvidence == null
             || baselineEvidence.outcome() != KernelCandidateOutcome.PASS
             || baselineEvidence.statistics() == null) {
-            reason = "trusted baseline was not stable; retained trusted baseline";
-            speedup = 1.0;
+            reason = "trusted baseline was not stable; use fallback baseline";
         } else {
             double baselineMedian = baselineEvidence.statistics().medianNanos();
             speedup = baselineMedian / fastest.statistics().medianNanos();
             if (!Double.isFinite(speedup) || speedup < 1.0 + config.promotionThreshold()) {
                 winner = baseline;
                 speedup = 1.0;
-                reason = "no stable candidate exceeded promotion threshold";
+                reason = "baseline retained after stable end-to-end calibration";
             } else {
                 winner = fastest.variantSignature();
                 reason = "lowest stable median exceeded promotion threshold";

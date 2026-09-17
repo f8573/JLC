@@ -12,19 +12,24 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 
 /**
- * Human-inspectable machine/build-specific R5 evidence profile.
+ * Human-inspectable machine/build-specific backend calibration profile.
  *
- * <p>The profile is evidence, not just a winner cache: pruned, failed, noisy,
- * and losing candidates remain serialized with raw samples where available.</p>
+ * <p>The R5 schema remains visible for review and compatibility, while the
+ * dispatch schema adds a typed {@code KernelSignature -> BackendChoice} record
+ * and comparable evidence for Java, scalar-native, and generated AVX2 paths.
+ * Old R5-only JSON is deliberately rejected by compatibility checks.</p>
  */
 public final class KernelCalibrationProfile {
     public static final int CURRENT_SCHEMA_VERSION = 1;
+    /** Version 3 makes the explicit calibrated/no-stable winner invariant part of the wire contract. */
+    public static final int CURRENT_DISPATCH_SCHEMA_VERSION = 3;
     public static final String METHODOLOGY_VERSION = "r5-median-mad-v1";
 
     private static final ObjectMapper MAPPER = new ObjectMapper()
         .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
 
     private final int schemaVersion;
+    private final int dispatchSchemaVersion;
     private final KernelMachineIdentity machine;
     private final KernelBuildIdentity build;
     private final String timestamp;
@@ -36,16 +41,19 @@ public final class KernelCalibrationProfile {
                                     String timestamp,
                                     String methodologyVersion,
                                     List<KernelCalibrationEntry> entries) {
-        this(CURRENT_SCHEMA_VERSION, machine, build, timestamp, methodologyVersion, entries);
+        this(CURRENT_SCHEMA_VERSION, CURRENT_DISPATCH_SCHEMA_VERSION, machine, build,
+            timestamp, methodologyVersion, entries);
     }
 
     private KernelCalibrationProfile(int schemaVersion,
+                                     int dispatchSchemaVersion,
                                      KernelMachineIdentity machine,
                                      KernelBuildIdentity build,
                                      String timestamp,
                                      String methodologyVersion,
                                      List<KernelCalibrationEntry> entries) {
         this.schemaVersion = schemaVersion;
+        this.dispatchSchemaVersion = dispatchSchemaVersion;
         this.machine = machine;
         this.build = build;
         this.timestamp = timestamp == null ? "" : timestamp;
@@ -65,7 +73,48 @@ public final class KernelCalibrationProfile {
             List.of(KernelCalibrationEntry.from(result)));
     }
 
+    public static KernelCalibrationProfile fromBackendResult(KernelMachineIdentity machine,
+                                                             KernelBuildIdentity build,
+                                                             BackendCalibrationResult result) {
+        if (machine == null || build == null || result == null) {
+            throw new IllegalArgumentException("Machine, build, and backend result are required");
+        }
+        return new KernelCalibrationProfile(machine, build,
+            java.time.Instant.now().toString(), METHODOLOGY_VERSION,
+            List.of(KernelCalibrationEntry.from(result)));
+    }
+
+    /** Replace one exact signature/bucket while retaining every unrelated entry. */
+    public KernelCalibrationProfile merge(BackendCalibrationResult result) {
+        if (result == null) throw new IllegalArgumentException("Backend result is required");
+        KernelCalibrationEntry replacement = KernelCalibrationEntry.from(result);
+        List<KernelCalibrationEntry> merged = new ArrayList<>();
+        boolean replaced = false;
+        for (KernelCalibrationEntry entry : entries) {
+            if (entry.kernelSha256().equals(replacement.kernelSha256())
+                && entry.kernelSignature().equals(replacement.kernelSignature())
+                && entry.workloadBucket().equals(replacement.workloadBucket())) {
+                if (!replaced) {
+                    merged.add(replacement);
+                    replaced = true;
+                }
+            } else {
+                merged.add(entry);
+            }
+        }
+        if (!replaced) merged.add(replacement);
+        return new KernelCalibrationProfile(CURRENT_SCHEMA_VERSION,
+            CURRENT_DISPATCH_SCHEMA_VERSION, machine, build,
+            java.time.Instant.now().toString(), methodologyVersion, merged);
+    }
+
+    /** Alias emphasizing that this operation is an update, not a new profile. */
+    public KernelCalibrationProfile withBackendResult(BackendCalibrationResult result) {
+        return merge(result);
+    }
+
     public int schemaVersion() { return schemaVersion; }
+    public int dispatchSchemaVersion() { return dispatchSchemaVersion; }
     public KernelMachineIdentity machine() { return machine; }
     public KernelBuildIdentity build() { return build; }
     public String machineKey() { return machine == null ? "" : machine.key(); }
@@ -80,14 +129,33 @@ public final class KernelCalibrationProfile {
             && signature.canonicalText().equals(entry.kernelSignature())).findFirst();
     }
 
+    public Optional<KernelCalibrationEntry> entry(KernelSignature signature,
+                                                  String workloadBucket) {
+        if (signature == null) return Optional.empty();
+        String bucket = workloadBucket == null ? "exact" : workloadBucket;
+        return entries.stream().filter(entry -> signature.sha256().equals(entry.kernelSha256())
+            && signature.canonicalText().equals(entry.kernelSignature())
+            && bucket.equals(entry.workloadBucket())).findFirst();
+    }
+
     public String compatibilityReason(KernelMachineIdentity currentMachine,
                                       KernelBuildIdentity currentBuild,
                                       KernelSignature signature) {
         if (schemaVersion != CURRENT_SCHEMA_VERSION) return "schema version mismatch";
+        if (dispatchSchemaVersion != CURRENT_DISPATCH_SCHEMA_VERSION) {
+            return "dispatch schema version mismatch";
+        }
+        if (!METHODOLOGY_VERSION.equals(methodologyVersion)) {
+            return "methodology version mismatch";
+        }
+        if (build == null || !build.identityVerified() || build.gitDirty()
+            || currentBuild == null || !currentBuild.identityVerified() || currentBuild.gitDirty()) {
+            return "build identity unverified";
+        }
         if (machine == null || currentMachine == null || !machine.key().equals(currentMachine.key())) {
             return "machine mismatch";
         }
-        if (build == null || currentBuild == null || !build.key().equals(currentBuild.key())) {
+        if (!build.key().equals(currentBuild.key())) {
             return "build mismatch";
         }
         if (entry(signature).isEmpty()) return "kernel signature missing";
@@ -116,6 +184,7 @@ public final class KernelCalibrationProfile {
         try {
             JsonNode root = MAPPER.readTree(json);
             int schema = integer(root, "schemaVersion", -1);
+            int dispatchSchema = integer(root, "dispatchSchemaVersion", -1);
             KernelMachineIdentity machine = machine(root.path("machine"));
             KernelBuildIdentity build = build(root.path("build"));
             List<KernelCalibrationEntry> entries = new ArrayList<>();
@@ -124,6 +193,12 @@ public final class KernelCalibrationProfile {
                 throw new IllegalArgumentException("entries must be an array");
             }
             for (JsonNode entry : entryArray) {
+                String kernelSha = text(entry, "kernelSha256", "");
+                String kernelText = text(entry, "kernelSignature", "");
+                KernelSignature signature = KernelSignature.fromCanonicalText(kernelText);
+                if (!signature.sha256().equals(kernelSha)) {
+                    throw new IllegalArgumentException("Kernel signature digest mismatch");
+                }
                 List<KernelCalibrationCandidate> candidates = new ArrayList<>();
                 JsonNode candidateArray = entry.path("candidates");
                 if (candidateArray.isArray()) {
@@ -132,13 +207,30 @@ public final class KernelCalibrationProfile {
                     }
                 }
                 List<KernelTrustedBaseline> baselines = baselines(entry.path("trustedBaselines"));
-                entries.add(new KernelCalibrationEntry(
-                    text(entry, "kernelSha256", ""), text(entry, "kernelSignature", ""),
+                BackendChoice baselineChoice = choice(entry.get("baselineChoice"), signature);
+                BackendChoice winnerChoice = choice(entry.get("winnerChoice"), signature);
+                BackendSelectionStatus selectionStatus = selectionStatus(entry, winnerChoice);
+                if (!entry.has("baselineChoice")) {
+                    baselineChoice = legacyChoice(signature, text(entry, "baselineVariant", ""));
+                }
+                if (!entry.has("winnerChoice")
+                    && selectionStatus != BackendSelectionStatus.NO_STABLE_WINNER) {
+                    winnerChoice = legacyChoice(signature, nullableText(entry, "winnerVariant"));
+                }
+                List<BackendCandidateEvidence> backendCandidates = backendCandidates(
+                    entry.path("backendCandidates"), signature);
+                double winnerSpeedup = decimal(entry, "winnerSpeedup",
+                    selectionStatus == BackendSelectionStatus.NO_STABLE_WINNER ? 0.0 : 1.0);
+                boolean stable = entry.has("stable")
+                    ? entry.path("stable").asBoolean(false)
+                    : selectionStatus == BackendSelectionStatus.CALIBRATED;
+                entries.add(KernelCalibrationEntry.persisted(
+                    kernelSha, kernelText, text(entry, "workloadBucket", "exact"),
                     text(entry, "baselineVariant", ""), nullableText(entry, "winnerVariant"),
-                    decimal(entry, "winnerSpeedup", 1.0),
-                    text(entry, "decisionReason", ""), candidates, baselines));
+                    winnerSpeedup, text(entry, "decisionReason", ""), candidates, baselines,
+                    baselineChoice, winnerChoice, backendCandidates, selectionStatus, stable));
             }
-            return new KernelCalibrationProfile(schema, machine, build,
+            return new KernelCalibrationProfile(schema, dispatchSchema, machine, build,
                 text(root, "timestamp", ""), text(root, "methodologyVersion", ""), entries);
         } catch (IOException | RuntimeException failure) {
             throw new IllegalArgumentException("Invalid calibration profile", failure);
@@ -148,6 +240,7 @@ public final class KernelCalibrationProfile {
     private Map<String, Object> toMap() {
         Map<String, Object> root = new LinkedHashMap<>();
         root.put("schemaVersion", schemaVersion);
+        root.put("dispatchSchemaVersion", dispatchSchemaVersion);
         root.put("timestamp", timestamp);
         root.put("methodologyVersion", methodologyVersion);
         root.put("machine", machineMap(machine));
@@ -184,6 +277,12 @@ public final class KernelCalibrationProfile {
         map.put("codegenAbiVersion", build.codegenAbiVersion());
         map.put("compilerIdentity", build.compilerIdentity());
         map.put("strictFlags", build.strictFlags());
+        map.put("gitDirty", build.gitDirty());
+        map.put("identityVerified", build.identityVerified());
+        map.put("javaCompiler", build.javaCompiler());
+        map.put("javaRuntime", build.javaRuntime());
+        map.put("nativeCompilerVersion", build.nativeCompilerVersion());
+        map.put("nativeVendor", build.nativeVendor());
         return map;
     }
 
@@ -191,13 +290,40 @@ public final class KernelCalibrationProfile {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("kernelSha256", entry.kernelSha256());
         map.put("kernelSignature", entry.kernelSignature());
+        map.put("workloadBucket", entry.workloadBucket());
+        map.put("baselineChoice", entry.baselineChoice() == null
+            ? null : BackendChoiceCodec.toMap(entry.baselineChoice()));
+        map.put("winnerChoice", entry.winnerChoice() == null
+            ? null : BackendChoiceCodec.toMap(entry.winnerChoice()));
+        map.put("selectionStatus", entry.selectionStatus().name());
+        map.put("stable", entry.stable());
         map.put("baselineVariant", entry.baselineVariant());
         map.put("winnerVariant", entry.winnerVariant());
         map.put("winnerSpeedup", entry.winnerSpeedup());
         map.put("decisionReason", entry.decisionReason());
-        map.put("candidates", entry.candidates().stream().map(KernelCalibrationProfile::candidateMap).toList());
+        map.put("backendCandidates", entry.backendCandidates().stream()
+            .map(KernelCalibrationProfile::backendCandidateMap).toList());
+        map.put("candidates", entry.candidates().stream()
+            .map(KernelCalibrationProfile::candidateMap).toList());
         map.put("trustedBaselines", entry.trustedBaselines().stream()
             .map(KernelCalibrationProfile::baselineMap).toList());
+        return map;
+    }
+
+    private static Map<String, Object> backendCandidateMap(BackendCandidateEvidence candidate) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("choice", BackendChoiceCodec.toMap(candidate.choice()));
+        map.put("outcome", candidate.outcome().name());
+        map.put("correctnessPassed", candidate.correctnessPassed());
+        map.put("stable", candidate.stable());
+        map.put("reason", candidate.reason());
+        map.put("benchmarkNanos", candidate.benchmarkNanos());
+        KernelBenchmarkStatistics stats = candidate.statistics();
+        map.put("medianNanos", stats == null ? null : stats.medianNanos());
+        map.put("minNanos", stats == null ? null : stats.minNanos());
+        map.put("maxNanos", stats == null ? null : stats.maxNanos());
+        map.put("madNanos", stats == null ? null : stats.madNanos());
+        map.put("rawSamplesNanos", stats == null ? List.of() : stats.rawSamplesNanos());
         return map;
     }
 
@@ -241,11 +367,7 @@ public final class KernelCalibrationProfile {
     }
 
     private static KernelCalibrationCandidate candidate(JsonNode node) {
-        List<Long> samples = new ArrayList<>();
-        JsonNode sampleArray = node.path("rawSamplesNanos");
-        if (sampleArray.isArray()) {
-            for (JsonNode sample : sampleArray) samples.add(sample.asLong());
-        }
+        List<Long> samples = samples(node.path("rawSamplesNanos"));
         return new KernelCalibrationCandidate(
             text(node, "variantId", ""), text(node, "variantSignature", ""),
             text(node, "backend", ""), integer(node, "unroll", 1),
@@ -258,15 +380,60 @@ public final class KernelCalibrationProfile {
             longValue(node, "benchmarkNanos", 0L), longValue(node, "compiledTextBytes", 0L));
     }
 
+    private static List<BackendCandidateEvidence> backendCandidates(JsonNode nodes,
+                                                                     KernelSignature signature) {
+        if (nodes == null || !nodes.isArray()) return List.of();
+        List<BackendCandidateEvidence> result = new ArrayList<>();
+        for (JsonNode node : nodes) {
+            BackendChoice choice = BackendChoiceCodec.fromNode(node.path("choice"), signature);
+            KernelCandidateOutcome outcome;
+            try {
+                outcome = KernelCandidateOutcome.valueOf(text(node, "outcome", ""));
+            } catch (IllegalArgumentException failure) {
+                throw new IllegalArgumentException("Invalid backend candidate outcome", failure);
+            }
+            List<Long> raw = samples(node.path("rawSamplesNanos"));
+            KernelBenchmarkStatistics stats = raw.isEmpty()
+                ? null : KernelBenchmarkStatistics.from(raw);
+            result.add(new BackendCandidateEvidence(choice, outcome,
+                node.path("correctnessPassed").asBoolean(false),
+                node.path("stable").asBoolean(false), stats,
+                longValue(node, "benchmarkNanos", 0L), text(node, "reason", "")));
+        }
+        return List.copyOf(result);
+    }
+
+    private static BackendChoice choice(JsonNode node, KernelSignature signature) {
+        if (node == null || node.isNull() || node.isMissingNode()) return null;
+        return BackendChoiceCodec.fromNode(node, signature);
+    }
+
+    private static BackendSelectionStatus selectionStatus(JsonNode node,
+                                                           BackendChoice winnerChoice) {
+        JsonNode value = node == null ? null : node.get("selectionStatus");
+        if (value == null || value.isNull() || value.asText().isBlank()) {
+            return winnerChoice == null ? BackendSelectionStatus.NO_STABLE_WINNER
+                : BackendSelectionStatus.CALIBRATED;
+        }
+        try {
+            return BackendSelectionStatus.valueOf(value.asText());
+        } catch (IllegalArgumentException failure) {
+            throw new IllegalArgumentException("Invalid backend selection status", failure);
+        }
+    }
+
+    private static BackendChoice legacyChoice(KernelSignature signature, String variantText) {
+        if (variantText == null || variantText.isBlank()) return null;
+        KernelVariantSignature variant = KernelVariantSignature.fromCanonicalText(signature, variantText);
+        return variant.backend() == CodegenBackend.AVX2
+            ? new GeneratedAvx2Backend(variant) : new ScalarNativeBackend(variant);
+    }
+
     private static List<KernelTrustedBaseline> baselines(JsonNode nodes) {
         if (nodes == null || !nodes.isArray()) return List.of();
         List<KernelTrustedBaseline> result = new ArrayList<>();
         for (JsonNode node : nodes) {
-            List<Long> samples = new ArrayList<>();
-            JsonNode sampleArray = node.path("rawSamplesNanos");
-            if (sampleArray.isArray()) {
-                for (JsonNode sample : sampleArray) samples.add(sample.asLong());
-            }
+            List<Long> samples = samples(node.path("rawSamplesNanos"));
             KernelBenchmarkStatistics stats = samples.isEmpty()
                 ? null : KernelBenchmarkStatistics.from(samples);
             result.add(new KernelTrustedBaseline(text(node, "name", "unknown"),
@@ -275,6 +442,13 @@ public final class KernelCalibrationProfile {
                 text(node, "note", "")));
         }
         return result;
+    }
+
+    private static List<Long> samples(JsonNode sampleArray) {
+        if (sampleArray == null || !sampleArray.isArray()) return List.of();
+        List<Long> samples = new ArrayList<>();
+        for (JsonNode sample : sampleArray) samples.add(sample.asLong());
+        return samples;
     }
 
     private static KernelMachineIdentity machine(JsonNode node) {
@@ -294,7 +468,32 @@ public final class KernelCalibrationProfile {
             text(node, "variantSignatureVersion", "unknown"),
             text(node, "compilerIdentity", "unknown"),
             text(node, "codegenAbiVersion", KernelBuildIdentity.CODEGEN_ABI_VERSION),
-            text(node, "strictFlags", KernelBuildIdentity.STRICT_FLAGS));
+            text(node, "strictFlags", KernelBuildIdentity.STRICT_FLAGS),
+            node.path("gitDirty").asBoolean(false),
+            node.path("identityVerified").asBoolean(false),
+            text(node, "javaCompiler", "unknown"), text(node, "javaRuntime", "unknown"),
+            text(node, "nativeCompilerVersion", "unknown"),
+            text(node, "nativeVendor", "unknown"));
+    }
+
+    private static KernelCalibrationEntry persisted(String kernelSha256,
+                                                    String kernelSignature,
+                                                    String workloadBucket,
+                                                    String baselineVariant,
+                                                    String winnerVariant,
+                                                    double winnerSpeedup,
+                                                    String decisionReason,
+                                                    List<KernelCalibrationCandidate> candidates,
+                                                    List<KernelTrustedBaseline> trustedBaselines,
+                                                    BackendChoice baselineChoice,
+                                                    BackendChoice winnerChoice,
+                                                    List<BackendCandidateEvidence> backendCandidates,
+                                                    BackendSelectionStatus selectionStatus,
+                                                    boolean stable) {
+        return KernelCalibrationEntry.persisted(kernelSha256, kernelSignature, workloadBucket,
+            baselineVariant, winnerVariant, winnerSpeedup, decisionReason, candidates,
+            trustedBaselines, baselineChoice, winnerChoice, backendCandidates,
+            selectionStatus, stable);
     }
 
     private static String text(JsonNode node, String field, String fallback) {

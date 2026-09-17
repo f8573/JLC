@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Optional;
 
 /** Explicit-path profile persistence; no normal execution writes to user home. */
@@ -17,7 +18,20 @@ public final class KernelCalibrationProfileStore {
         }
         Path parent = path.toAbsolutePath().getParent();
         if (parent != null) Files.createDirectories(parent);
-        Files.writeString(path, profile.toJson(), StandardCharsets.UTF_8);
+        Path absolute = path.toAbsolutePath();
+        Path temporary = Files.createTempFile(
+            absolute.getParent(), absolute.getFileName().toString(), ".tmp");
+        try {
+            Files.writeString(temporary, profile.toJson(), StandardCharsets.UTF_8);
+            try {
+                Files.move(temporary, absolute, StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING);
+            } catch (java.nio.file.AtomicMoveNotSupportedException unsupported) {
+                Files.move(temporary, absolute, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temporary);
+        }
     }
 
     public static Optional<KernelCalibrationProfile> load(Path path) {

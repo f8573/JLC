@@ -36,5 +36,7 @@ vary.
 
 Raw cleanup measurements and exact commands are in
 [`build/reports/jlc-cleanup-pass1-20260914/`](../build/reports/jlc-cleanup-pass1-20260914/).
-The broader BLAS evidence is in
-[`BLAS_CEILING_REPORT.md`](../BLAS_CEILING_REPORT.md).
+The exact public claim and its measurement inputs are summarized in
+[`GEMM_PUBLICATION_BENCHMARK.md`](GEMM_PUBLICATION_BENCHMARK.md). The broader
+machine-specific BLAS evidence is retained in the local `build/reports/`
+bundle when available and is not a runtime dependency.

@@ -35,6 +35,39 @@ public final class KernelBenchmark {
         return KernelBenchmarkStatistics.from(samples);
     }
 
+    /**
+     * Measure a complete Java or JNI-boundary invocation.  The callback owns
+     * the same execution boundary used by production dispatch; no inner-loop
+     * shortcut is introduced here.
+     */
+    public static KernelBenchmarkStatistics measure(BackendInvocation invocation,
+                                                    KernelTuningConfig config) {
+        if (invocation == null || config == null) {
+            throw new IllegalArgumentException("Backend invocation and config are required");
+        }
+        for (int warmup = 0; warmup < config.warmupSamples(); warmup++) {
+            invoke(invocation);
+        }
+        long started = System.nanoTime();
+        long[] samples = new long[config.measuredSamples()];
+        for (int sample = 0; sample < samples.length; sample++) {
+            long start = System.nanoTime();
+            invoke(invocation);
+            samples[sample] = Math.max(1L, System.nanoTime() - start);
+            if (config.maxBenchmarkMillis() > 0L
+                && System.nanoTime() - started >= config.maxBenchmarkMillis() * 1_000_000L) {
+                throw new IllegalStateException("Backend benchmark budget exhausted");
+            }
+        }
+        return KernelBenchmarkStatistics.from(samples);
+    }
+
+    private static void invoke(BackendInvocation invocation) {
+        if (!invocation.invoke()) {
+            throw new IllegalStateException("Backend invocation returned false");
+        }
+    }
+
     private static void invokeAndConsume(GeneratedKernelInvoker invoker,
                                          KernelBinding binding) {
         if (!invoker.invoke(binding)) {
