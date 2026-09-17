@@ -1698,7 +1698,7 @@ The R5 work was performed in an isolated worktree and was not merged into
 | Item | Value |
 |---|---|
 | R5 base SHA | `10a29053dbc63ddc02518e572692eb783b75cb65` |
-| implementation SHA | \`9085de5\` (\`9085de5960f519349c08e708d8c310b75f514289\`) |
+| implementation SHA | \`76ff6c8\` |
 | branch | `feature/compiler-autotuning` |
 | worktree | `/home/james/Projects/JLC-r5` |
 | date | 2026-09-17 |
