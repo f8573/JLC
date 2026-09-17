@@ -21,6 +21,7 @@ struct RunSummary {
     double median_gflops = 0.0;
     double mean_gflops = 0.0;
     jlc_gemm_profile best_profile{};
+    std::vector<double> measured_seconds;
 };
 
 std::vector<int> default_sizes() {
@@ -163,6 +164,7 @@ RunSummary run_case(int size, int requested_threads, int warmup_runs, int measur
     }
 
     double total_seconds = std::accumulate(seconds.begin(), seconds.end(), 0.0);
+    const std::vector<double> measured_seconds = seconds;
     std::sort(seconds.begin(), seconds.end());
     const double mean_seconds = total_seconds / measured_runs;
     const double median_seconds = seconds[seconds.size() / 2];
@@ -176,7 +178,8 @@ RunSummary run_case(int size, int requested_threads, int warmup_runs, int measur
         flops / best_seconds / 1.0e9,
         flops / median_seconds / 1.0e9,
         flops / mean_seconds / 1.0e9,
-        best_profile
+        best_profile,
+        measured_seconds
     };
 }
 }
@@ -253,18 +256,29 @@ int main(int argc, char** argv) {
             const double pack_b_gib_s = gib_per_second(profile.pack_b_bytes, profile.pack_b_ns);
 
             std::printf(
-                "size=%d requested_threads=%d best_ms=%.6f median_ms=%.6f mean_ms=%.6f best_gflops=%.6f actual_threads=%llu profile_kernel_pct=%.2f profile_pack_a_pct=%.2f profile_pack_b_pct=%.2f\n",
+                "size=%d requested_threads=%d best_ms=%.6f median_ms=%.6f mean_ms=%.6f best_gflops=%.6f median_gflops=%.6f actual_threads=%llu effective_mc=%llu effective_kc=%llu effective_nc=%llu effective_mr=%llu effective_nr=%llu profile_kernel_pct=%.2f profile_pack_a_pct=%.2f profile_pack_b_pct=%.2f\n",
                 summary.size,
                 summary.requested_threads,
                 summary.best_seconds * 1000.0,
                 summary.median_seconds * 1000.0,
                 summary.mean_seconds * 1000.0,
                 summary.best_gflops,
+                summary.median_gflops,
                 static_cast<unsigned long long>(profile.last_actual_threads),
+                static_cast<unsigned long long>(profile.last_mc),
+                static_cast<unsigned long long>(profile.last_kc),
+                static_cast<unsigned long long>(profile.last_nc),
+                static_cast<unsigned long long>(profile.last_mr),
+                static_cast<unsigned long long>(profile.last_nr),
                 kernel_pct,
                 pack_a_pct,
                 pack_b_pct
             );
+            std::printf("timings_seconds=%d,%d", summary.size, summary.requested_threads);
+            for (double elapsed : summary.measured_seconds) {
+                std::printf(",%.9f", elapsed);
+            }
+            std::printf("\n");
             std::printf(
                 "csv_row=%d,%d,%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%llu,%llu,%llu,%llu,%llu,%llu,%llu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n",
                 summary.size,

@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <limits>
+#include <vector>
 
 #include "jlc_native.h"
+#include "jlc_generated_kernel_registry.h"
 
 namespace {
 void throw_java_exception(JNIEnv* env, const char* class_name, const char* message) {
@@ -217,6 +219,128 @@ void throw_status_exception(JNIEnv* env, jlc_status status) {
 extern "C" JNIEXPORT jboolean JNICALL
 Java_net_faulj_nativeblas_NativeBindings_nativeIsAvailable(JNIEnv*, jclass) {
     return jlc_native_is_available() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_net_faulj_nativeblas_NativeBindings_nativeGeneratedAvx2Supported(JNIEnv*, jclass) {
+    return jlc_generated_avx2_supported() ? JNI_TRUE : JNI_FALSE;
+}
+
+static jboolean execute_generated_kernel(JNIEnv* env, jstring signature, jstring variant,
+                                         jobjectArray inputs, jdoubleArray output,
+                                         jint rows, jint cols) {
+    if (signature == nullptr || inputs == nullptr || output == nullptr || rows < 0 || cols < 0) {
+        throw_java_exception(env, "java/lang/IllegalArgumentException",
+                             "Generated kernel binding is invalid");
+        return JNI_FALSE;
+    }
+    const jsize input_count = env->GetArrayLength(inputs);
+    const long long elements = static_cast<long long>(rows) * static_cast<long long>(cols);
+    if (elements < 0 || elements > env->GetArrayLength(output)) {
+        throw_java_exception(env, "java/lang/IllegalArgumentException",
+                             "Generated kernel output is too small");
+        return JNI_FALSE;
+    }
+
+    const char* signature_chars = env->GetStringUTFChars(signature, nullptr);
+    if (signature_chars == nullptr) {
+        return JNI_FALSE;
+    }
+    const char* variant_chars = variant == nullptr
+        ? nullptr : env->GetStringUTFChars(variant, nullptr);
+    if (variant != nullptr && variant_chars == nullptr) {
+        env->ReleaseStringUTFChars(signature, signature_chars);
+        return JNI_FALSE;
+    }
+    std::vector<const double*> input_pointers(static_cast<std::size_t>(input_count), nullptr);
+    std::vector<jdoubleArray> input_arrays(static_cast<std::size_t>(input_count), nullptr);
+    std::vector<jdouble*> acquired_inputs(static_cast<std::size_t>(input_count), nullptr);
+    jdouble* output_pointer = nullptr;
+    bool ok = false;
+    try {
+        for (jsize index = 0; index < input_count; ++index) {
+            jobject object = env->GetObjectArrayElement(inputs, index);
+            jdoubleArray array = static_cast<jdoubleArray>(object);
+            input_arrays[static_cast<std::size_t>(index)] = array;
+            if (array == nullptr || env->GetArrayLength(array) < elements) {
+                throw_java_exception(env, "java/lang/IllegalArgumentException",
+                                     "Generated kernel input is too small or null");
+                break;
+            }
+            acquired_inputs[static_cast<std::size_t>(index)] =
+                static_cast<jdouble*>(env->GetPrimitiveArrayCritical(array, nullptr));
+            if (acquired_inputs[static_cast<std::size_t>(index)] == nullptr && elements != 0) {
+                throw_java_exception(env, "java/lang/IllegalStateException",
+                                     "Unable to pin generated-kernel input");
+                break;
+            }
+            input_pointers[static_cast<std::size_t>(index)] =
+                acquired_inputs[static_cast<std::size_t>(index)];
+            if (index == input_count - 1) {
+                output_pointer = static_cast<jdouble*>(
+                    env->GetPrimitiveArrayCritical(output, nullptr));
+                if (output_pointer == nullptr && elements != 0) {
+                    throw_java_exception(env, "java/lang/IllegalStateException",
+                                         "Unable to pin generated-kernel output");
+                    break;
+                }
+                ok = variant_chars == nullptr
+                    ? jlc_generated_execute(signature_chars, input_pointers.data(),
+                        static_cast<std::size_t>(input_count), output_pointer,
+                        static_cast<std::size_t>(rows), static_cast<std::size_t>(cols))
+                    : jlc_generated_execute_variant(signature_chars, variant_chars,
+                        input_pointers.data(), static_cast<std::size_t>(input_count),
+                        output_pointer, static_cast<std::size_t>(rows),
+                        static_cast<std::size_t>(cols));
+            }
+        }
+        if (input_count == 0) {
+            output_pointer = static_cast<jdouble*>(
+                env->GetPrimitiveArrayCritical(output, nullptr));
+            if (output_pointer != nullptr || elements == 0) {
+                ok = variant_chars == nullptr
+                    ? jlc_generated_execute(signature_chars, nullptr, 0, output_pointer,
+                        static_cast<std::size_t>(rows), static_cast<std::size_t>(cols))
+                    : jlc_generated_execute_variant(signature_chars, variant_chars,
+                        nullptr, 0, output_pointer, static_cast<std::size_t>(rows),
+                        static_cast<std::size_t>(cols));
+            }
+        }
+    } catch (...) {
+        ok = false;
+    }
+    if (output_pointer != nullptr) {
+        env->ReleasePrimitiveArrayCritical(output, output_pointer, 0);
+    }
+    for (jsize index = 0; index < input_count; ++index) {
+        if (acquired_inputs[static_cast<std::size_t>(index)] != nullptr) {
+            env->ReleasePrimitiveArrayCritical(
+                input_arrays[static_cast<std::size_t>(index)],
+                acquired_inputs[static_cast<std::size_t>(index)], JNI_ABORT);
+        }
+        if (input_arrays[static_cast<std::size_t>(index)] != nullptr) {
+            env->DeleteLocalRef(input_arrays[static_cast<std::size_t>(index)]);
+        }
+    }
+    env->ReleaseStringUTFChars(signature, signature_chars);
+    if (variant_chars != nullptr) {
+        env->ReleaseStringUTFChars(variant, variant_chars);
+    }
+    return ok ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_net_faulj_nativeblas_NativeBindings_nativeGeneratedKernelExecute(
+    JNIEnv* env, jclass, jstring signature, jobjectArray inputs,
+    jdoubleArray output, jint rows, jint cols) {
+    return execute_generated_kernel(env, signature, nullptr, inputs, output, rows, cols);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_net_faulj_nativeblas_NativeBindings_nativeGeneratedKernelExecuteVariant(
+    JNIEnv* env, jclass, jstring signature, jstring variant, jobjectArray inputs,
+    jdoubleArray output, jint rows, jint cols) {
+    return execute_generated_kernel(env, signature, variant, inputs, output, rows, cols);
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

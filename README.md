@@ -21,6 +21,103 @@ Live site: https://lambdacompute.org/
 - `JNI_CPP_LIBRARY_PROPOSAL.md`: proposed JNI-loaded C++ compute backend design
 - `frontend`: React + Vite client for matrix input, analysis views, decompositions, spectral reports, favorites/history, and settings
 
+## Current CPU/compiler/runtime scope
+
+The current checkpoint is the CPU-focused compiler and numerical runtime:
+
+```text
+                                  LambdaCompute / JLC
+                                         │
+                    ┌────────────────────┴────────────────────┐
+                    │                                         │
+          Numerical Algorithm Runtime                 Matrix Compiler
+                    │                                         │
+          Java implementations                           MatrixExpr
+          Native C++ algorithms                              │
+          GEMM / decompositions                      M1 — Graph optimization
+                    │                                         │
+          Algorithm dispatch                       M2 — Affine/dependence IR
+             ┌──────┴──────┐                                  │
+             │             │                         M3 — Legal scheduling
+           Java         C++ / JNI                              │
+             │             │                         M4 — CPU lowering
+             │             │                                  │
+             │             │                         R2 — Generalized fusion
+             │             │                                  │
+             │             │                  ┌───────────────┴───────────────┐
+             │             │                  │                               │
+             │             │         R1 — Physical buffer planning   R3 — Verified Kernel IR
+             │             │                  │                               │
+             │             │                  │                      R4 — Native codegen
+             │             │                  │                       ┌───────┴────────┐
+             │             │                  │                       │                │
+             │             │                  │                  Scalar C++     Generated AVX2
+             │             │                  │                       │                │
+             │             │                  │                       └───────┬────────┘
+             │             │                  │                               │
+             │             │                  │                      R5 — Empirical tuning
+             │             │                  │                               │
+             │             │                  │                    Backend calibration
+             │             │                  │                               │
+             │             │                  │                    KernelDispatchSelector
+             │             │                  │                 ┌────────┼─────────┐
+             │             │                  │                 │        │         │
+             │             │                  │              R2 Java   Scalar    AVX2
+             │             │                  │                 │        │         │
+             │             │                  │                 └────────┴─────────┘
+             │             │                  │                          │
+             └──────┬──────┘                  └────────────┬─────────────┘
+                    │                                      │
+                    └──────────────────┬───────────────────┘
+                                       │
+                                  JLC execution
+                                       │
+                           correctness-preserving fallback
+
+
+                        ───── Current CPU checkpoint ─────
+
+                                       │
+                                       ▼
+                               Future compiler backends
+                          ┌────────────┼────────────┐
+                          │            │            │
+                       AVX-512      CUDA/GPU     other ISA
+                                       │
+                            heterogeneous placement
+```
+
+The runtime combines Java numerical implementations, optimized native algorithms,
+JNI/native registry execution, correctness-gated generated kernels, and a
+correctness-preserving Java fallback. M4 is the terminal matrix-compiler
+milestone; R1–R5 are post-M4 research, and typed backend dispatch is the
+production integration pass. There is no R6 in this checkpoint.
+
+`R1–R5` names reflect research chronology, not a single linear compiler pipeline.
+After R2 determines fusion and materialization, R1 handles physical storage for
+executable values while R3–R5 form the generated-kernel path.
+
+**CPU performance checkpoint:** on the documented Ryzen 9 3950X same-host
+benchmark, JLC's built-in native FP64 GEMM reached 520.959 GFLOP/s at 2048³
+with 16 physical workers, or 89.3% of the measured AOCL-BLIS throughput. See
+[`docs/GEMM_PUBLICATION_BENCHMARK.md`](docs/GEMM_PUBLICATION_BENCHMARK.md) for
+the methodology and limitations.
+
+Existing or legacy CUDA-capable runtime infrastructure, including JCuda-related
+configuration and execution-policy switches, may still exist elsewhere in JLC.
+That infrastructure is separate from this checkpoint: the typed Kernel IR
+backend path dispatches only R2 Java, scalar native, and generated AVX2. It does
+not generate a CUDA backend; a CUDA `BackendChoice` for typed Kernel IR is future
+work.
+
+The public design and evidence are documented in
+[`docs/COMPILER_RUNTIME_RESEARCH.md`](docs/COMPILER_RUNTIME_RESEARCH.md) and
+[`docs/MATRIX_COMPILER.md`](docs/MATRIX_COMPILER.md).
+
+Future work is intentionally outside this CPU checkpoint: CUDA/GPU execution,
+AVX-512, heterogeneous CPU/GPU placement, broader shape-family calibration,
+thread-count tuning, mixed precision, and runtime JIT.
+
 ## Primary use cases
 
 - Run matrix diagnostics from raw matrix input
@@ -162,8 +259,9 @@ JLC routes dense linear algebra through calibrated algorithm dispatch. Java is t
 Current calibrated native scope:
 
 - GEMM coverage: heap-backed `Matrix` GEMM, compatible strided GEMM variants, and supported direct/off-heap layouts
-- Decomposition coverage: C++ LU, QR, and Cholesky hooks routed by algorithm dispatch
-- Hessenberg, SVD, Schur, and Polar stay on Java unless future calibrated native implementations pass correctness and threshold rules
+- Decomposition coverage: optional C++/JNI LU and QR hooks routed by algorithm dispatch; Cholesky has an explicitly enabled native hook
+- Stage-level native helpers: guarded C++/JNI Hessenberg and SVD-bidiagonal paths are available for validated shapes; full SVD remains primarily Java, the iterative Schur stage and general eigenvalue path remain Java, and native Hessenberg coverage is bounded by policy and shape rules
+- These lower-level helpers are separate from generated Kernel IR backends; the typed compiler path remains limited to R2 Java, scalar native, and generated AVX2
 - Java fallback: unsupported shapes/layouts, unavailable native libraries, failed native calls, failed validation, and numerically sensitive or uncalibrated paths
 - Diagnostics: `/api/status` and benchmark responses expose requested/effective backend and native load status
 
@@ -225,7 +323,7 @@ Current cold-start QR policy:
 
 Current performance status:
 
-- GEMM remains a documented known-red guardrail under the cleaned `512x512` median methodology; do not treat that guard as green unless the native JNI array-backed median path actually clears the threshold
+- GEMM has two distinct performance references: the smaller `512x512` JNI array-backed regression guard remains a targeted test boundary, while the publication-scale `2048x2048x2048` FP64 run on the Ryzen 9 3950X measured `520.959 GFLOP/s` with 16 physical workers, or `89.3%` of the same-host AOCL-BLIS reference. See [`docs/GEMM_PUBLICATION_BENCHMARK.md`](docs/GEMM_PUBLICATION_BENCHMARK.md) for the exact methodology and scope
 - QR is the strongest native subsystem today, with large stable wins for factorize-only and improved square `thin/full` performance after the native direct trailing-update promotion
 
 Default verification boundary:
