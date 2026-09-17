@@ -1232,11 +1232,11 @@ IR structure is exactly linear:
 
 | Ops | Lowering µs | Verification µs | IR values | IR operations |
 | --: | ----------: | ---------------: | --------: | -------------: |
-| 2 | 192 | 169 | 5 | 6 |
-| 10 | 182 | 262 | 21 | 22 |
-| 25 | 121 | 195 | 51 | 52 |
-| 50 | 135 | 294 | 101 | 102 |
-| 100 | 167 | 466 | 201 | 202 |
+| 2 | 183 | 159 | 5 | 6 |
+| 10 | 127 | 200 | 21 | 22 |
+| 25 | 129 | 207 | 51 | 52 |
+| 50 | 128 | 282 | 101 | 102 |
+| 100 | 166 | 450 | 201 | 202 |
 
 Each scale contributes one constant and one multiply; the single load and
 single store are fixed. Therefore values and operations grow linearly, and
@@ -1257,9 +1257,9 @@ claim and does not define R3 success:
 
 | Workload | R2 fast path µs | R3 scalar reference µs | Ratio | Correct |
 | -------- | ---------------: | ---------------------: | ----: | :------ |
-| scale-add 37x11 | 415.2 | 207.4 | 0.50 | yes |
-| transpose 37x11 | 353.7 | 122.1 | 0.35 | yes |
-| shared producer 64x64 | 328.6 | 835.5 | 2.54 | yes |
+| scale-add 37x11 | 324.2 | 157.9 | 0.49 | yes |
+| transpose 37x11 | 332.7 | 112.1 | 0.34 | yes |
+| shared producer 64x64 | 203.9 | 531.4 | 2.61 | yes |
 
 The execution benchmark is opt-in:
 
