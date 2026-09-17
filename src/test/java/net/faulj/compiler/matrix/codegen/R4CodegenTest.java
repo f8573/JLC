@@ -109,6 +109,23 @@ public class R4CodegenTest {
     }
 
     @Test
+    public void zeroSizedPlanEmitsNoWork() {
+        Matrix zeroA = new Matrix(0, 3);
+        Matrix zeroB = new Matrix(0, 3);
+        CompiledMatrixProgram program = MatrixCompiler.compileProgram(
+            MatrixExpr.input(zeroA).scale(2.0).add(MatrixExpr.input(zeroB)),
+            OptimizationSemantics.STRICT, new FlopCostModel(), FusionStrategy.GENERALIZED);
+        assertFalse(program.cpuPlan().fusedRegions().isEmpty());
+        KernelLoweringResult lowering = KernelLowerer.lower(
+            program.cpuPlan().fusedRegions().get(0));
+        PseudokernelPlan plan = PseudokernelPlanner.plan(lowering.program().function());
+        assertEquals(0L, plan.elements());
+        assertEquals(0, plan.vectorIterations());
+        assertEquals(0, plan.scalarTailElements());
+        assertTrue(KernelCodeGenerator.scalar(plan).source().contains("rows != 0"));
+    }
+
+    @Test
     public void generatedBackendMissFallsBackWithoutChangingDefault() {
         String previous = System.getProperty(KernelBackendMode.PROPERTY);
         try {

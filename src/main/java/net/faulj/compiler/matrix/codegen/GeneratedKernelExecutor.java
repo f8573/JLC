@@ -17,36 +17,48 @@ public final class GeneratedKernelExecutor {
             || !lowering.isEligible()) {
             return false;
         }
-        PseudokernelPlan plan = PseudokernelPlanner.plan(lowering.program().function());
-        CodegenBackend backend = mode.backend();
-        if (backend == CodegenBackend.AVX2
-            && (!plan.avx2Eligible() || !RuntimeCpuFeatures.avx2Supported())) {
+        try {
+            if (binding.function() != lowering.program().function()) {
+                return false;
+            }
+            PseudokernelPlan plan = PseudokernelPlanner.plan(lowering.program().function());
+            CodegenBackend backend = mode.backend();
+            if (backend == CodegenBackend.AVX2
+                && (!plan.avx2Eligible() || !RuntimeCpuFeatures.avx2Supported())) {
+                return false;
+            }
+            if (backend == CodegenBackend.SCALAR_CPP && !plan.scalarCppEligible()) {
+                return false;
+            }
+            if (!heapRealNoAliasBinding(binding)) {
+                return false;
+            }
+            GeneratedKernelRegistry.Entry entry = GeneratedKernelRegistry.global()
+                .lookup(plan.signature(), backend);
+            return entry != null && entry.invoke(binding);
+        } catch (RuntimeException | LinkageError failure) {
             return false;
         }
-        if (backend == CodegenBackend.SCALAR_CPP && !plan.scalarCppEligible()) {
-            return false;
-        }
-        if (!heapRealNoAliasBinding(binding)) {
-            return false;
-        }
-        GeneratedKernelRegistry.Entry entry = GeneratedKernelRegistry.global()
-            .lookup(plan.signature(), backend);
-        return entry != null && entry.invoke(binding);
     }
 
     private static boolean heapRealNoAliasBinding(KernelBinding binding) {
         KernelBuffer outputBuffer = binding.function().outputBuffers().get(0);
         Matrix output = binding.matrix(outputBuffer);
-        if (output == null || output.getClass() != Matrix.class || output.hasImagData()) {
+        if (!matches(output, outputBuffer)) {
             return false;
         }
         for (KernelBuffer inputBuffer : binding.function().inputBuffers()) {
             Matrix input = binding.matrix(inputBuffer);
-            if (input == null || input.getClass() != Matrix.class || input.hasImagData()
-                || input == output) {
+            if (!matches(input, inputBuffer) || input == output) {
                 return false;
             }
         }
         return true;
+    }
+
+    private static boolean matches(Matrix matrix, KernelBuffer buffer) {
+        return matrix != null && matrix.getClass() == Matrix.class && !matrix.hasImagData()
+            && matrix.getRowCount() == buffer.shape().rows()
+            && matrix.getColumnCount() == buffer.shape().columns();
     }
 }

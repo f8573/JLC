@@ -1404,3 +1404,275 @@ R1: logical value != physical storage
 R2: logical matrix intermediate != mandatory runtime Matrix
 R3: fused semantic computation != backend-specific implementation
 ```
+
+## R4 — Generated SIMD pseudokernels
+
+R4 is implemented on branch `feature/compiler-generated-simd` in the clean
+worktree `/home/james/Projects/JLC-r4`. It is based on the R3 checkpoint
+`ae4bd0b5043b4fb3143a12d722aa23a7e0b166ab`; the implementation checkpoint is
+`a66864d` (`Implement R4 generated SIMD pseudokernels`). The primary checkout
+and `main` were not modified. This milestone does not rename the project or
+introduce an M5 compatibility layer.
+
+### Scope and phase boundary
+
+R4 consumes only verified R3 `KernelProgram`/`KernelFunction` objects. R1
+continues to describe storage, R2 continues to choose and lower generalized
+fusion regions, and R3 remains the semantic IR and scalar reference oracle.
+R4 adds a backend-facing plan, a deterministic signature, strict scalar C++
+emission, strict AVX2 C++ intrinsic emission, and optional native dispatch.
+The existing GEMM implementation remains opaque and is not lowered into this
+path.
+
+The normal default is unchanged:
+
+```text
+jlc.compiler.kernelBackend = r2       -> existing R2 execution
+jlc.compiler.kernelBackend = scalar_cpp -> generated scalar C++ when registered
+jlc.compiler.kernelBackend = avx2      -> generated AVX2 when eligible and supported
+```
+
+The generated modes are opt-in and a registry miss, verifier rejection,
+binding mismatch, or ISA failure returns to the existing R2 path. No runtime
+compiler or C++ toolchain is needed for ordinary execution; source compilation
+is a build/deployment step.
+
+### Phase A audit: R3 inputs and the native convention
+
+The implementation uses the following R3 facts directly: ordered
+`KernelOp` values and operands, `KernelLoop` bounds, `KernelAccess` affine
+maps, `KernelBuffer` roles/shapes/types/layout/memory/ownership,
+`KernelAliasFact` relations, output effects, and R2 provenance. The verifier is
+called before planning or emission, so R4 does not re-interpret
+`MatrixExpr`, redo R2 legality, or infer missing alias facts.
+
+The native audit found the existing JNI library, CMake object-library layout,
+and whole-array `double[]` convention. R4 therefore adds a separate
+`jlc_native_codegen` object library and registry rather than changing the
+historical GEMM target. Existing GEMM compilation may retain its historical
+optimization policy; R4 generated objects use `-O2 -fno-fast-math
+-ffp-contract=off` (or the strict MSVC equivalent). An optional
+`JLC_R4_GENERATED_SOURCE_DIR` CMake cache path links emitted `.cpp` files into
+the native library.
+
+### Deterministic identity and shape policy
+
+`KernelSignature` emits inspectable canonical text containing:
+
+* a version marker and `shape-specialized=true`;
+* function identity, leaf/output counts, and exact loop bounds/steps;
+* all buffer facts and sorted alias facts; and
+* the ordered opcode stream, SSA IDs, operands, affine accesses, and raw
+  constant bits.
+
+The canonical UTF-8 text is hashed with SHA-256. The generated symbol is
+`jlc_pk_<first-12-hex-digits>`. No Java object identity, source-expression
+text, or pointer address participates in the key. Rows and columns are part of
+the signature and are also checked by the generated function and native
+registry descriptor. This is deliberate shape specialization: one artifact
+cannot silently execute a different shape.
+
+### Eligibility and plan
+
+`SimdEligibility` is separate from emission. The initial scalar/AVX2 subset
+requires one real FP64 output, FP64 inputs, row-major dense buffers in the
+initial heap-storage subset, the canonical two-loop rectangular domain, and
+only the verified R3 opcodes `LOAD`, `CONSTANT`, `ADD`, `MUL`, and `STORE`.
+AVX2 additionally requires identity `[outer, inner]` accesses (unit inner
+stride) and a proven `NO_ALIAS` relation from the output to every input.
+Unknown or unsupported storage/layout facts are ineligible; non-unit-stride
+regions may use scalar C++ when their storage facts are otherwise safe, and
+transpose/non-dense cases fall back to R2. Complex FP64 is never promoted.
+
+`PseudokernelPlan` retains the source function and signature and records vector
+width 4, element count, vector iterations, scalar-tail elements, load/store
+counts, arithmetic and constant counts, estimated bytes per element, and a
+conservative maximum live SSA-vector count. The plan is diagnostic and
+inspectable; it does not replace R3 or mutate it. Shared producers remain one
+SSA value and are emitted once per vector iteration.
+
+### Scalar and AVX2 lowering
+
+The scalar emitter prints the verified operation order inside shape-checked
+`i,j` loops. It uses ordinary `double` loads, stores, `+`, and `*`; affine
+indices remain explicit, including non-unit-stride scalar cases. The AVX2
+emitter uses `_mm256_loadu_pd`, `_mm256_set1_pd`, `_mm256_mul_pd`,
+`_mm256_add_pd`, and `_mm256_storeu_pd`. Constants are hoisted into vector
+values before the loop, and the exact same ordered operation graph is emitted
+for the scalar remainder. Width is fixed at four FP64 values. Remainders use
+`p + 4 <= rows*cols` followed by a scalar tail, so columns 1–5 and other
+non-multiples are covered by the same artifact.
+
+There is no FMA selection, reassociation, fast-math flag, or contraction
+permission in R4. Generated sources include `#pragma STDC FP_CONTRACT OFF`;
+the CMake/test compile-smoke uses `-fno-fast-math -ffp-contract=off`. NaNs,
+infinities, signed zero, and ordinary IEEE ordering therefore remain in the
+strict semantic contract, subject to the host compiler honoring those strict
+flags.
+
+### Registry, JNI, and runtime gate
+
+The Java registry key is `(KernelSignature, CodegenBackend)`. A native entry
+contains the canonical signature, generated symbol, backend, value type, width,
+and exact rows/columns. The C++ registry is function-local-static and mutex
+protected, which avoids cross-translation-unit initialization-order hazards.
+Generated registration adapters expose one whole-region function:
+
+```text
+Java double[][] inputs + double[] output
+    -> pin all input arrays once and output once
+    -> one jlc_generated_execute call for the complete region
+    -> release inputs without copy-back; commit output
+```
+
+The Java executor checks exact base `Matrix` objects, real storage, output/input
+identity, structural AVX2 eligibility, and a conservative runtime AVX2 probe.
+The native registry repeats the shape and AVX2 checks. If any check or lookup
+fails, the caller returns false and `CpuFusedRegionStep` continues through R2
+fast/generic execution. The source-emission tests exercise both standalone
+driver dispatch and native registry registration; the normal Gradle native
+build also compiles the JNI bridge and registry.
+
+### Validation evidence
+
+Focused R4 validation completed on the implementation checkpoint:
+
+| Check | Result |
+| ----- | ------ |
+| deterministic signature/source, strict flags, no FMA, shared SSA, tails, zero-size plan, alias/transpose policy, opt-in fallback | 6 tests pass |
+| eager/R2/R3 baseline agreement for the generated fixture | pass |
+| scalar C++ compile-smoke and registry execution | pass |
+| AVX2 intrinsic compile-smoke and registry execution | pass on AVX2 host |
+| NaN, infinity, signed-zero, and 3x5 vector-plus-tail correctness | pass |
+| opt-in JNI whole-region benchmark, including empty-shape bridge probe | pass |
+| AddressSanitizer generated-source run | pass |
+| native CMake build with vendor BLAS disabled | pass |
+| `git diff --check` on the final branch | pass |
+
+The full project test task completed with 504 tests, 26 skips, and one
+failure: the pre-existing
+`net.faulj.nativeblas.AlgorithmDispatchTest.coldStartAllowsCppOnlyForFoundationAlgorithmsAboveThreshold`
+assertion. Running the generic suite without the generated native library
+leaves that same single failure and skips the native-library integration tests;
+the extra native profile failure observed when reusing the R4 vendor-disabled
+build is therefore an environment/configuration condition, not an R4 code
+failure.
+
+The 3x5 native driver checks the scalar tail after a 4-wide vector prefix and
+checks NaN, positive infinity, and signed-zero propagation. A generated 0x3
+scalar artifact is also compiled and invoked through the registry with empty
+vectors, proving the no-work path. Existing R3 tests continue to cover
+zero-sized lowering and verification; the R4 native registry rejects shape
+mismatches and allows null data pointers only for a zero-element invocation.
+The current R2 lowerer does not create a generated fused region for every
+empty expression, so those cases remain a deliberate R2/R3 boundary rather
+than being optimistically promoted.
+
+Inspectable artifacts from the deterministic test are written under
+`build/reports/r4/generated/`. For the representative 4x5 scale-plus-add
+kernel, the scalar and AVX2 source sizes were 792 and 1,154 bytes and the
+signature/plan report was 766 bytes. The plan reported width 4, five vector
+iterations, zero tail elements, 24 estimated bytes per element, and a maximum
+live-vector count of 3.
+
+### Execution benchmark
+
+The opt-in benchmark generated and compiled the same registry-backed scalar
+and AVX2 artifacts for 2, 5, 10, and 25-operation scale chains. It warmed the
+R2 Java path and timed 21 steady-state native samples; code generation and C++
+compilation were excluded from the execution numbers. For shapes through
+256x256 it also timed five warmed R3 reference samples separately. Values below are
+nanoseconds per element on this host, with R2 Java allocation/setup included
+in its path. The native numbers are standalone registry calls, so they do not
+claim to be a DRAM-bandwidth model and do not include JNI overhead.
+
+| Kernel | Shape | R2 Java | Scalar C++ | AVX2 | AVX2 vs R2 | Correct |
+| ------ | ----- | ------: | ---------: | ---: | ----------: | :-----: |
+| 2 ops | 256x256 | 16.9 | 0.3 | 0.3 | 51.35x | yes |
+| 10 ops | 256x256 | 44.6 | 0.6 | 0.4 | 124.30x | yes |
+| 25 ops | 256x256 | 101.8 | 2.7 | 1.4 | 72.39x | yes |
+| 2 ops | 1024x1024 | 15.8 | 0.9 | 0.9 | 17.42x | yes |
+| 25 ops | 1024x1024 | 95.5 | 2.8 | 1.5 | 64.22x | yes |
+
+The 2-operation rows are memory-bound and show little scalar-versus-AVX2
+separation in the standalone native loop. Arithmetic-heavy chains expose the
+expected AVX2 benefit. Representative source generation took 80–2,886 µs
+(the first scalar sample was a cold JVM case); C++ compilation took roughly
+0.69 s for scalar and 1.13 s for AVX2 artifacts. Those costs are build/cache
+costs, not steady-state execution costs.
+
+The R3 reference context from the same harness was 74.9, 185.6, and 408.2
+ns/element for the 2-, 10-, and 25-operation 256x256 cases, respectively.
+Those interpreter/reference numbers include its per-call output setup and are
+reported to show the lowering gap, not as a production backend target.
+
+The separate opt-in JNI benchmark built a temporary CMake native library with
+the generated AVX2 source linked in. A 256x256 whole-region JNI call measured
+21,750 ns median (0.3319 ns/element) on the same host. An empty 0x3 generated
+call measured 1,470 ns median; this is a useful bridge/pin/registry baseline
+because it has no element work, but it is not subtracted from the non-empty
+kernel number.
+
+### R4 architecture audit answers
+
+1. **What exactly is consumed from R3?** Verified `KernelFunction` buffers,
+   loops, ordered SSA operations, accesses, types/layouts, memory/ownership,
+   aliases, effects, and provenance.
+2. **What is the separate eligibility layer?** `SimdEligibility` returns
+   `AVX2_CONTIGUOUS`, `SCALAR_CPP`, or `INELIGIBLE` with deterministic reasons.
+3. **What is the backend-neutral representation?** `PseudokernelPlan` keeps
+   R3 as the semantic source and adds shape/vector/pressure metrics.
+4. **How is identity made deterministic?** Canonical inspectable text plus
+   SHA-256; no object identity or addresses.
+5. **Is shape policy explicit?** Yes: rows, columns, loops, and buffer shapes
+   are signature fields and runtime descriptor checks.
+6. **What vector width is selected?** Four FP64 lanes for AVX2.
+7. **How is shared SSA preserved?** One R3 value produces one emitted vector
+   definition per iteration; the shared-producer test verifies one MUL.
+8. **How are constants handled?** Scalar constants use exact literals/raw
+   bits; AVX2 constants are hoisted with `_mm256_set1_pd`.
+9. **How is ordering preserved?** Emission walks the verified flat operation
+   list in order without reassociation.
+10. **How are tails handled?** A four-lane loop is followed by scalar `p<count`
+    code from the same operation graph.
+11. **How is aliasing handled?** Output/input must be proven `NO_ALIAS` for
+    AVX2; `MAY_ALIAS` is never promoted.
+12. **What happens to transpose/non-unit stride?** Non-unit stride is scalar
+    C++ eligible when safe; non-dense/unknown layouts fall back to R2.
+13. **What happens without AVX2?** The runtime gate returns false; R2 remains
+    the fallback. Scalar C++ has no AVX2 execution requirement.
+14. **Are generated sources compiled at runtime?** No. They are build/deploy
+    artifacts; the runtime only looks up a registered function.
+15. **How is registration done?** Static generated registration calls the
+    mutex-protected native registry with a whole-region adapter.
+16. **How is JNI crossed?** Inputs and output are pinned once around exactly
+    one native whole-region call; no per-element JNI call exists.
+17. **What JNI overhead was measured?** The opt-in bridge benchmark measured a
+    1,470 ns median empty 0x3 whole-region call, including JNI array handling,
+    registry lookup, and the no-work generated entry. A 256x256 AVX2 call was
+    21,750 ns median; the execution table intentionally keeps that JNI total
+    separate from standalone native kernel timing.
+18. **Which kernels benefit most?** Real FP64, dense, contiguous, alias-safe
+    elementwise regions with enough arithmetic per element.
+19. **Which kernels are bandwidth-bound?** Short scale/add chains and other
+    low-arithmetic kernels; scalar and AVX2 native rows are close there.
+20. **What is live-vector pressure?** It is exposed by the plan; the
+    representative shared scale/add plan measured three live vector values.
+21. **Is performance tied to correctness evidence?** Yes: every reported row
+    is marked correct by the benchmark driver's expected-value check; the
+    generated fixture also agrees with eager, R2, and R3 Java baselines, while
+    compile-smoke/ASAN remains separate evidence.
+22. **What belongs in R5?** Width/unroll variants, FMA policy experiments,
+    layout-aware kernels, broader zero-shape coverage, JNI pin/copy tuning, live-range
+    pressure studies, cache/roofline measurement, and registration/cache
+    lifecycle tuning.
+
+### Definition-of-done mapping
+
+R4 now has a verified R3 consumer, explicit scalar and AVX2 emitters, fixed
+width/tail policy, deterministic shape-specialized signatures, conservative
+alias and ISA gates, a native registry, one-call JNI plumbing, strict compile
+flags, opt-in backend selection, safe R2 fallback, correctness/compile/ASAN
+evidence, benchmark output, a measured JNI bridge probe, and this audit. The
+remaining scope boundary is that shapes the current lowerer does not represent
+as fused regions remain on the R2/R3 side of its contract.

@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
@@ -18,7 +19,10 @@ import net.faulj.compiler.matrix.MatrixCompiler;
 import net.faulj.compiler.matrix.MatrixExpr;
 import net.faulj.compiler.matrix.OptimizationSemantics;
 import net.faulj.compiler.matrix.cpu.FusionStrategy;
+import net.faulj.compiler.matrix.kernel.KernelBuffer;
 import net.faulj.compiler.matrix.kernel.KernelLowerer;
+import net.faulj.compiler.matrix.kernel.KernelLoweringResult;
+import net.faulj.compiler.matrix.kernel.KernelReferenceExecutor;
 import net.faulj.matrix.Matrix;
 
 import org.junit.Assume;
@@ -54,15 +58,24 @@ public class R4GeneratedKernelBenchmarkTest {
                 CompiledMatrixProgram program = MatrixCompiler.compileProgram(
                     expression, OptimizationSemantics.STRICT, new FlopCostModel(),
                     FusionStrategy.GENERALIZED);
+                KernelLoweringResult lowering = KernelLowerer.lower(
+                    program.cpuPlan().fusedRegions().get(0));
                 PseudokernelPlan plan = PseudokernelPlanner.plan(
-                    KernelLowerer.lower(program.cpuPlan().fusedRegions().get(0))
-                        .program().function());
+                    lowering.program().function());
+                if (size <= 256) {
+                    long r3 = medianReference(lowering, a, b);
+                    System.out.printf("r4_r3_reference shape=%dx%d ops=%d ns_per_element=%.1f%n",
+                        size, size, complexity,
+                        r3 / (double) (size * (long) size));
+                }
                 long r2 = medianJava(program, size);
                 long scalar = runNative(repository, registryHeader, registrySource,
-                    KernelCodeGenerator.scalar(plan, CppEmissionOptions.nativeRegistry()), false);
+                    KernelCodeGenerator.scalar(plan, CppEmissionOptions.nativeRegistry()), false,
+                    complexity);
                 long avx2 = RuntimeCpuFeatures.avx2Supported()
                     ? runNative(repository, registryHeader, registrySource,
-                        KernelCodeGenerator.avx2(plan, CppEmissionOptions.nativeRegistry()), true)
+                        KernelCodeGenerator.avx2(plan, CppEmissionOptions.nativeRegistry()), true,
+                        complexity)
                     : -1L;
                 String avxRatio = avx2 < 0L ? "n/a" : String.format("%.2fx", (double) r2 / avx2);
                 System.out.printf("| %d ops | %dx%d | %.1f | %.1f | %s | %s | yes |%n",
@@ -88,11 +101,31 @@ public class R4GeneratedKernelBenchmarkTest {
         return samples[samples.length / 2];
     }
 
+    private static long medianReference(KernelLoweringResult lowering,
+                                        Matrix a,
+                                        Matrix b) {
+        IdentityHashMap<KernelBuffer, Matrix> inputs = new IdentityHashMap<>();
+        inputs.put(lowering.program().function().inputBuffers().get(0), a);
+        inputs.put(lowering.program().function().inputBuffers().get(1), b);
+        for (int warmup = 0; warmup < 2; warmup++) {
+            KernelReferenceExecutor.execute(lowering.program(), inputs);
+        }
+        long[] samples = new long[5];
+        for (int sample = 0; sample < samples.length; sample++) {
+            long start = System.nanoTime();
+            KernelReferenceExecutor.execute(lowering.program(), inputs);
+            samples[sample] = System.nanoTime() - start;
+        }
+        Arrays.sort(samples);
+        return samples[samples.length / 2];
+    }
+
     private static long runNative(Path repository,
                                   Path registryHeader,
                                   Path registrySource,
                                   GeneratedKernelSource generated,
-                                  boolean avx2) throws Exception {
+                                  boolean avx2,
+                                  int complexity) throws Exception {
         Path directory = Files.createTempDirectory("jlc-r4-bench-");
         long generationAndWriteStart = System.nanoTime();
         try {
@@ -100,7 +133,7 @@ public class R4GeneratedKernelBenchmarkTest {
             Path driver = directory.resolve("driver.cpp");
             Path executable = directory.resolve("r4_bench");
             Files.writeString(source, generated.source(), StandardCharsets.UTF_8);
-            Files.writeString(driver, benchmarkDriver(generated), StandardCharsets.UTF_8);
+            Files.writeString(driver, benchmarkDriver(generated, complexity), StandardCharsets.UTF_8);
             List<String> command = new ArrayList<>(List.of(
                 "c++", "-std=c++17", "-O3", "-fno-fast-math", "-ffp-contract=off",
                 "-I", registryHeader.getParent().toString(), source.toString(), driver.toString(),
@@ -141,7 +174,7 @@ public class R4GeneratedKernelBenchmarkTest {
         }
     }
 
-    private static String benchmarkDriver(GeneratedKernelSource generated) {
+    private static String benchmarkDriver(GeneratedKernelSource generated, int complexity) {
         int inputCount = generated.plan().function().inputBuffers().size();
         String signature = CppEmitterSupport.escape(generated.signature().canonicalText());
         StringBuilder source = new StringBuilder()
@@ -158,6 +191,18 @@ public class R4GeneratedKernelBenchmarkTest {
             .append("    for (std::size_t p = 0; p < count; ++p) storage[input][p] = 0.25 + input + p * 0.0001;\n")
             .append("    inputs.push_back(storage[input].data());\n  }\n")
             .append("  std::vector<double> output(count);\n")
+            .append("  std::vector<double> expected(count);\n")
+            .append("  for (std::size_t p = 0; p < count; ++p) {\n")
+            .append("    double value = storage[0][p];\n");
+        for (int operation = 0; operation < complexity; operation++) {
+            if ((operation & 1) == 0) {
+                source.append("    value *= ")
+                    .append(1.001 + operation * 0.0001).append(";\n");
+            } else {
+                source.append("    value += storage[1][p];\n");
+            }
+        }
+        source.append("    expected[p] = value;\n  }\n")
             .append("  for (int warmup = 0; warmup < 10; ++warmup)\n")
             .append("    if (!jlc_generated_execute(\"").append(signature)
             .append("\", inputs.data(), inputs.size(), output.data(), rows, cols)) return 2;\n")
@@ -168,6 +213,7 @@ public class R4GeneratedKernelBenchmarkTest {
             .append("\", inputs.data(), inputs.size(), output.data(), rows, cols)) return 3;\n")
             .append("    auto stop = std::chrono::steady_clock::now();\n")
             .append("    samples[sample] = std::chrono::duration_cast<std::chrono::nanoseconds>(stop - start).count();\n  }\n")
+            .append("  for (std::size_t p = 0; p < count; ++p) if (output[p] != expected[p]) return 4;\n")
             .append("  std::sort(samples, samples + 21); std::printf(\"median_ns=%lld\\n\", samples[10]); return 0;\n}\n");
         return "#include <algorithm>\n#include <chrono>\n" + source;
     }

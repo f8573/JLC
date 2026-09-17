@@ -171,10 +171,15 @@ public final class PseudokernelPlan {
             return 0;
         }
         int[] lastUse = new int[maxId + 1];
+        int[] definition = new int[maxId + 1];
         java.util.Arrays.fill(lastUse, -1);
+        java.util.Arrays.fill(definition, -1);
         List<net.faulj.compiler.matrix.kernel.KernelOp> operations = function.body().operations();
         for (int index = 0; index < operations.size(); index++) {
             var operation = operations.get(index);
+            if (operation.resultValueId() >= 0 && operation.resultValueId() <= maxId) {
+                definition[operation.resultValueId()] = index;
+            }
             if (operation.operands() == null) {
                 continue;
             }
@@ -190,8 +195,7 @@ public final class PseudokernelPlan {
             for (var operation : operations) {
                 int id = operation.resultValueId();
                 if (id >= 0 && id <= maxId) {
-                    int definition = operations.indexOf(operation);
-                    if (definition <= index && lastUse[id] >= index) {
+                    if (definition[id] <= index && lastUse[id] >= index) {
                         live++;
                     }
                 }

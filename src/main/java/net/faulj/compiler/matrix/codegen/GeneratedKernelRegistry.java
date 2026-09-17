@@ -71,11 +71,20 @@ public final class GeneratedKernelRegistry {
             if (matrix == null || matrix.getClass() != Matrix.class || matrix.hasImagData()) {
                 return false;
             }
+            KernelBuffer inputBuffer = function.inputBuffers().get(index);
+            if (matrix.getRowCount() != inputBuffer.shape().rows()
+                || matrix.getColumnCount() != inputBuffer.shape().columns()) {
+                return false;
+            }
             inputs[index] = matrix.getRawData();
         }
         KernelBuffer outputBuffer = function.outputBuffers().get(0);
         Matrix output = binding.matrix(outputBuffer);
         if (output == null || output.getClass() != Matrix.class || output.hasImagData()) {
+            return false;
+        }
+        if (output.getRowCount() != outputBuffer.shape().rows()
+            || output.getColumnCount() != outputBuffer.shape().columns()) {
             return false;
         }
         for (Matrix input : inputsAsMatrices(function, binding)) {
