@@ -90,6 +90,11 @@ final class CpuExecutionContext {
         return values;
     }
 
+    /** R1 plan visible to an optional backend binding layer. */
+    PhysicalMemoryPlan physicalMemoryPlan() {
+        return physicalMemoryPlan;
+    }
+
     boolean isOwned(LogicalBuffer buffer) {
         return owned.containsKey(buffer)
             || (arena != null && arenaPlanHasSlot(buffer));

@@ -13,6 +13,12 @@ import net.faulj.compiler.matrix.affine.BufferOwnership;
 import net.faulj.compiler.matrix.affine.LogicalBuffer;
 import net.faulj.compiler.matrix.schedule.ScheduleBand;
 import net.faulj.compiler.matrix.schedule.ScheduleLoop;
+import net.faulj.compiler.matrix.kernel.KernelBinding;
+import net.faulj.compiler.matrix.kernel.KernelEligibility;
+import net.faulj.compiler.matrix.kernel.KernelIrMode;
+import net.faulj.compiler.matrix.kernel.KernelLowerer;
+import net.faulj.compiler.matrix.kernel.KernelLoweringResult;
+import net.faulj.compiler.matrix.kernel.KernelReferenceExecutor;
 import net.faulj.matrix.Matrix;
 
 /**
@@ -26,7 +32,8 @@ import net.faulj.matrix.Matrix;
 public final class CpuFusedRegionStep implements CpuStep {
     public enum ExecutionPath {
         FAST_REAL_DENSE,
-        GENERIC_SCHEDULE
+        GENERIC_SCHEDULE,
+        KERNEL_IR_REFERENCE
     }
 
     private final int id;
@@ -34,6 +41,8 @@ public final class CpuFusedRegionStep implements CpuStep {
     private final List<LogicalBuffer> inputBuffers;
     private final CompiledProgram compiledProgram;
     private final FastProgram fastProgram;
+    private final KernelIrMode kernelIrMode;
+    private final KernelLoweringResult kernelLowering;
     private volatile ExecutionPath lastExecutionPath;
 
     CpuFusedRegionStep(int id, FusedRegionPlan regionPlan) {
@@ -45,6 +54,9 @@ public final class CpuFusedRegionStep implements CpuStep {
         this.inputBuffers = List.copyOf(regionPlan.leafBuffers());
         this.compiledProgram = CompiledProgram.compile(regionPlan);
         this.fastProgram = FastProgram.tryCompile(regionPlan);
+        this.kernelIrMode = KernelIrMode.fromSystemProperty();
+        this.kernelLowering = kernelIrMode.isEnabled()
+            ? KernelLowerer.lower(regionPlan) : null;
     }
 
     @Override
@@ -92,6 +104,20 @@ public final class CpuFusedRegionStep implements CpuStep {
         return lastExecutionPath;
     }
 
+    public KernelIrMode kernelIrMode() {
+        return kernelIrMode;
+    }
+
+    /** Null when the optional R3 selector is off. */
+    public KernelLoweringResult kernelLowering() {
+        return kernelLowering;
+    }
+
+    /** Null when the optional R3 selector is off or lowering was rejected. */
+    public net.faulj.compiler.matrix.kernel.KernelProgram kernelProgram() {
+        return kernelLowering == null ? null : kernelLowering.program();
+    }
+
     @Override
     public String description() {
         return "FUSED_REGION F" + regionPlan.regionId() + " S"
@@ -115,6 +141,19 @@ public final class CpuFusedRegionStep implements CpuStep {
             }
         }
 
+        if (kernelIrMode == KernelIrMode.EXECUTE
+            && kernelLowering != null
+            && kernelLowering.eligibility() == KernelEligibility.ELIGIBLE
+            && kernelLowering.verified()
+            && allReal(leaves, output)) {
+            KernelBinding binding = KernelBinding.fromLogicalBuffers(
+                kernelLowering.program().function(), context.values(),
+                context.physicalMemoryPlan());
+            KernelReferenceExecutor.executeVerified(kernelLowering.program(), binding);
+            lastExecutionPath = ExecutionPath.KERNEL_IR_REFERENCE;
+            return;
+        }
+
         if (allRealDense && fastProgram != null) {
             fastProgram.execute(output, leaves);
             lastExecutionPath = ExecutionPath.FAST_REAL_DENSE;
@@ -130,6 +169,18 @@ public final class CpuFusedRegionStep implements CpuStep {
             output.ensureImagData();
         }
         compiledProgram.execute(output, leaves, complex);
+    }
+
+    private static boolean allReal(Matrix[] leaves, Matrix output) {
+        if (output.hasImagData()) {
+            return false;
+        }
+        for (Matrix leaf : leaves) {
+            if (leaf.hasImagData()) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static final class CompiledProgram {

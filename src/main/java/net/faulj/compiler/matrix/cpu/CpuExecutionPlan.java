@@ -11,6 +11,9 @@ import net.faulj.compiler.matrix.affine.LogicalBuffer;
 import net.faulj.compiler.matrix.schedule.ScheduleAnnotation;
 import net.faulj.compiler.matrix.schedule.SchedulePlan;
 import net.faulj.compiler.matrix.schedule.ScheduleRegion;
+import net.faulj.compiler.matrix.kernel.KernelIrMetrics;
+import net.faulj.compiler.matrix.kernel.KernelLoweringResult;
+import net.faulj.compiler.matrix.kernel.KernelProgram;
 import net.faulj.matrix.Matrix;
 
 /**
@@ -35,6 +38,8 @@ public final class CpuExecutionPlan {
     private final long estimatedTemporaryBytes;
     private final FusionMetrics fusionMetrics;
     private final PhysicalMemoryPlan physicalMemoryPlan;
+    private final List<KernelLoweringResult> kernelLowerings;
+    private final KernelIrMetrics kernelIrMetrics;
 
     CpuExecutionPlan(SchedulePlan schedule,
                      List<CpuStep> steps,
@@ -76,6 +81,13 @@ public final class CpuExecutionPlan {
             || hasAnnotation(ScheduleAnnotation.REDUCTION_PARALLEL_ELIGIBLE);
         this.hasVectorAnnotations = hasAnnotation(ScheduleAnnotation.VECTOR);
         this.estimatedTemporaryBytes = estimatedBytes(this.materializedTemporaryBuffers);
+        this.kernelLowerings = this.steps.stream()
+            .filter(CpuFusedRegionStep.class::isInstance)
+            .map(CpuFusedRegionStep.class::cast)
+            .map(CpuFusedRegionStep::kernelLowering)
+            .filter(java.util.Objects::nonNull)
+            .toList();
+        this.kernelIrMetrics = KernelIrMetrics.from(kernelLowerings);
         this.physicalMemoryPlan = PhysicalMemoryPlanner.plan(this);
     }
 
@@ -135,6 +147,26 @@ public final class CpuExecutionPlan {
     /** Short alias for callers that use the generic metrics term. */
     public FusionMetrics metrics() {
         return fusionMetrics;
+    }
+
+    /** R3 lowering results when the optional kernel IR selector is enabled. */
+    public List<KernelLoweringResult> kernelLowerings() {
+        return kernelLowerings;
+    }
+
+    public List<KernelProgram> kernelPrograms() {
+        return kernelLowerings.stream()
+            .map(KernelLoweringResult::program)
+            .filter(java.util.Objects::nonNull)
+            .toList();
+    }
+
+    public KernelIrMetrics kernelIrMetrics() {
+        return kernelIrMetrics;
+    }
+
+    public KernelIrMetrics kernelMetrics() {
+        return kernelIrMetrics;
     }
 
     public FusionStrategy fusionStrategy() {
@@ -275,6 +307,8 @@ public final class CpuExecutionPlan {
         appendBuffers(result, elidedTemporaryBuffers);
         result.append("fusion planning:\n");
         result.append(fusionMetrics.dump().indent(2));
+        result.append("kernel IR planning:\n");
+        result.append(kernelIrMetrics.dump().indent(2));
         result.append("  accepted regions:\n");
         List<FusedRegionPlan> regions = fusedRegions();
         if (regions.isEmpty()) {
