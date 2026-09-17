@@ -68,6 +68,8 @@ public final class CpuExecutor {
                     transpose.execute(context);
                 } else if (step instanceof CpuFusedElementwiseStep fused) {
                     fused.execute(context);
+                } else if (step instanceof CpuFusedRegionStep fusedRegion) {
+                    fusedRegion.execute(context);
                 } else {
                     throw new IllegalStateException(
                         "Unsupported CPU step type: " + step.getClass().getName());

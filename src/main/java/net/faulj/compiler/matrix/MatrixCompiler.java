@@ -1,6 +1,7 @@
 package net.faulj.compiler.matrix;
 
 import net.faulj.matrix.Matrix;
+import net.faulj.compiler.matrix.cpu.FusionStrategy;
 
 /**
  * Entry point for the opt-in matrix-expression compiler.
@@ -83,7 +84,30 @@ public final class MatrixCompiler {
 
     public static CompiledMatrixProgram compileProgram(MatrixExpr expression,
                                                        OptimizationSemantics semantics,
+                                                       FusionStrategy fusionStrategy) {
+        return compileProgram(expression, semantics, new FlopCostModel(), fusionStrategy);
+    }
+
+    public static CompiledMatrixProgram compileProgram(MatrixExpr expression,
+                                                       FusionStrategy fusionStrategy) {
+        return compileProgram(expression, OptimizationSemantics.STRICT, fusionStrategy);
+    }
+
+    public static CompiledMatrixProgram compileProgram(MatrixExpr expression,
+                                                       OptimizationSemantics semantics,
                                                        MatrixCostModel costModel) {
         return CompiledMatrixProgram.from(compile(expression, semantics, costModel));
+    }
+
+    /** Compile a program with an explicit CPU fusion implementation. */
+    public static CompiledMatrixProgram compileProgram(MatrixExpr expression,
+                                                       OptimizationSemantics semantics,
+                                                       MatrixCostModel costModel,
+                                                       FusionStrategy fusionStrategy) {
+        if (fusionStrategy == null) {
+            throw new IllegalArgumentException("Fusion strategy must not be null");
+        }
+        return CompiledMatrixProgram.fromWithFusion(
+            compile(expression, semantics, costModel), fusionStrategy);
     }
 }

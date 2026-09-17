@@ -6,11 +6,13 @@ import net.faulj.compiler.matrix.affine.AffineProgram;
 import net.faulj.compiler.matrix.affine.DependenceGraph;
 import net.faulj.compiler.matrix.cpu.CpuExecutionPlan;
 import net.faulj.compiler.matrix.cpu.CpuLowerer;
+import net.faulj.compiler.matrix.cpu.FusionStrategy;
 import net.faulj.compiler.matrix.schedule.SchedulePlan;
 import net.faulj.matrix.Matrix;
 
 /**
- * Inspectable result of the complete M1-to-M4 compiler pipeline.
+ * Inspectable result of the complete M1-to-M4 compiler pipeline plus the
+ * selected post-M4 fusion lowering.
  *
  * <p>The stages are retained as immutable references. Calling
  * {@link #execute()} runs only the lowered CPU plan; it never interprets the
@@ -35,12 +37,20 @@ public final class CompiledMatrixProgram {
     }
 
     static CompiledMatrixProgram from(ExecutionPlan expressionPlan) {
+        return fromWithFusion(expressionPlan, FusionStrategy.fromSystemProperty());
+    }
+
+    static CompiledMatrixProgram fromWithFusion(ExecutionPlan expressionPlan,
+                                                FusionStrategy fusionStrategy) {
         if (expressionPlan == null) {
             throw new IllegalArgumentException("Expression plan must not be null");
         }
+        if (fusionStrategy == null) {
+            throw new IllegalArgumentException("Fusion strategy must not be null");
+        }
         AffineProgram affine = AffineProgram.lower(expressionPlan);
-        SchedulePlan schedule = CpuLowerer.defaultSchedule(affine);
-        CpuExecutionPlan cpu = CpuLowerer.lower(schedule, expressionPlan);
+        SchedulePlan schedule = CpuLowerer.defaultSchedule(affine, fusionStrategy);
+        CpuExecutionPlan cpu = CpuLowerer.lower(schedule, expressionPlan, fusionStrategy);
         return new CompiledMatrixProgram(expressionPlan, affine, schedule, cpu);
     }
 

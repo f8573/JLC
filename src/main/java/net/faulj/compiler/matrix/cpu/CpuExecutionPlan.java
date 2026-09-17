@@ -14,7 +14,8 @@ import net.faulj.compiler.matrix.schedule.ScheduleRegion;
 import net.faulj.matrix.Matrix;
 
 /**
- * Immutable, inspectable, executable CPU plan produced by M4.
+ * Immutable, inspectable, executable CPU plan produced by M4 and the selected
+ * post-M4 fusion lowering.
  *
  * <p>The plan retains logical buffers from M2 and the schedule from M3. R1
  * adds an immutable physical-memory description derived from the final CPU
@@ -32,6 +33,7 @@ public final class CpuExecutionPlan {
     private final boolean hasParallelAnnotations;
     private final boolean hasVectorAnnotations;
     private final long estimatedTemporaryBytes;
+    private final FusionMetrics fusionMetrics;
     private final PhysicalMemoryPlan physicalMemoryPlan;
 
     CpuExecutionPlan(SchedulePlan schedule,
@@ -40,6 +42,23 @@ public final class CpuExecutionPlan {
                      List<LogicalBuffer> temporaryBuffers,
                      List<LogicalBuffer> materializedTemporaryBuffers,
                      List<LogicalBuffer> elidedTemporaryBuffers) {
+        this(
+            schedule,
+            steps,
+            inputBindings,
+            temporaryBuffers,
+            materializedTemporaryBuffers,
+            elidedTemporaryBuffers,
+            FusionMetrics.empty(FusionStrategy.fromSystemProperty(), schedule.program(), steps));
+    }
+
+    CpuExecutionPlan(SchedulePlan schedule,
+                     List<CpuStep> steps,
+                     List<CpuBufferBinding> inputBindings,
+                     List<LogicalBuffer> temporaryBuffers,
+                     List<LogicalBuffer> materializedTemporaryBuffers,
+                     List<LogicalBuffer> elidedTemporaryBuffers,
+                     FusionMetrics fusionMetrics) {
         this.schedule = Objects.requireNonNull(schedule, "CPU schedule must not be null");
         this.steps = immutableCopy(steps, "CPU steps");
         this.inputBindings = immutableCopy(inputBindings, "CPU input bindings");
@@ -48,6 +67,8 @@ public final class CpuExecutionPlan {
             materializedTemporaryBuffers, "CPU materialized temporary buffers");
         this.elidedTemporaryBuffers = immutableCopy(
             elidedTemporaryBuffers, "CPU elided temporary buffers");
+        this.fusionMetrics = Objects.requireNonNull(
+            fusionMetrics, "CPU fusion metrics must not be null");
         this.outputBuffer = schedule.program().resultBuffer();
         validateStepIds();
         validateBuffers();
@@ -104,6 +125,20 @@ public final class CpuExecutionPlan {
     /** Short alias for diagnostics and callers that use the memory-plan term. */
     public PhysicalMemoryPlan memoryPlan() {
         return physicalMemoryPlan;
+    }
+
+    /** Immutable accounting and planner decisions for the final CPU plan. */
+    public FusionMetrics fusionMetrics() {
+        return fusionMetrics;
+    }
+
+    /** Short alias for callers that use the generic metrics term. */
+    public FusionMetrics metrics() {
+        return fusionMetrics;
+    }
+
+    public FusionStrategy fusionStrategy() {
+        return fusionMetrics.strategy();
     }
 
     public int physicalSlotCount() {
@@ -167,6 +202,30 @@ public final class CpuExecutionPlan {
         return steps.stream().anyMatch(step -> step.kind() == CpuStepKind.FUSED_ELEMENTWISE);
     }
 
+    public boolean hasFusedRegionStep() {
+        return steps.stream().anyMatch(step -> step instanceof CpuFusedRegionStep);
+    }
+
+    public List<FusedRegionPlan> fusedRegions() {
+        return steps.stream()
+            .filter(CpuFusedRegionStep.class::isInstance)
+            .map(CpuFusedRegionStep.class::cast)
+            .map(CpuFusedRegionStep::regionPlan)
+            .toList();
+    }
+
+    public int fusedRegionCount() {
+        return fusionMetrics.fusedRegionCount();
+    }
+
+    public int fusionElidedTemporaryCount() {
+        return fusionMetrics.fusionElidedTemporaryCount();
+    }
+
+    public long estimatedFusionElidedBytes() {
+        return fusionMetrics.fusionElidedBytes();
+    }
+
     public boolean hasParallelAnnotations() {
         return hasParallelAnnotations;
     }
@@ -214,6 +273,17 @@ public final class CpuExecutionPlan {
         appendBuffers(result, materializedTemporaryBuffers);
         result.append("  elided by fusion:\n");
         appendBuffers(result, elidedTemporaryBuffers);
+        result.append("fusion planning:\n");
+        result.append(fusionMetrics.dump().indent(2));
+        result.append("  accepted regions:\n");
+        List<FusedRegionPlan> regions = fusedRegions();
+        if (regions.isEmpty()) {
+            result.append("    (none)\n");
+        } else {
+            for (FusedRegionPlan region : regions) {
+                result.append(region.dump().indent(4));
+            }
+        }
         result.append(physicalMemoryPlan.dump());
         result.append("steps:\n");
         if (steps.isEmpty()) {
