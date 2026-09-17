@@ -2029,6 +2029,20 @@ The negative evidence is retained instead of only reporting the fastest row:
 * Scalar JNI ties or beats AVX2 at the smallest crossover points.
 * The initial implementation does not claim a tiled-transpose or prefetch win.
 
+### Regression evidence
+
+The focused R4/R5 suite passed, including `R4CodegenTest`,
+`R4GeneratedNativeExecutionTest`, `R5AutotuningTest`, native variant
+coexistence, the direct-native benchmark, and the opt-in JNI crossover
+harness. A full `bash gradlew test` run executed 511 tests with five skips and
+two failures. Both failures reproduce on the clean R4 base
+`feature/compiler-generated-simd` at `10a2905`: the environment-sensitive
+`AlgorithmDispatchTest.coldStartAllowsCppOnlyForFoundationAlgorithmsAboveThreshold`
+assertion and the vendor-BLAS expectation in
+`NativeGemmIntegrationTest.nativeBackendUsesAvx2PackedMicrokernelOnWindowsBuild`.
+They are unrelated to the R5 files and are retained as explicitly documented
+pre-existing/environment failures.
+
 ### Existing JLC calibration patterns
 
 R5 follows the existing JLC calibration ideas in
