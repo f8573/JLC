@@ -1,5 +1,8 @@
 package net.faulj.nativeblas;
 
+import net.faulj.decomposition.result.SVDResult;
+import net.faulj.matrix.Matrix;
+
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -33,6 +36,28 @@ public final class BackendRegistry {
         NativeContext nativeContext = nativeContextFor(requested);
         return requested != BackendMode.JAVA
             && AlgorithmDispatch.shouldUseCpp(new AlgorithmDispatchRequest(algorithm, mode, rows, cols, threadCount), nativeContext);
+    }
+
+    /**
+     * Select and invoke the native SVD only when the normal per-algorithm
+     * dispatch policy permits it. A null result preserves the Java fallback.
+     */
+    public static SVDResult tryNativeSvd(Matrix matrix, boolean thin) {
+        if (matrix == null) {
+            return null;
+        }
+        int rows = matrix.getRowCount();
+        int cols = matrix.getColumnCount();
+        String mode = thin ? "thin" : "full";
+        BackendMode requested = requestedBackend();
+        NativeContext nativeContext = nativeContextFor(requested);
+        AlgorithmDispatchRequest request = new AlgorithmDispatchRequest(
+            "svd", mode, rows, cols, 1);
+        if (requested != BackendMode.JAVA
+            && AlgorithmDispatch.shouldUseCpp(request, nativeContext)) {
+            return NATIVE_BACKEND.svd(matrix, thin);
+        }
+        return null;
     }
 
     public static BackendSnapshot snapshot() {

@@ -3,6 +3,7 @@ package net.faulj.svd;
 import net.faulj.decomposition.result.SVDResult;
 import net.faulj.matrix.Matrix;
 import net.faulj.nativeblas.AlgorithmBackend;
+import net.faulj.nativeblas.BackendRegistry;
 import net.faulj.nativeblas.NativeAlgorithmScope;
 
 import java.util.Map;
@@ -48,6 +49,10 @@ public class SVDecomposition {
     public SVDResult decompose(Matrix A) {
         if (A == null) {
             throw new IllegalArgumentException("Matrix must not be null");
+        }
+        SVDResult nativeResult = BackendRegistry.tryNativeSvd(A, false);
+        if (nativeResult != null) {
+            return nativeResult;
         }
         Map<String, AlgorithmBackend> stageBackends = nativeStageBackends(A, "full");
         SVDResult res = NativeAlgorithmScope.withOverrides(stageBackends, () -> switch (algorithm) {
