@@ -2217,14 +2217,13 @@ The negative evidence is retained instead of only reporting the fastest row:
 The focused R4/R5/post-R5 suite passed, including `R4CodegenTest`,
 `R4GeneratedNativeExecutionTest`, `R5AutotuningTest`, native variant
 coexistence, the direct-native benchmark, and the opt-in JNI crossover
-harness. A full `bash gradlew test` run executed 519 tests with five skips and
-two failures. Both failures reproduce on the clean R4 base
-`feature/compiler-generated-simd` at `10a2905`: the environment-sensitive
-`AlgorithmDispatchTest.coldStartAllowsCppOnlyForFoundationAlgorithmsAboveThreshold`
-assertion and the vendor-BLAS expectation in
-`NativeGemmIntegrationTest.nativeBackendUsesAvx2PackedMicrokernelOnWindowsBuild`.
-They are unrelated to the R5 files and are retained as explicitly documented
-pre-existing/environment failures.
+harness. In the final fresh checkout, `./gradlew test` executed 519 tests with
+five skips and zero failures; the explicit `testNativeBackend` task executed
+36 tests with zero skips and zero failures. Earlier validation runs exposed an
+environment-sensitive `AlgorithmDispatchTest` assertion and a
+platform-specific vendor-BLAS expectation in
+`NativeGemmIntegrationTest`; those contracts were corrected before the public
+checkpoint was integrated, so they are not final checkpoint failures.
 
 ### Existing JLC calibration patterns
 
