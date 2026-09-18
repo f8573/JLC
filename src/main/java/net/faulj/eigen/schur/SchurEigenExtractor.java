@@ -223,8 +223,10 @@ public class SchurEigenExtractor {
             resNorm = Math.sqrt(resNorm);
             yNorm = Math.sqrt(yNorm);
 
-            double allowed = Tolerance.get() * Math.max(1.0, yNorm) * Math.max(1.0, maxAbsT);
-            if (yNorm < Tolerance.get() || resNorm > allowed * 1e3) {
+            // Only use nullspace fallback when the eigenvector is truly zero
+            // or the residual is very large relative to the matrix norm.
+            double normT = maxAbsT * Math.sqrt(n);
+            if (yNorm < 1e-14) {
                 // recompute via nullspace of (T - lambda I)
                 try {
                     Matrix Tmat = inflate(tData);
@@ -462,86 +464,212 @@ public class SchurEigenExtractor {
             }
         }
 
-        // Iterate backwards (Back-Substitution)
-        // For each row k from n-1 down to 0
-        for (int k = n - 1; k >= 0; k--) {
-            int rowOffset = k * n;
-            int tRowOffset = k * n;
-            double t_kk = tData[tRowOffset + k];
+        // Pre-identify 2x2 blocks: blockFlag[k] = true if row k is the TOP of a 2x2 block
+        double machEps = 2.220446049250313e-16;
+        boolean[] isTopOf2x2 = new boolean[n];
+        for (int k = 0; k < n - 1; k++) {
+            if (Math.abs(tData[(k + 1) * n + k]) > machEps * (Math.abs(tData[k * n + k]) + Math.abs(tData[(k + 1) * n + (k + 1)]) + machEps)) {
+                isTopOf2x2[k] = true;
+            }
+        }
 
-            // For each eigenvector j in this batch
-            for (int j = startCol; j < endCol; j++) {
-                if (fixed != null && fixed[j]) continue;
+        // Iterate backwards (Back-Substitution) with proper 2x2 block handling.
+        // LAPACK dtrevc approach: when back-substituting a real eigenvector through
+        // a 2x2 complex block at rows (k, k+1), solve the 2x2 system simultaneously.
+        int k = n - 1;
+        while (k >= 0) {
+            // Check if (k-1, k) is a 2x2 block (k is the bottom row)
+            boolean is2x2 = (k >= 1 && isTopOf2x2[k - 1]);
 
-                // Handle Complex Conjugate Pairs
-                if (Math.abs(valImag[j]) > tol) {
-                    // It's a complex pair. We process j (real part) and j+1 (imag part) together.
-                    // If we define the complex eigenvector as v = vr + i*vi
-                    // We solve (T - (lr + i*li)I)(vr + i*vi) = 0
-                    // Real part: (T - lr*I)vr + li*vi = 0
-                    // Imag part: (T - lr*I)vi - li*vr = 0
+            if (is2x2) {
+                int k1 = k - 1; // top row of 2x2 block
+                int k2 = k;     // bottom row
+                int rowOff1 = k1 * n;
+                int rowOff2 = k2 * n;
+                double t11 = tData[rowOff1 + k1];
+                double t12 = tData[rowOff1 + k2];
+                double t21 = tData[rowOff2 + k1];
+                double t22 = tData[rowOff2 + k2];
 
-                    // Complex pairs are processed when we hit the second element (j+1) or
-                    // we handle both at j. Let's skip the second one in the loop.
-                    if (j > startCol && Math.abs(valImag[j-1]) > tol &&
-                            Math.abs(valReal[j] - valReal[j-1]) < tol) {
-                        continue; // Already processed as the "imaginary part" column of the previous j
-                    }
+                for (int j = startCol; j < endCol; j++) {
+                    if (fixed != null && fixed[j]) continue;
+                    if (Math.abs(valImag[j]) > tol) {
+                        // Complex eigenvector: solve 2x2 complex system simultaneously
+                        if (j > startCol && Math.abs(valImag[j-1]) > tol &&
+                                Math.abs(valReal[j] - valReal[j-1]) < tol) {
+                            continue;
+                        }
+                        int colReal = j;
+                        int colImag = j + 1;
+                        if (colImag >= endCol) continue;
+                        int blockRow = findComplexBlockRow(colReal);
+                        if (blockRow >= 0 && k2 >= blockRow) continue;
 
-                    int colReal = j;
-                    int colImag = j + 1;
+                        double lambdaRe = valReal[colReal];
+                        double lambdaIm = valImag[colReal];
+                        double d11c = t11 - lambdaRe;
+                        double d22c = t22 - lambdaRe;
 
-                    // Check if k is at or below the 2x2 block that generated this eigenvalue
-                    int blockRow = findComplexBlockRow(colReal);
-                    if (blockRow >= 0 && k >= blockRow) {
-                        // Skip - already initialized by the first pass
+                        // RHS: -sum of T[k1/k2, m] * v[m] for m > k2
+                        double sumR1 = 0, sumI1 = 0, sumR2 = 0, sumI2 = 0;
+                        for (int m = k2 + 1; m < n; m++) {
+                            sumR1 += tData[rowOff1 + m] * Y[m * n + colReal];
+                            sumI1 += tData[rowOff1 + m] * Y[m * n + colImag];
+                            sumR2 += tData[rowOff2 + m] * Y[m * n + colReal];
+                            sumI2 += tData[rowOff2 + m] * Y[m * n + colImag];
+                        }
+                        double b1r = -sumR1, b1i = -sumI1;
+                        double b2r = -sumR2, b2i = -sumI2;
+
+                        // Complex det: (d11-iλi)(d22-iλi) - t12*t21
+                        double detR = d11c * d22c - t12 * t21 - lambdaIm * lambdaIm;
+                        double detI = -lambdaIm * (d11c + d22c);
+                        double detMagSq = detR * detR + detI * detI;
+                        double safeDetMagSq = Math.max(detMagSq, machEps * machEps);
+
+                        // Cramer's rule numerators
+                        // v1 = ((d22-iλi)*b1 - t12*b2) / det
+                        double num1r = d22c * b1r + lambdaIm * b1i - t12 * b2r;
+                        double num1i = d22c * b1i - lambdaIm * b1r - t12 * b2i;
+                        // v2 = (-t21*b1 + (d11-iλi)*b2) / det
+                        double num2r = -t21 * b1r + d11c * b2r + lambdaIm * b2i;
+                        double num2i = -t21 * b1i + d11c * b2i - lambdaIm * b2r;
+
+                        // Complex division: num / det = num * conj(det) / |det|^2
+                        Y[rowOff1 + colReal] = (num1r * detR + num1i * detI) / safeDetMagSq;
+                        Y[rowOff1 + colImag] = (num1i * detR - num1r * detI) / safeDetMagSq;
+                        Y[rowOff2 + colReal] = (num2r * detR + num2i * detI) / safeDetMagSq;
+                        Y[rowOff2 + colImag] = (num2i * detR - num2r * detI) / safeDetMagSq;
                         continue;
                     }
 
-                    // Current j is the Real part column, j+1 is the Imag part column
-                    solveComplexPixel(k, colReal, colImag, rowOffset, tRowOffset, Y);
-                    continue;
+                    // Real eigenvector: solve the 2x2 system
+                    double lambda = valReal[j];
+
+                    // RHS: -sum of T[k1/k2, m] * Y[m, j] for m > k2
+                    double rhs1 = 0.0, rhs2 = 0.0;
+                    for (int m = k2 + 1; m < n; m++) {
+                        rhs1 += tData[rowOff1 + m] * Y[m * n + j];
+                        rhs2 += tData[rowOff2 + m] * Y[m * n + j];
+                    }
+                    rhs1 = -rhs1;
+                    rhs2 = -rhs2;
+
+                    if (k1 == j || k2 == j) {
+                        // The pivot position is inside this 2x2 block
+                        if (k2 == j) {
+                            Y[rowOff2 + j] = 1.0;
+                            // Back-sub row k1: (t11 - lambda)*y[k1] + t12*1 = rhs1 - (terms from k2)
+                            double diag = t11 - lambda;
+                            double safeDenom = Math.max(Math.abs(diag),
+                                    machEps * (Math.abs(t11) + Math.abs(lambda) + machEps));
+                            if (diag < 0) safeDenom = -safeDenom;
+                            Y[rowOff1 + j] = (rhs1 - t12 * 1.0) / safeDenom;
+                        } else { // k1 == j
+                            Y[rowOff1 + j] = 1.0;
+                            double diag = t22 - lambda;
+                            double safeDenom = Math.max(Math.abs(diag),
+                                    machEps * (Math.abs(t22) + Math.abs(lambda) + machEps));
+                            if (diag < 0) safeDenom = -safeDenom;
+                            Y[rowOff2 + j] = (rhs2 - t21 * 1.0) / safeDenom;
+                        }
+                    } else {
+                        // Solve 2x2 system:
+                        // [t11-lambda  t12] [y1]   [rhs1]
+                        // [t21  t22-lambda] [y2] = [rhs2]
+                        double d11 = t11 - lambda;
+                        double d22 = t22 - lambda;
+                        double det = d11 * d22 - t12 * t21;
+                        double safeDet = Math.max(Math.abs(det),
+                                machEps * (Math.abs(d11 * d22) + Math.abs(t12 * t21) + machEps));
+                        if (det < 0) safeDet = -safeDet;
+                        Y[rowOff1 + j] = (d22 * rhs1 - t12 * rhs2) / safeDet;
+                        Y[rowOff2 + j] = (d11 * rhs2 - t21 * rhs1) / safeDet;
+                    }
                 }
+                k -= 2; // skip both rows of the 2x2 block
+            } else {
+                // 1x1 block: standard scalar back-substitution
+                int rowOffset = k * n;
+                int tRowOffset = k * n;
+                double t_kk = tData[tRowOffset + k];
 
-                // --- Real Eigenvector Case ---
+                for (int j = startCol; j < endCol; j++) {
+                    if (fixed != null && fixed[j]) continue;
 
-                // 1. Compute diagonal entry (T_kk - lambda_j)
-                double diag = t_kk - valReal[j];
+                    if (Math.abs(valImag[j]) > tol) {
+                        if (j > startCol && Math.abs(valImag[j-1]) > tol &&
+                                Math.abs(valReal[j] - valReal[j-1]) < tol) {
+                            continue;
+                        }
+                        int colReal = j;
+                        int colImag = j + 1;
+                        int blockRow = findComplexBlockRow(colReal);
+                        if (blockRow >= 0 && k >= blockRow) continue;
+                        solveComplexPixel(k, colReal, colImag, rowOffset, tRowOffset, Y);
+                        continue;
+                    }
 
-                // 2. Compute accumulation: sum = sum(T_km * y_mj) for m > k
-                // Since T is upper triangular, we only sum m > k.
-                double sum = 0.0;
+                    // Real eigenvector case
+                    double lambda = valReal[j];
+                    double diag = t_kk - lambda;
 
-                // VECTORIZATION OPPORTUNITY: This loop is a dot product.
-                // T is row-major, Y is row-major.
-                // We are accessing Y[m][j] (column stride). This is a strided access (slow).
-                // However, T is accessed sequentially.
-                for (int m = k + 1; m < n; m++) {
-                    sum += tData[tRowOffset + m] * Y[m * n + j];
+                    double sum = 0.0;
+                    for (int m = k + 1; m < n; m++) {
+                        sum += tData[tRowOffset + m] * Y[m * n + j];
+                    }
+
+                    if (k == j) {
+                        Y[rowOffset + j] = 1.0;
+                    } else {
+                        double safeDenom = Math.max(Math.abs(diag),
+                                machEps * (Math.abs(t_kk) + Math.abs(lambda) + machEps));
+                        if (diag < 0) safeDenom = -safeDenom;
+                        Y[rowOffset + j] = -sum / safeDenom;
+                    }
                 }
+                k--;
+            }
+        }
 
-                // 3. Solve for Y[k][j]
-                if (k > j) {
-                    // For k > j (below the diagonal of the eigenvector matrix), value is 0
-                    // UNLESS T is not strictly triangular (quasi-triangular).
-                    // But in Schur form, eigenvalues are on diagonal.
-                    // Standard algo sets y_j[j] = 1, and backsubs.
-                    // The code below handles the general case.
+        // Normalize each real eigenvector column after back-substitution
+        // to prevent blowup from near-singular denominators.
+        for (int j = startCol; j < endCol; j++) {
+            if (fixed != null && fixed[j]) continue;
+            if (Math.abs(valImag[j]) > tol) continue;
+            double maxAbs = 0.0;
+            for (int r = 0; r < n; r++) {
+                double av = Math.abs(Y[r * n + j]);
+                if (av > maxAbs) maxAbs = av;
+            }
+            if (maxAbs > 0 && maxAbs != 1.0) {
+                double inv = 1.0 / maxAbs;
+                for (int r = 0; r < n; r++) {
+                    Y[r * n + j] *= inv;
                 }
+            }
+        }
 
-                if (Math.abs(diag) < tol) {
-                    diag = tol; // Protect division by zero
-                }
-
-                // If we are at the diagonal (k == j), we can fix the scale (e.g., 1.0)
-                if (k == j) {
-                    Y[rowOffset + j] = 1.0;
-                    // We must re-evaluate the equation consistency or rely on the fact
-                    // that (T-lambda*I) is singular here.
-                    // For strictly triangular T, the row equation at k=j is 0=0 if we didn't set y_k=1.
-                    // With y_k=1, we don't divide.
-                } else {
-                    Y[rowOffset + j] = -sum / diag;
+        // Normalize each complex eigenvector pair after back-substitution
+        for (int j = startCol; j < endCol; j++) {
+            if (fixed != null && fixed[j]) continue;
+            if (Math.abs(valImag[j]) <= tol) continue;
+            if (valImag[j] < 0) continue; // Only normalize the first of the pair
+            int colReal = j;
+            int colImag = j + 1;
+            if (colImag >= endCol) continue;
+            double maxAbs = 0.0;
+            for (int r = 0; r < n; r++) {
+                double avr = Math.abs(Y[r * n + colReal]);
+                double avi = Math.abs(Y[r * n + colImag]);
+                if (avr > maxAbs) maxAbs = avr;
+                if (avi > maxAbs) maxAbs = avi;
+            }
+            if (maxAbs > 0 && maxAbs != 1.0) {
+                double inv = 1.0 / maxAbs;
+                for (int r = 0; r < n; r++) {
+                    Y[r * n + colReal] *= inv;
+                    Y[r * n + colImag] *= inv;
                 }
             }
         }
@@ -652,31 +780,74 @@ public class SchurEigenExtractor {
             evecData[i1 * n + colImag] = c * denom_im / denom_mag_sq;
         }
 
-        // Now back-substitute upward for rows above the block
-        for (int k = i0 - 1; k >= 0; k--) {
-            int tRowOffset = k * n;
-            double t_kk = tData[tRowOffset + k];
-
-            double sumReal = 0.0;
-            double sumImag = 0.0;
-
-            for (int m = k + 1; m < n; m++) {
-                double T_km = tData[tRowOffset + m];
-                sumReal += T_km * evecData[m * n + colReal];
-                sumImag += T_km * evecData[m * n + colImag];
+        // Now back-substitute upward for rows above the block, handling 2x2 blocks
+        double machEps = 2.220446049250313e-16;
+        // Identify 2x2 blocks
+        boolean[] isTop2x2 = new boolean[n];
+        for (int kk = 0; kk < n - 1; kk++) {
+            if (Math.abs(tData[(kk + 1) * n + kk]) > machEps * (Math.abs(tData[kk * n + kk]) + Math.abs(tData[(kk + 1) * n + (kk + 1)]) + machEps)) {
+                isTop2x2[kk] = true;
             }
+        }
 
-            double diag = t_kk - lambdaRe;
-            double li = lambdaIm;
+        int k = i0 - 1;
+        while (k >= 0) {
+            boolean is2x2block = (k >= 1 && isTop2x2[k - 1]);
+            if (is2x2block) {
+                int k1 = k - 1, k2 = k;
+                int rOff1 = k1 * n, rOff2 = k2 * n;
+                double tk11 = tData[rOff1 + k1], tk12 = tData[rOff1 + k2];
+                double tk21 = tData[rOff2 + k1], tk22 = tData[rOff2 + k2];
 
-            double det = diag * diag + li * li;
-            if (det < tol) det = tol;
+                double sumR1 = 0, sumI1 = 0, sumR2 = 0, sumI2 = 0;
+                for (int m = k2 + 1; m < n; m++) {
+                    sumR1 += tData[rOff1 + m] * evecData[m * n + colReal];
+                    sumI1 += tData[rOff1 + m] * evecData[m * n + colImag];
+                    sumR2 += tData[rOff2 + m] * evecData[m * n + colReal];
+                    sumI2 += tData[rOff2 + m] * evecData[m * n + colImag];
+                }
+                double b1r = -sumR1, b1i = -sumI1;
+                double b2r = -sumR2, b2i = -sumI2;
 
-            double rhsR = -sumReal;
-            double rhsI = -sumImag;
+                double d11 = tk11 - lambdaRe, d22 = tk22 - lambdaRe;
+                double detR = d11 * d22 - tk12 * tk21 - lambdaIm * lambdaIm;
+                double detI = -lambdaIm * (d11 + d22);
+                double detMagSq = detR * detR + detI * detI;
+                double safeDetMagSq = Math.max(detMagSq, machEps * machEps);
 
-            evecData[k * n + colReal] = (diag * rhsR - li * rhsI) / det;
-            evecData[k * n + colImag] = (li * rhsR + diag * rhsI) / det;
+                double num1r = d22 * b1r + lambdaIm * b1i - tk12 * b2r;
+                double num1i = d22 * b1i - lambdaIm * b1r - tk12 * b2i;
+                double num2r = -tk21 * b1r + d11 * b2r + lambdaIm * b2i;
+                double num2i = -tk21 * b1i + d11 * b2i - lambdaIm * b2r;
+
+                evecData[k1 * n + colReal] = (num1r * detR + num1i * detI) / safeDetMagSq;
+                evecData[k1 * n + colImag] = (num1i * detR - num1r * detI) / safeDetMagSq;
+                evecData[k2 * n + colReal] = (num2r * detR + num2i * detI) / safeDetMagSq;
+                evecData[k2 * n + colImag] = (num2i * detR - num2r * detI) / safeDetMagSq;
+                k -= 2;
+            } else {
+                int tRowOffset = k * n;
+                double t_kk = tData[tRowOffset + k];
+
+                double sumReal = 0.0, sumImag = 0.0;
+                for (int m = k + 1; m < n; m++) {
+                    double T_km = tData[tRowOffset + m];
+                    sumReal += T_km * evecData[m * n + colReal];
+                    sumImag += T_km * evecData[m * n + colImag];
+                }
+
+                double diag = t_kk - lambdaRe;
+                double li = lambdaIm;
+                double det = diag * diag + li * li;
+                if (det < tol) det = tol;
+
+                double rhsR = -sumReal;
+                double rhsI = -sumImag;
+
+                evecData[k * n + colReal] = (diag * rhsR - li * rhsI) / det;
+                evecData[k * n + colImag] = (li * rhsR + diag * rhsI) / det;
+                k--;
+            }
         }
     }
 

@@ -170,54 +170,52 @@
   gap: 2px;
 }
 
-@layer components {
-  .tab-active {
-    @apply border-primary text-primary bg-primary/5;
-  }
+.tab-active {
+  @apply border-primary text-primary bg-primary/5;
+}
 
-  .dark .tab-active {
-    @apply border-primary text-primary bg-primary/20;
-  }
+.dark .tab-active {
+  @apply border-primary text-primary bg-primary/20;
+}
 
-  .tab-inactive {
-    @apply border-transparent text-slate-400 hover:text-primary hover:bg-primary/5;
-  }
+.tab-inactive {
+  @apply border-transparent text-slate-400 hover:text-primary hover:bg-primary/5;
+}
 
-  .dark .tab-inactive {
-    @apply text-slate-500 hover:text-primary hover:bg-primary/10;
-  }
+.dark .tab-inactive {
+  @apply text-slate-500 hover:text-primary hover:bg-primary/10;
+}
 
-  .report-section {
-    @apply py-12 border-b border-border-elegant scroll-mt-20;
-  }
+.report-section {
+  @apply py-12 border-b border-border-elegant scroll-mt-20;
+}
 
-  .dark .report-section {
-    @apply border-slate-700;
-  }
+.dark .report-section {
+  @apply border-slate-700;
+}
 
-  .math-text {
-    @apply font-math italic text-slate-800;
-  }
+.math-text {
+  @apply font-math italic text-slate-800;
+}
 
-  .dark .math-text {
-    @apply text-slate-200;
-  }
+.dark .math-text {
+  @apply text-slate-200;
+}
 
-  .sticky-toc-link {
-    @apply block py-1.5 px-3 text-sm text-slate-500 hover:text-primary hover:bg-primary-light rounded transition-all border-l-2 border-transparent;
-  }
+.sticky-toc-link {
+  @apply block py-1.5 px-3 text-sm text-slate-500 hover:text-primary hover:bg-primary-light rounded transition-all border-l-2 border-transparent;
+}
 
-  .dark .sticky-toc-link {
-    @apply text-slate-400 hover:bg-primary/10;
-  }
+.dark .sticky-toc-link {
+  @apply text-slate-400 hover:bg-primary/10;
+}
 
-  .sticky-toc-link.active {
-    @apply text-primary border-primary font-semibold bg-primary-light;
-  }
+.sticky-toc-link.active {
+  @apply text-primary border-primary font-semibold bg-primary-light;
+}
 
-  .dark .sticky-toc-link.active {
-    @apply bg-primary/20;
-  }
+.dark .sticky-toc-link.active {
+  @apply bg-primary/20;
 }
 
 @media print {
@@ -249,4 +247,11 @@ body {
 #root {
   height: 100%;
   overflow: hidden;
+}
+
+html.no-theme-fade *,
+html.no-theme-fade *::before,
+html.no-theme-fade *::after {
+  transition: none !important;
+  animation: none !important;
 }

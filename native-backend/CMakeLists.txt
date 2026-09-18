@@ -10,6 +10,8 @@ option(JLC_NATIVE_ENABLE_VENDOR_BLAS "Enable vendor BLAS integration when availa
 option(JLC_NATIVE_ENABLE_MARCH_NATIVE "Enable -march=native for GCC/Clang/MinGW release builds" ON)
 option(JLC_NATIVE_ENABLE_EXPERIMENTAL_GEMM "Build reproducibility-only GEMM consumers, layouts and shared-A" OFF)
 option(JLC_NATIVE_ENABLE_EXPERIMENTAL_ASM "Build the opt-in handwritten kmajor6 GEMM consumers" OFF)
+set(JLC_R4_GENERATED_SOURCE_DIR "" CACHE PATH
+  "Optional directory of Java-emitted R4 .cpp sources to link into jlc_native")
 set(JLC_NATIVE_VENDOR_BLAS "AUTO" CACHE STRING "Vendor BLAS preference: AUTO, NONE, OPENBLAS, MKL")
 set_property(CACHE JLC_NATIVE_VENDOR_BLAS PROPERTY STRINGS AUTO NONE OPENBLAS MKL)
 
@@ -43,6 +45,58 @@ add_library(jlc_native_kernel OBJECT
   src/main/cpp/kernels/bidiagonal.cpp
 )
 
+# R4 generated-kernel registry is compiled with strict floating-point flags.
+# It is intentionally separate from the existing GEMM target, whose historical
+# benchmark path retains its own optimization policy.
+add_library(jlc_native_codegen OBJECT
+  src/main/cpp/codegen/jlc_generated_kernel_registry.cpp
+)
+target_include_directories(jlc_native_codegen PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/main/cpp/codegen"
+)
+if(MSVC)
+  target_compile_options(jlc_native_codegen PRIVATE /O2)
+else()
+  target_compile_options(jlc_native_codegen PRIVATE -O2 -fno-fast-math -ffp-contract=off)
+endif()
+
+if(JLC_R4_GENERATED_SOURCE_DIR)
+  file(GLOB JLC_R4_GENERATED_SOURCES CONFIGURE_DEPENDS
+    "${JLC_R4_GENERATED_SOURCE_DIR}/*.cpp")
+  if(JLC_R4_GENERATED_SOURCES)
+    target_sources(jlc_native_codegen PRIVATE ${JLC_R4_GENERATED_SOURCES})
+    foreach(JLC_R4_SOURCE IN LISTS JLC_R4_GENERATED_SOURCES)
+      # Typed R5 sources declare their backend in a deterministic comment.
+      # Compile scalar-native artifacts without AVX2 so they remain a safe
+      # fallback on hosts where the generated AVX2 peer cannot execute. Older
+      # R4 sources have no marker; retain the historical AVX2 compile flags
+      # for those compatibility artifacts.
+      file(STRINGS "${JLC_R4_SOURCE}" JLC_R4_BACKEND_MARKER
+        REGEX "^// variant-backend=" LIMIT_COUNT 1)
+      set(JLC_R4_SOURCE_IS_AVX2 ON)
+      if(JLC_R4_BACKEND_MARKER MATCHES "^// variant-backend=SCALAR_CPP")
+        set(JLC_R4_SOURCE_IS_AVX2 OFF)
+      endif()
+      if(MSVC)
+        if(JLC_R4_SOURCE_IS_AVX2)
+          set(JLC_R4_SOURCE_OPTIONS "/O2;/fp:strict;/arch:AVX2")
+        else()
+          set(JLC_R4_SOURCE_OPTIONS "/O2;/fp:strict")
+        endif()
+      else()
+        set(JLC_R4_SOURCE_OPTIONS "-O2;-fno-fast-math;-ffp-contract=off")
+        if(JLC_R4_SOURCE_IS_AVX2)
+          list(APPEND JLC_R4_SOURCE_OPTIONS "-mavx2")
+        endif()
+      endif()
+      set_source_files_properties(${JLC_R4_SOURCE} PROPERTIES
+        COMPILE_OPTIONS "${JLC_R4_SOURCE_OPTIONS}")
+    endforeach()
+    target_include_directories(jlc_native_codegen PRIVATE
+      "${JLC_R4_GENERATED_SOURCE_DIR}")
+  endif()
+endif()
+
 # Assembly is a subset of the experimental implementation. Preserve the existing
 # assembly-only opt-in command by enabling its required source group as well.
 if(JLC_NATIVE_ENABLE_EXPERIMENTAL_ASM)
@@ -73,12 +127,14 @@ target_include_directories(jlc_native_kernel PRIVATE
 add_library(jlc_native SHARED
   src/main/cpp/jni/jlc_native_Jni.cpp
   $<TARGET_OBJECTS:jlc_native_kernel>
+  $<TARGET_OBJECTS:jlc_native_codegen>
 )
 
 target_include_directories(jlc_native PRIVATE
   "${JLC_JNI_INCLUDE}"
   "${JLC_JNI_PLATFORM_INCLUDE}"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/main/cpp/api"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/main/cpp/codegen"
 )
 
 add_executable(jlc_native_gemm_sweep

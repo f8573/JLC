@@ -67,9 +67,9 @@ function JsonModal({ open, onClose, matrixString, diagnostics }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-11/12 md:w-3/4 lg:w-2/3 max-h-[80vh] bg-white rounded-xl shadow-lg overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-          <h3 className="text-sm font-bold">JSON Data</h3>
+      <div className="relative w-11/12 md:w-3/4 lg:w-2/3 max-h-[80vh] bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-lg overflow-hidden transition-colors duration-300">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">JSON Data</h3>
           <div className="flex items-center gap-2">
             <button
               onClick={handleDownload}
@@ -87,7 +87,7 @@ function JsonModal({ open, onClose, matrixString, diagnostics }) {
           </div>
         </div>
         <div className="p-4 overflow-auto max-h-[72vh]">
-          <pre className="whitespace-pre-wrap text-sm font-mono text-slate-800">
+          <pre className="whitespace-pre-wrap text-sm font-mono text-slate-800 dark:text-slate-200">
             {JSON.stringify({ matrixString, diagnostics }, null, 2)}
           </pre>
         </div>
@@ -116,9 +116,9 @@ export default function MatrixReportPage({ matrixString }) {
   const eigenvalues = diagnostics?.eigenvalues || []
   const alg = diagnostics?.algebraicMultiplicity || []
   const eigenvectors = diagnostics?.eigenvectors || null
-  const luL = diagnostics?.lu?.l?.data
-  const luU = diagnostics?.lu?.u?.data
-  const svdSigma = diagnostics?.svd?.sigma?.data
+  const luL = diagnostics?.lu?.l
+  const luU = diagnostics?.lu?.u
+  const svdSigma = diagnostics?.svd?.sigma
   const characteristic = formatPolynomial(diagnostics?.characteristicPolynomial)
 
   const determinant = formatNumber(diagnostics?.determinant, 4)
@@ -130,10 +130,8 @@ export default function MatrixReportPage({ matrixString }) {
   const matrixToDisplay = (matrix) => {
     if (!matrix) return null
     const data = matrix.data || matrix
-    const imag = matrix.imag
     if (!Array.isArray(data)) return null
-    if (!imag) return data
-    return data.map((row, rIdx) => row.flatMap((val, cIdx) => [val ?? 0, imag?.[rIdx]?.[cIdx] ?? 0]))
+    return matrix
   }
 
   const eigenvectorsDisplay = matrixToDisplay(eigenvectors)
@@ -143,8 +141,8 @@ export default function MatrixReportPage({ matrixString }) {
   }
 
   return (
-    <div className="bg-slate-50 font-display text-slate-900 h-screen overflow-hidden flex flex-col">
-      <header className="flex items-center justify-between border-b border-solid border-slate-200 bg-white px-6 py-3 sticky top-0 z-50 no-print">
+    <div className="bg-slate-50 dark:bg-slate-900 font-display text-slate-900 dark:text-slate-100 h-screen overflow-hidden flex flex-col transition-colors duration-300">
+      <header className="flex items-center justify-between border-b border-solid border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-6 py-3 sticky top-0 z-50 no-print transition-colors duration-300">
         <div className="flex items-center gap-8">
           <button 
             onClick={handleBackToBasic}
@@ -155,14 +153,14 @@ export default function MatrixReportPage({ matrixString }) {
           </button>
           <a href="/" className="flex items-center gap-3">
             <Logo />
-            <h2 className="text-lg font-bold leading-tight tracking-tight text-slate-800">ΛCompute</h2>
+            <h2 className="text-lg font-bold leading-tight tracking-tight text-slate-800 dark:text-slate-100">ΛCompute</h2>
           </a>
         </div>
         <div className="flex items-center gap-4">
           <nav className="flex items-center gap-6">
-            <a className="text-sm font-semibold text-slate-600 hover:text-primary" href="/documentation">Documentation</a>
+            <a className="text-sm font-semibold text-slate-600 dark:text-slate-300 hover:text-primary" href="/documentation">Documentation</a>
           </nav>
-          <div className="h-8 w-[1px] bg-slate-200 mx-2"></div>
+          <div className="h-8 w-[1px] bg-slate-200 dark:bg-slate-700 mx-2"></div>
           <button className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-bold shadow-md hover:bg-primary/90 transition-all" onClick={() => window.print()}>
             <span className="material-symbols-outlined text-[20px]">print</span>
             Export PDF
@@ -171,12 +169,12 @@ export default function MatrixReportPage({ matrixString }) {
       </header>
       <div className="flex-1 overflow-y-auto custom-scrollbar">
         <div className="max-w-[1200px] mx-auto flex gap-8 p-8">
-          <main className="flex-1 bg-white border border-border-elegant shadow-sm rounded-xl p-12 report-container min-h-[1500px]">
+          <main className="flex-1 bg-white dark:bg-slate-800 border border-border-elegant dark:border-slate-700 shadow-sm rounded-xl p-12 report-container min-h-[1500px] transition-colors duration-300 dark:[&_.bg-white]:bg-slate-800 dark:[&_.bg-slate-50]:bg-slate-800/60 dark:[&_.bg-slate-50\\/50]:bg-slate-800/60 dark:[&_.border-slate-100]:border-slate-700 dark:[&_.border-slate-200]:border-slate-700 dark:[&_.text-slate-900]:text-slate-100 dark:[&_.text-slate-800]:text-slate-100 dark:[&_.text-slate-700]:text-slate-200 dark:[&_.text-slate-600]:text-slate-300 dark:[&_.text-slate-500]:text-slate-400 dark:[&_.text-slate-400]:text-slate-500">
           <header className="mb-12">
             <div className="flex justify-between items-start mb-6">
               <div>
-                <h1 className="text-4xl font-black text-slate-900 mb-2">Matrix Analysis Report</h1>
-                <div className="flex gap-4 text-sm text-slate-400 font-medium">
+                <h1 className="text-4xl font-black text-slate-900 dark:text-slate-100 mb-2">Matrix Analysis Report</h1>
+                <div className="flex gap-4 text-sm text-slate-400 dark:text-slate-500 font-medium">
                   <span className="flex items-center gap-1">
                     <span className="material-symbols-outlined text-[16px]">fingerprint</span>
                     ID: #MS-99421-A
@@ -194,22 +192,22 @@ export default function MatrixReportPage({ matrixString }) {
                 </div>
               </div>
             </div>
-                <div className="grid grid-cols-4 gap-4 p-6 bg-slate-50 border border-slate-100 rounded-xl">
+                <div className="grid grid-cols-4 gap-4 p-6 bg-slate-50 dark:bg-slate-700/40 border border-slate-100 dark:border-slate-700 rounded-xl transition-colors duration-300">
               <div>
                 <p className="text-[10px] font-bold text-slate-400">Matrix Class</p>
-                <p className="font-bold text-slate-800">{diagnostics?.square ? 'Square' : 'Rectangular'}, {diagnostics?.domain === 'C' ? 'Complex' : 'Real'}</p>
+                <p className="font-bold text-slate-800 dark:text-slate-100">{diagnostics?.square ? 'Square' : 'Rectangular'}, {diagnostics?.domain === 'C' ? 'Complex' : 'Real'}</p>
               </div>
               <div>
                 <p className="text-[10px] font-bold text-slate-400">Determinant</p>
-                    <p className="font-bold text-slate-800 math-text"><Latex tex={`\\det(A) = ${determinant}`} /></p>
+                    <p className="font-bold text-slate-800 dark:text-slate-100 math-text"><Latex tex={`\\det(A) = ${determinant}`} /></p>
               </div>
               <div>
                 <p className="text-[10px] font-bold text-slate-400">Rank</p>
-                <p className="font-bold text-slate-800">{rank}</p>
+                <p className="font-bold text-slate-800 dark:text-slate-100">{rank}</p>
               </div>
               <div>
                 <p className="text-[10px] font-bold text-slate-400">Symmetry</p>
-                <p className="font-bold text-slate-800">{symmetry}</p>
+                <p className="font-bold text-slate-800 dark:text-slate-100">{symmetry}</p>
               </div>
             </div>
           </header>
@@ -277,7 +275,7 @@ export default function MatrixReportPage({ matrixString }) {
                   <div>
                     <p className="text-xs text-slate-400 mb-2">Reduced Row Echelon Form (RREF)</p>
                     {diagnostics?.rrefMatrix?.data ? (
-                      <MatrixLatex data={diagnostics.rrefMatrix.data} className="math-text text-sm" precision={2} />
+                      <MatrixLatex data={diagnostics.rrefMatrix} className="math-text text-sm" precision={2} />
                     ) : (
                       <p className="text-sm text-slate-400">Unavailable</p>
                     )}
@@ -285,7 +283,7 @@ export default function MatrixReportPage({ matrixString }) {
                   <div>
                     <p className="text-xs text-slate-400 mb-2">Row Echelon (Upper Triangular Form)</p>
                     {diagnostics?.rowEchelonMatrix?.data ? (
-                      <MatrixLatex data={diagnostics.rowEchelonMatrix.data} className="math-text text-sm" precision={2} />
+                      <MatrixLatex data={diagnostics.rowEchelonMatrix} className="math-text text-sm" precision={2} />
                     ) : (
                       <p className="text-sm text-slate-400">Unavailable</p>
                     )}
@@ -413,13 +411,13 @@ export default function MatrixReportPage({ matrixString }) {
                   <h4 className="text-sm font-bold text-slate-700">SVD (USV*)</h4>
                   <div className="flex items-center gap-4">
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={diagnostics?.svd?.u?.data} precision={2} />
+                      <MatrixLatex data={diagnostics?.svd?.u} precision={2} />
                     </div>
                     <div className="math-text text-[11px] scale-90">
                       <MatrixLatex data={svdSigma} precision={2} />
                     </div>
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={diagnostics?.svd?.v?.data} precision={2} />
+                      <MatrixLatex data={diagnostics?.svd?.v} precision={2} />
                     </div>
                   </div>
                   <p className="text-[10px] text-slate-400 italic">Truncated for display. Full precision in JSON export.</p>
@@ -431,10 +429,10 @@ export default function MatrixReportPage({ matrixString }) {
                   <h4 className="text-sm font-bold text-slate-700">QR Decomposition</h4>
                   <div className="flex items-center gap-4">
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={diagnostics?.qr?.q?.data} precision={2} />
+                      <MatrixLatex data={diagnostics?.qr?.q} precision={2} />
                     </div>
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={diagnostics?.qr?.r?.data} precision={2} />
+                      <MatrixLatex data={diagnostics?.qr?.r} precision={2} />
                     </div>
                   </div>
                 </div>
@@ -442,13 +440,13 @@ export default function MatrixReportPage({ matrixString }) {
                   <h4 className="text-sm font-bold text-slate-700">Cholesky / Polar / Hessenberg</h4>
                   <div className="flex items-center gap-4">
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={diagnostics?.cholesky?.l?.data} precision={2} />
+                      <MatrixLatex data={diagnostics?.cholesky?.l} precision={2} />
                     </div>
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={diagnostics?.polar?.u?.data} precision={2} />
+                      <MatrixLatex data={diagnostics?.polar?.u} precision={2} />
                     </div>
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={diagnostics?.hessenbergDecomposition?.h?.data} precision={2} />
+                      <MatrixLatex data={diagnostics?.hessenbergDecomposition?.h} precision={2} />
                     </div>
                   </div>
                 </div>
@@ -459,10 +457,10 @@ export default function MatrixReportPage({ matrixString }) {
                   <h4 className="text-sm font-bold text-slate-700">Schur / Spectral</h4>
                   <div className="flex items-center gap-4">
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={diagnostics?.schurDecomposition?.u?.data} precision={2} />
+                      <MatrixLatex data={diagnostics?.schurDecomposition?.u} precision={2} />
                     </div>
                     <div className="math-text text-[11px] scale-90">
-                      <MatrixLatex data={diagnostics?.schurDecomposition?.t?.data} precision={2} />
+                      <MatrixLatex data={diagnostics?.schurDecomposition?.t} precision={2} />
                     </div>
                   </div>
                 </div>
@@ -504,15 +502,15 @@ export default function MatrixReportPage({ matrixString }) {
               </div>
             </div>
           </section>
-          <footer className="mt-12 pt-8 border-t border-slate-100 flex justify-between items-center text-[10px] text-slate-400 font-bold">
+          <footer className="mt-12 pt-8 border-t border-slate-100 dark:border-slate-700 flex justify-between items-center text-[10px] text-slate-400 dark:text-slate-500 font-bold">
             <span>JLA HPC Engine v1.0.0</span>
             <span>Page 1 of 1</span>
             <span>Confidential Analysis Report</span>
           </footer>
           </main>
           <aside className="w-64 no-print h-fit sticky top-24">
-          <div className="bg-white rounded-xl border border-slate-200 p-6">
-            <h4 className="text-xs font-bold text-slate-900 mb-4 flex items-center gap-2">
+          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 transition-colors duration-300">
+            <h4 className="text-xs font-bold text-slate-900 dark:text-slate-100 mb-4 flex items-center gap-2">
               <span className="material-symbols-outlined text-primary text-[18px]">list_alt</span>
               Contents
             </h4>
@@ -524,19 +522,19 @@ export default function MatrixReportPage({ matrixString }) {
               <a className="sticky-toc-link" href="#decompositions">5. Decompositions</a>
               <a className="sticky-toc-link" href="#structure">6. Structure</a>
             </nav>
-            <div className="mt-8 pt-6 border-t border-slate-100">
+            <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-700">
               <button 
                 onClick={() => setJsonModalOpen(true)}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-slate-50 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-100 transition-all border border-slate-200 mb-2"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-200 rounded-lg text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-600 transition-all border border-slate-200 dark:border-slate-600 mb-2"
               >
                 <span className="material-symbols-outlined text-[18px]">download</span>
                 Raw JSON Data
               </button>
             </div>
           </div>
-          <div className="mt-6 p-4 rounded-xl bg-primary/5 border border-primary/10">
+          <div className="mt-6 p-4 rounded-xl bg-primary/5 dark:bg-primary/10 border border-primary/10 dark:border-primary/20 transition-colors duration-300">
             <p className="text-[10px] font-bold text-primary mb-1">Analysis Mode</p>
-            <p className="text-xs text-slate-600">High-precision double float (64-bit) JLA backend.</p>
+            <p className="text-xs text-slate-600 dark:text-slate-300">High-precision double float (64-bit) JLA backend.</p>
           </div>
           </aside>
         </div>

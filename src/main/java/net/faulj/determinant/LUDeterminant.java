@@ -80,6 +80,9 @@ public class LUDeterminant {
         if (!A.isSquare()) {
             throw new IllegalArgumentException("Determinant requires a square matrix");
         }
+        if (!A.isReal()) {
+            throw new IllegalArgumentException("LUDeterminant only supports real matrices. Use Determinant.computeComplex(Matrix).");
+        }
         // LUResult already computes det(A) = det(P^-1) * det(L) * det(U)
         // where det(L)=1, det(P)=+/-1, det(U)=product of diagonal
         return new LUDecomposition().decompose(A).getDeterminant();

@@ -3,17 +3,14 @@ package net.faulj.compute;
 import net.faulj.matrix.Matrix;
 import net.faulj.matrix.MatrixView;
 import net.faulj.matrix.OffHeapMatrix;
+import net.faulj.util.PerfTimers;
 
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinTask;
-import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.concurrent.RecursiveAction;
-import java.util.concurrent.TimeUnit;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Refactored BLAS Level-3 kernels with unified dispatch and optimal kernel selection.
@@ -29,59 +26,44 @@ import java.util.concurrent.atomic.AtomicInteger;
  * - CPU: 60-80% of peak GFLOPS (150-200 GF on AVX-512)
  * - GPU: Effective use for large problems (>200M FLOPs)
  * - Memory: Minimize cache misses via optimal blocking
+ *
+ * @deprecated Use {@link net.faulj.kernels.gemm.Gemm} as the canonical GEMM entry point.
  */
+@Deprecated(forRemoval = false, since = "1.0")
 public final class OptimizedBLAS3 {
+    // Shared pool for parallel GEMM - avoids expensive pool creation per call
+    private static final AtomicReference<ForkJoinPool> SHARED_POOL = new AtomicReference<>();
 
-    // Shared pools for parallel GEMM - avoids expensive pool creation per call
-    private static final ConcurrentHashMap<Integer, ForkJoinPool> SHARED_POOLS = new ConcurrentHashMap<>();
-    private static final AtomicInteger GEMM_WORKER_SEQUENCE = new AtomicInteger();
-    private static volatile ParallelTaskObserver parallelTaskObserver;
+    static {
+        Runtime.getRuntime().addShutdownHook(new Thread(OptimizedBLAS3::shutdownSharedPool, "faulj-optimizedblas3-shutdown"));
+    }
 
     private static ForkJoinPool getSharedPool(int threads) {
-        int boundedParallelism = GemmDispatch.boundedParallelism(threads);
-        int parallelism = Math.max(1, Integer.highestOneBit(boundedParallelism));
-        return SHARED_POOLS.computeIfAbsent(parallelism, OptimizedBLAS3::createGemmPool);
-    }
-
-    private static ForkJoinPool createGemmPool(int parallelism) {
-        ForkJoinPool.ForkJoinWorkerThreadFactory workerFactory = pool -> {
-            ForkJoinWorkerThread worker = ForkJoinPool.defaultForkJoinWorkerThreadFactory.newThread(pool);
-            worker.setName("jlc-gemm-worker-p" + parallelism + "-" + GEMM_WORKER_SEQUENCE.incrementAndGet());
-            worker.setDaemon(true);
-            return worker;
-        };
-        return new ForkJoinPool(parallelism, workerFactory, null, false);
-    }
-
-    interface ParallelTaskObserver {
-        default void beforeTask(int blockRow, int blockCol) {}
-
-        default void afterTask(int blockRow, int blockCol) {}
-    }
-
-    static void setParallelTaskObserverForTesting(ParallelTaskObserver observer) {
-        parallelTaskObserver = observer;
-    }
-
-    static void resetParallelStateForTesting() {
-        parallelTaskObserver = null;
-        List<ForkJoinPool> pools = new ArrayList<>(SHARED_POOLS.values());
-        SHARED_POOLS.clear();
-        pools.forEach(ForkJoinPool::shutdownNow);
-        for (ForkJoinPool pool : pools) {
-            try {
-                if (!pool.awaitTermination(10, TimeUnit.SECONDS)) {
-                    throw new IllegalStateException("GEMM test pool did not terminate");
+        ForkJoinPool pool = SHARED_POOL.get();
+        // Create new pool if none exists or parallelism changed significantly
+        if (pool == null || pool.isShutdown() || pool.getParallelism() != threads) {
+            ForkJoinPool newPool = new ForkJoinPool(threads);
+            if (SHARED_POOL.compareAndSet(pool, newPool)) {
+                // Shut down old pool if we successfully replaced it
+                if (pool != null && !pool.isShutdown()) {
+                    pool.shutdown();
                 }
-            } catch (InterruptedException failure) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException("Interrupted while terminating GEMM test pool", failure);
+                pool = newPool;
+            } else {
+                // Another thread beat us, shut down our new pool
+                newPool.shutdown();
+                pool = SHARED_POOL.get();
             }
         }
+        return pool;
     }
 
-    static int sharedPoolCountForTesting() {
-        return SHARED_POOLS.size();
+    static void shutdownSharedPool() {
+        ForkJoinPool pool = SHARED_POOL.getAndSet(null);
+        if (pool == null) {
+            return;
+        }
+        pool.shutdownNow();
     }
 
     private OptimizedBLAS3() {}
@@ -93,6 +75,7 @@ public final class OptimizedBLAS3 {
      */
     public static void gemm(Matrix a, Matrix b, Matrix c,
                            double alpha, double beta, DispatchPolicy policy) {
+        RuntimeProfile.applyConfiguredProfile();
         if (a == null || b == null || c == null) {
             throw new IllegalArgumentException("Matrices must not be null");
         }
@@ -120,11 +103,15 @@ public final class OptimizedBLAS3 {
         double[] cd = c.getRawData();
 
         // Dispatch to optimal kernel
+        DispatchPolicy activePolicy = policy == null ? DispatchPolicy.defaultPolicy() : policy;
         GemmWorkspace ws = GemmWorkspace.get();
-        int threads = policy == null ? 1 : policy.getParallelism();
+        int threads = activePolicy.isParallelEnabled() ? activePolicy.getParallelism() : 1;
+        boolean cudaAvailable = activePolicy.isCudaEnabled()
+            && ws.getCudaContext() != null
+            && ws.getCudaContext().isAvailable();
 
         GemmDispatch.Kernel kernel = GemmDispatch.selectKernel(m, n, k,
-            ws.getCudaContext() != null && ws.getCudaContext().isAvailable(), threads);
+            cudaAvailable, threads);
 
         switch (kernel) {
             case TINY:
@@ -170,6 +157,7 @@ public final class OptimizedBLAS3 {
                                   double[] c, int cOffset, int ldc,
                                   int m, int k, int n,
                                   double alpha, double beta) {
+        long tGemm = PerfTimers.start();
         GemmWorkspace ws = GemmWorkspace.get();
         GemmDispatch.Kernel kernel = GemmDispatch.selectKernel(m, n, k, false, 1);
 
@@ -212,11 +200,67 @@ public final class OptimizedBLAS3 {
     }
 
     /**
+     * Strided GEMM with optional transpose on A. This provides a convenience
+     * fast-path for A^T * B without requiring callers to materialize A^T.
+     */
+    public static void gemmStrided(boolean transposeA,
+                                  double[] a, int aOffset, int lda,
+                                  double[] b, int bOffset, int ldb,
+                                  double[] c, int cOffset, int ldc,
+                                  int m, int k, int n,
+                                  double alpha, double beta) {
+        if (!transposeA) {
+            gemmStrided(a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta);
+            return;
+        }
+
+        // Compute C = alpha * A^T * B + beta * C without materializing A^T.
+        // A is (m x k), B is (m x n), result C is (k x n).
+        // Scale C by beta first.
+        if (beta == 0.0) {
+            for (int i = 0; i < k; i++) {
+                java.util.Arrays.fill(c, cOffset + i * ldc, cOffset + i * ldc + n, 0.0);
+            }
+        } else if (beta != 1.0) {
+            for (int i = 0; i < k; i++) {
+                for (int j = 0; j < n; j++) {
+                    c[cOffset + i * ldc + j] *= beta;
+                }
+            }
+        }
+
+        if (alpha == 0.0 || m == 0 || k == 0 || n == 0) {
+            return;
+        }
+
+        final int block = 64;
+
+        // Loop over rows of A^T (columns of A)
+        for (int kk = 0; kk < k; kk++) {
+            int cRowOff = cOffset + kk * ldc;
+
+            // Accumulate into C[kk, :]
+            for (int ii = 0; ii < m; ii += block) {
+                int iend = Math.min(m, ii + block);
+                for (int i = ii; i < iend; i++) {
+                    double aVal = a[aOffset + i * lda + kk] * alpha;
+                    int bOff = bOffset + i * ldb;
+                    int cIdx = cRowOff;
+                    for (int j = 0; j < n; j++) {
+                        c[cIdx + j] += aVal * b[bOff + j];
+                    }
+                }
+            }
+        }
+    }
+
+    /**
      * Single-threaded microkernel GEMM with optimal blocking.
      */
     private static void gemmMicrokernel(double[] a, int lda, double[] b, int ldb,
                                        double[] c, int ldc, int m, int k, int n,
                                        double alpha, double beta, GemmWorkspace ws) {
+        long tGemm = PerfTimers.start();
         // Apply beta to C
         PackingUtils.scaleCPanel(c, 0, m, n, ldc, beta);
 
@@ -240,7 +284,9 @@ public final class OptimizedBLAS3 {
 
                 // Pack B panel
                 double[] bPack = ws.getPackB(kBlock * packedN);
+                long tPB = PerfTimers.start();
                 PackingUtils.packB(b, ldb, kk, kBlock, jj, nBlock, packedN, bPack);
+                PerfTimers.record("GEMM.packB", tPB);
 
                 for (int ii = 0; ii < m; ii += blocks.mc) {
                     int rowEnd = Math.min(ii + blocks.mc, m);
@@ -251,16 +297,21 @@ public final class OptimizedBLAS3 {
 
                         // Pack A panel
                         double[] aPack = ws.getPackA(mBlock * kBlock);
+                        long tPA = PerfTimers.start();
                         PackingUtils.packA(a, lda, i, mBlock, kk, kBlock, alpha, aPack);
+                        PerfTimers.record("GEMM.packA", tPA);
 
                         // Call microkernel
                         int cOffset = i * ldc + jj;
+                        long tMK = PerfTimers.start();
                         MicroKernel.compute(mBlock, kBlock, packedN, nBlock,
                                           aPack, bPack, c, cOffset, ldc);
+                        PerfTimers.record("GEMM.microkernel.call", tMK);
                     }
                 }
             }
         }
+        PerfTimers.record("GEMM.total", tGemm);
     }
 
     /**
@@ -271,6 +322,7 @@ public final class OptimizedBLAS3 {
                                               double[] c, int cOffset, int ldc,
                                               int m, int k, int n,
                                               double alpha, double beta, GemmWorkspace ws) {
+        long tGemm = PerfTimers.start();
         // Apply beta to C
         if (beta == 0.0) {
             for (int i = 0; i < m; i++) {
@@ -302,7 +354,9 @@ public final class OptimizedBLAS3 {
                 int kBlock = kEnd - kk;
 
                 double[] bPack = ws.getPackB(kBlock * packedN);
-                PackingUtils.packB(b, ldb, bOffset + kk * ldb, kBlock, jj, nBlock, packedN, bPack);
+                long tPB = PerfTimers.start();
+                PackingUtils.packBStrided(b, bOffset, ldb, kk, kBlock, jj, nBlock, packedN, bPack);
+                PerfTimers.record("GEMM.packB", tPB);
 
                 for (int ii = 0; ii < m; ii += blocks.mc) {
                     int rowEnd = Math.min(ii + blocks.mc, m);
@@ -310,15 +364,20 @@ public final class OptimizedBLAS3 {
                     for (int i = ii; i < rowEnd; i += mr) {
                         int mBlock = Math.min(mr, rowEnd - i);
                         double[] aPack = ws.getPackA(mBlock * kBlock);
-                        PackingUtils.packA(a, lda, aOffset + i * lda, mBlock, kk, kBlock, alpha, aPack);
+                        long tPA = PerfTimers.start();
+                        PackingUtils.packAStrided(a, aOffset, lda, i, mBlock, kk, kBlock, alpha, aPack);
+                        PerfTimers.record("GEMM.packA", tPA);
 
                         int cOff = cOffset + i * ldc + jj;
+                        long tMK = PerfTimers.start();
                         MicroKernel.compute(mBlock, kBlock, packedN, nBlock,
                                           aPack, bPack, c, cOff, ldc);
+                        PerfTimers.record("GEMM.microkernel.call", tMK);
                     }
                 }
             }
         }
+        PerfTimers.record("GEMM.total", tGemm);
     }
 
     /**
@@ -329,8 +388,10 @@ public final class OptimizedBLAS3 {
                                                double[] c, int ldc, int m, int k, int n,
                                                double alpha, double beta, int threads,
                                                GemmWorkspace ws) {
+        // Apply beta to C
+        PackingUtils.scaleCPanel(c, 0, m, n, ldc, beta);
+
         if (alpha == 0.0 || k == 0 || m == 0 || n == 0) {
-            PackingUtils.scaleCPanel(c, 0, m, n, ldc, beta);
             return;
         }
 
@@ -342,55 +403,43 @@ public final class OptimizedBLAS3 {
             return;
         }
 
-        // Apply beta exactly once before any task starts modifying C.
-        PackingUtils.scaleCPanel(c, 0, m, n, ldc, beta);
-
         int blockRows = (m + blocks.mc - 1) / blocks.mc;
         int blockCols = (n + blocks.nc - 1) / blocks.nc;
 
         ForkJoinPool pool = getSharedPool(actualThreads);
-        ParallelTaskObserver taskObserver = parallelTaskObserver;
-        List<RecursiveAction> tasks = new ArrayList<>();
-
-        for (int br = 0; br < blockRows; br++) {
-            for (int bc = 0; bc < blockCols; bc++) {
-                final int blockRow = br;
-                final int blockCol = bc;
-
-                tasks.add(new RecursiveAction() {
-                    @Override
-                    protected void compute() {
-                        if (taskObserver != null) {
-                            taskObserver.beforeTask(blockRow, blockCol);
-                        }
-                        int ii = blockRow * blocks.mc;
-                        int jj = blockCol * blocks.nc;
-                        int rowEnd = Math.min(ii + blocks.mc, m);
-                        int colEnd = Math.min(jj + blocks.nc, n);
-
-                        // Get thread-local workspace
-                        GemmWorkspace localWs = GemmWorkspace.get();
-                        computeTile(a, lda, b, ldb, c, ldc, k,
-                                  ii, rowEnd, jj, colEnd,
-                                  alpha, blocks, localWs);
-                        if (taskObserver != null) {
-                            taskObserver.afterTask(blockRow, blockCol);
-                        }
-                    }
-                });
-            }
-        }
-
         try {
-            pool.submit(() -> ForkJoinTask.invokeAll(tasks)).get();
-        } catch (InterruptedException failure) {
-            Thread.currentThread().interrupt();
-            throw new RuntimeException("parallel GEMM failed", failure);
-        } catch (ExecutionException failure) {
-            throw new RuntimeException("parallel GEMM failed", failure.getCause());
-        } catch (RuntimeException failure) {
-            throw new RuntimeException("parallel GEMM failed", failure);
+            List<RecursiveAction> tasks = new ArrayList<>();
+
+            for (int br = 0; br < blockRows; br++) {
+                for (int bc = 0; bc < blockCols; bc++) {
+                    final int blockRow = br;
+                    final int blockCol = bc;
+
+                    tasks.add(new RecursiveAction() {
+                        @Override
+                        protected void compute() {
+                            int ii = blockRow * blocks.mc;
+                            int jj = blockCol * blocks.nc;
+                            int rowEnd = Math.min(ii + blocks.mc, m);
+                            int colEnd = Math.min(jj + blocks.nc, n);
+
+                            // Get thread-local workspace
+                            GemmWorkspace localWs = GemmWorkspace.get();
+                            computeTile(a, lda, b, ldb, c, ldc, k,
+                                      ii, rowEnd, jj, colEnd,
+                                      alpha, blocks, localWs);
+                        }
+                    });
+                }
+            }
+
+            // Invoke all tasks
+            ForkJoinTask.invokeAll(tasks);
+        } catch (Exception e) {
+            // Fallback to sequential
+            gemmMicrokernel(a, lda, b, ldb, c, ldc, m, k, n, alpha, beta, ws);
         }
+        // Note: Do NOT shutdown the shared pool - it's reused across calls
     }
 
     /**

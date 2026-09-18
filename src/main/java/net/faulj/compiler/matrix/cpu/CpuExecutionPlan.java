@@ -11,14 +11,19 @@ import net.faulj.compiler.matrix.affine.LogicalBuffer;
 import net.faulj.compiler.matrix.schedule.ScheduleAnnotation;
 import net.faulj.compiler.matrix.schedule.SchedulePlan;
 import net.faulj.compiler.matrix.schedule.ScheduleRegion;
+import net.faulj.compiler.matrix.kernel.KernelIrMetrics;
+import net.faulj.compiler.matrix.kernel.KernelLoweringResult;
+import net.faulj.compiler.matrix.kernel.KernelProgram;
 import net.faulj.matrix.Matrix;
 
 /**
- * Immutable, inspectable, executable CPU plan produced by M4.
+ * Immutable, inspectable, executable CPU plan produced by M4 and the selected
+ * post-M4 fusion lowering.
  *
- * <p>The plan retains logical buffers from M2 and the schedule from M3. It
- * records only materialization decisions; it does not introduce a second
- * ownership model, allocator, pool, or lifetime-based reuse scheme.</p>
+ * <p>The plan retains logical buffers from M2 and the schedule from M3. R1
+ * adds an immutable physical-memory description derived from the final CPU
+ * steps; live Matrix objects remain execution-scoped and are never retained
+ * by this plan.</p>
  */
 public final class CpuExecutionPlan {
     private final SchedulePlan schedule;
@@ -31,6 +36,10 @@ public final class CpuExecutionPlan {
     private final boolean hasParallelAnnotations;
     private final boolean hasVectorAnnotations;
     private final long estimatedTemporaryBytes;
+    private final FusionMetrics fusionMetrics;
+    private final PhysicalMemoryPlan physicalMemoryPlan;
+    private final List<KernelLoweringResult> kernelLowerings;
+    private final KernelIrMetrics kernelIrMetrics;
 
     CpuExecutionPlan(SchedulePlan schedule,
                      List<CpuStep> steps,
@@ -38,6 +47,23 @@ public final class CpuExecutionPlan {
                      List<LogicalBuffer> temporaryBuffers,
                      List<LogicalBuffer> materializedTemporaryBuffers,
                      List<LogicalBuffer> elidedTemporaryBuffers) {
+        this(
+            schedule,
+            steps,
+            inputBindings,
+            temporaryBuffers,
+            materializedTemporaryBuffers,
+            elidedTemporaryBuffers,
+            FusionMetrics.empty(FusionStrategy.fromSystemProperty(), schedule.program(), steps));
+    }
+
+    CpuExecutionPlan(SchedulePlan schedule,
+                     List<CpuStep> steps,
+                     List<CpuBufferBinding> inputBindings,
+                     List<LogicalBuffer> temporaryBuffers,
+                     List<LogicalBuffer> materializedTemporaryBuffers,
+                     List<LogicalBuffer> elidedTemporaryBuffers,
+                     FusionMetrics fusionMetrics) {
         this.schedule = Objects.requireNonNull(schedule, "CPU schedule must not be null");
         this.steps = immutableCopy(steps, "CPU steps");
         this.inputBindings = immutableCopy(inputBindings, "CPU input bindings");
@@ -46,6 +72,8 @@ public final class CpuExecutionPlan {
             materializedTemporaryBuffers, "CPU materialized temporary buffers");
         this.elidedTemporaryBuffers = immutableCopy(
             elidedTemporaryBuffers, "CPU elided temporary buffers");
+        this.fusionMetrics = Objects.requireNonNull(
+            fusionMetrics, "CPU fusion metrics must not be null");
         this.outputBuffer = schedule.program().resultBuffer();
         validateStepIds();
         validateBuffers();
@@ -53,6 +81,14 @@ public final class CpuExecutionPlan {
             || hasAnnotation(ScheduleAnnotation.REDUCTION_PARALLEL_ELIGIBLE);
         this.hasVectorAnnotations = hasAnnotation(ScheduleAnnotation.VECTOR);
         this.estimatedTemporaryBytes = estimatedBytes(this.materializedTemporaryBuffers);
+        this.kernelLowerings = this.steps.stream()
+            .filter(CpuFusedRegionStep.class::isInstance)
+            .map(CpuFusedRegionStep.class::cast)
+            .map(CpuFusedRegionStep::kernelLowering)
+            .filter(java.util.Objects::nonNull)
+            .toList();
+        this.kernelIrMetrics = KernelIrMetrics.from(kernelLowerings);
+        this.physicalMemoryPlan = PhysicalMemoryPlanner.plan(this);
     }
 
     public SchedulePlan schedule() {
@@ -93,6 +129,74 @@ public final class CpuExecutionPlan {
         return elidedTemporaryBuffers;
     }
 
+    /** Immutable R1 physical plan; it contains no live runtime allocations. */
+    public PhysicalMemoryPlan physicalMemoryPlan() {
+        return physicalMemoryPlan;
+    }
+
+    /** Short alias for diagnostics and callers that use the memory-plan term. */
+    public PhysicalMemoryPlan memoryPlan() {
+        return physicalMemoryPlan;
+    }
+
+    /** Immutable accounting and planner decisions for the final CPU plan. */
+    public FusionMetrics fusionMetrics() {
+        return fusionMetrics;
+    }
+
+    /** Short alias for callers that use the generic metrics term. */
+    public FusionMetrics metrics() {
+        return fusionMetrics;
+    }
+
+    /** R3 lowering results when the optional kernel IR selector is enabled. */
+    public List<KernelLoweringResult> kernelLowerings() {
+        return kernelLowerings;
+    }
+
+    public List<KernelProgram> kernelPrograms() {
+        return kernelLowerings.stream()
+            .map(KernelLoweringResult::program)
+            .filter(java.util.Objects::nonNull)
+            .toList();
+    }
+
+    public KernelIrMetrics kernelIrMetrics() {
+        return kernelIrMetrics;
+    }
+
+    public KernelIrMetrics kernelMetrics() {
+        return kernelIrMetrics;
+    }
+
+    public FusionStrategy fusionStrategy() {
+        return fusionMetrics.strategy();
+    }
+
+    public int physicalSlotCount() {
+        return physicalMemoryPlan.physicalSlotCount();
+    }
+
+    public long logicalTemporaryBytesSum() {
+        return physicalMemoryPlan.logicalTemporaryBytesSum();
+    }
+
+    public long peakLiveTemporaryBytes() {
+        return physicalMemoryPlan.peakLiveTemporaryBytes();
+    }
+
+    public long physicalTemporaryBytes() {
+        return physicalMemoryPlan.physicalTemporaryBytes();
+    }
+
+    public int logicalToPhysicalReuseCount() {
+        return physicalMemoryPlan.logicalToPhysicalReuseCount();
+    }
+
+    public int allocationCount() {
+        return physicalMemoryPlan.allocationCount();
+    }
+
     public LogicalBuffer outputBuffer() {
         return outputBuffer;
     }
@@ -109,6 +213,11 @@ public final class CpuExecutionPlan {
         return temporaryBuffers.size();
     }
 
+    /** Number of logical temporary buffers before fusion elision. */
+    public int logicalTemporaryCount() {
+        return physicalMemoryPlan.logicalTemporaryCount();
+    }
+
     public int materializedTemporaryCount() {
         return materializedTemporaryBuffers.size();
     }
@@ -123,6 +232,30 @@ public final class CpuExecutionPlan {
 
     public boolean hasFusedElementwiseStep() {
         return steps.stream().anyMatch(step -> step.kind() == CpuStepKind.FUSED_ELEMENTWISE);
+    }
+
+    public boolean hasFusedRegionStep() {
+        return steps.stream().anyMatch(step -> step instanceof CpuFusedRegionStep);
+    }
+
+    public List<FusedRegionPlan> fusedRegions() {
+        return steps.stream()
+            .filter(CpuFusedRegionStep.class::isInstance)
+            .map(CpuFusedRegionStep.class::cast)
+            .map(CpuFusedRegionStep::regionPlan)
+            .toList();
+    }
+
+    public int fusedRegionCount() {
+        return fusionMetrics.fusedRegionCount();
+    }
+
+    public int fusionElidedTemporaryCount() {
+        return fusionMetrics.fusionElidedTemporaryCount();
+    }
+
+    public long estimatedFusionElidedBytes() {
+        return fusionMetrics.fusionElidedBytes();
     }
 
     public boolean hasParallelAnnotations() {
@@ -172,6 +305,20 @@ public final class CpuExecutionPlan {
         appendBuffers(result, materializedTemporaryBuffers);
         result.append("  elided by fusion:\n");
         appendBuffers(result, elidedTemporaryBuffers);
+        result.append("fusion planning:\n");
+        result.append(fusionMetrics.dump().indent(2));
+        result.append("kernel IR planning:\n");
+        result.append(kernelIrMetrics.dump().indent(2));
+        result.append("  accepted regions:\n");
+        List<FusedRegionPlan> regions = fusedRegions();
+        if (regions.isEmpty()) {
+            result.append("    (none)\n");
+        } else {
+            for (FusedRegionPlan region : regions) {
+                result.append(region.dump().indent(4));
+            }
+        }
+        result.append(physicalMemoryPlan.dump());
         result.append("steps:\n");
         if (steps.isEmpty()) {
             result.append("  (none)\n");

@@ -1,38 +1,28 @@
 package net.faulj.web;
 
-import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-
-import jakarta.servlet.http.HttpServletRequest;
+import jakarta.annotation.PreDestroy;
 
 import net.faulj.core.DiagnosticMetrics;
 import net.faulj.core.DiagnosticMetrics.DiagnosticItem;
@@ -43,44 +33,61 @@ import net.faulj.eigen.schur.RealSchurDecomposition;
 import net.faulj.eigen.schur.SchurEigenExtractor;
 import net.faulj.matrix.Matrix;
 import net.faulj.matrix.MatrixAccuracyValidator;
+import net.faulj.nativeblas.BackendRegistry;
 import net.faulj.scalar.Complex;
 import net.faulj.vector.Vector;
 import net.faulj.visualizer.MatrixLatexExporter;
 
+@RestController
+@CrossOrigin(originPatterns = {
+        "http://localhost",
+        "http://localhost:*",
+        "http://127.0.0.1",
+        "http://127.0.0.1:*",
+        "http://0.0.0.0",
+        "http://0.0.0.0:*",
+        "https://localhost",
+        "https://localhost:*",
+        "https://127.0.0.1",
+        "https://127.0.0.1:*",
+        "https://0.0.0.0",
+        "https://0.0.0.0:*",
+        "http://lambdacompute.org",
+        "http://lambdacompute.org:*",
+        "https://lambdacompute.org",
+        "https://lambdacompute.org:*",
+        "http://www.lambdacompute.org",
+        "https://www.lambdacompute.org"
+})
 /**
  * REST controller exposing diagnostic and debug endpoints for matrix analysis.
  */
-@RestController
 public class ApiController {
-    private static final Logger log = LoggerFactory.getLogger(ApiController.class);
-    
-    private static final int FULL_DIAGNOSTIC_CELL_LIMIT = 65_536; // e.g. 256x256
-    private static final int MAX_DIAGNOSTICS_QUERY_CHARS = 200_000;
-    
-    // SECURITY PATCH: Hard limit on benchmark iterations to prevent DoS
-    private static final int MAX_BENCHMARK_ITERATIONS = 100;
-    private static final long ONE_MINUTE_MS = 60_000L;
+    private static final int FULL_DIAGNOSTIC_CELL_LIMIT = 262_144; // e.g. 512x512
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final BenchmarkService benchmarkService;
-    private final InMemoryRateLimiter rateLimiter;
-    private final Semaphore heavyJobPermits;
-    private final int maxHeavyQueue;
-    private final int heavyRateLimitPerMinute;
-    private final int maxSseClients;
-    private final int sseConnectRateLimitPerMinute;
-    private final String heavyEndpointToken;
-    private final boolean allowPublicHeavyEndpoints;
-    private final boolean debugEndpointsEnabled;
-    private final boolean exposeVersion;
+    private final ComputeGovernor governor = new ComputeGovernor();
+    private final IpRateLimiter ipRateLimiter = new IpRateLimiter();
     // SSE emitters for streaming status updates to connected frontend clients
     private final CopyOnWriteArrayList<SseEmitter> sseEmitters = new CopyOnWriteArrayList<>();
     private volatile String currentStatus = "SERVICE_INTERRUPTION";
     private volatile Map<String, Object> currentCpu = cpuTemplate("offline");
-    // SECURITY PATCH: Replace single bottleneck thread with highly scalable Virtual Threads
-    // Since this application uses Java 21, Virtual Threads allow independent, non-blocking I/O per SSE client.
-    private final ExecutorService sseExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private final ExecutorService sseExecutor = Executors.newSingleThreadExecutor();
     private final AtomicInteger queuedJobs = new AtomicInteger(0);
+
+    @PreDestroy
+    void onShutdown() {
+        for (SseEmitter emitter : sseEmitters) {
+            try {
+                emitter.complete();
+            } catch (Exception ignored) {
+            }
+        }
+        sseEmitters.clear();
+        sseExecutor.shutdownNow();
+        try { governor.shutdownWatchdog(); } catch (Throwable ignored) {}
+    }
 
     /**
      * Notify connected SSE clients only when the status or CPU state changes.
@@ -98,14 +105,25 @@ public class ApiController {
 
         String cpuState = normalizeCpuState(nextCpu.get("state"));
         nextCpu.put("state", cpuState);
-        int q = queuedJobs.get();
+        nextCpu.put("backend", BackendRegistry.snapshot().toMap());
+        // Prefer the new ComputeGovernor activeJobs metric as authoritative
+        int q = governor != null ? governor.getActiveJobs() : queuedJobs.get();
         Object queuedObj = nextCpu.get("queuedJobs");
-        if (queuedObj instanceof Number n) {
-            q = Math.max(0, n.intValue());
+        try {
+            System.out.printf("[STATUS] maybeNotifyStatus cpuState=%s atomicQueued=%d nextCpuQueuedObj=%s%n",
+                    cpuState, q, String.valueOf(queuedObj));
+        } catch (Throwable ignore) {}
+        // Prefer the authoritative atomic counter unless the caller explicitly
+        // provides a positive queuedJobs value (e.g., a client-side position).
+        if (queuedObj instanceof Number n && n.intValue() > 0) {
+            q = Math.max(q, n.intValue());
         }
         nextCpu.put("queuedJobs", q);
 
         String derivedStatus = deriveSystemStatus(cpuState, q);
+        try {
+            System.out.printf("[SSE_SEND] derived=%s queued=%d nextCpu=%s%n", derivedStatus, q, nextCpu);
+        } catch (Throwable ignore) {}
         // Keep optional caller override only when it is one of our known values.
         if (status != null && !status.isBlank()) {
             String normalized = status.trim().toUpperCase();
@@ -127,16 +145,17 @@ public class ApiController {
         currentStatus = derivedStatus;
         currentCpu = nextCpu;
 
-        // Push update asynchronously; avoid per-emitter nested task fan-out.
+        // push update to all emitters asynchronously
         sseExecutor.submit(() -> {
+            List<SseEmitter> toRemove = new ArrayList<>();
             for (SseEmitter emitter : sseEmitters) {
                 try {
                     emitter.send(SseEmitter.event().name("status").data(Map.of("status", currentStatus, "cpu", currentCpu)));
                 } catch (Exception ex) {
-                    // Client disconnected or timed out
-                    sseEmitters.remove(emitter);
+                    toRemove.add(emitter);
                 }
             }
+            sseEmitters.removeAll(toRemove);
         });
     }
 
@@ -145,7 +164,7 @@ public class ApiController {
         m.put("name", "CPU");
         m.put("gflops", null);
         m.put("state", state);
-        m.put("queuedJobs", 0);
+        m.put("backend", BackendRegistry.snapshot().toMap());
         return m;
     }
 
@@ -171,161 +190,15 @@ public class ApiController {
         return "ONLINE";
     }
 
-    private String clientIp(HttpServletRequest request) {
-        if (request == null) return "unknown";
-        String ip = request.getRemoteAddr();
-        return (ip == null || ip.isBlank()) ? "unknown" : ip;
-    }
-
-    private boolean allowHeavyRequest(HttpServletRequest request) {
-        return rateLimiter.allow(
-                "heavy:" + clientIp(request),
-                heavyRateLimitPerMinute,
-                ONE_MINUTE_MS);
-    }
-
-    private boolean allowSseConnect(HttpServletRequest request) {
-        return rateLimiter.allow(
-                "sse:" + clientIp(request),
-                sseConnectRateLimitPerMinute,
-                ONE_MINUTE_MS);
-    }
-
-    private boolean hasValidHeavyToken(HttpServletRequest request) {
-        if (allowPublicHeavyEndpoints || isLocalRequest(request)) {
-            return true;
-        }
-        if (heavyEndpointToken == null || heavyEndpointToken.isBlank()) {
-            return false;
-        }
-        if (request == null) {
-            return false;
-        }
-        String supplied = request.getHeader("X-API-Key");
-        if (supplied == null || supplied.isBlank()) {
-            supplied = request.getHeader("X-Heavy-Token");
-        }
-        return constantTimeEquals(heavyEndpointToken, supplied);
-    }
-
-    private static boolean constantTimeEquals(String expected, String supplied) {
-        if (expected == null || supplied == null) {
-            return false;
-        }
-        byte[] a = expected.getBytes(StandardCharsets.UTF_8);
-        byte[] b = supplied.getBytes(StandardCharsets.UTF_8);
-        return MessageDigest.isEqual(a, b);
-    }
-
-    private boolean isCrossSiteFetch(HttpServletRequest request) {
-        if (request == null) return false;
-        String secFetchSite = request.getHeader("Sec-Fetch-Site");
-        if (secFetchSite != null && "cross-site".equalsIgnoreCase(secFetchSite.trim())) {
-            return true;
-        }
-
-        String origin = request.getHeader("Origin");
-        if (origin == null || origin.isBlank()) {
-            return false;
-        }
-        String hostHeader = request.getHeader("Host");
-        if (hostHeader == null || hostHeader.isBlank()) {
-            return true;
-        }
-
-        String requestHost = hostHeader.split(":")[0].toLowerCase(Locale.ROOT);
-        try {
-            URI originUri = URI.create(origin);
-            String originHost = originUri.getHost();
-            if (originHost == null || originHost.isBlank()) {
-                return true;
-            }
-            return !originHost.equalsIgnoreCase(requestHost);
-        } catch (Exception ex) {
-            return true;
-        }
-    }
-
-    private boolean isLocalRequest(HttpServletRequest request) {
-        if (request == null) return false;
-        String ip = request.getRemoteAddr();
-        if (ip == null) return false;
-        String normalized = ip.trim();
-        return "127.0.0.1".equals(normalized)
-                || "::1".equals(normalized)
-                || "0:0:0:0:0:0:0:1".equals(normalized);
-    }
-
-    private ResponseEntity<Map<String, Object>> rateLimitResponse() {
-        return ResponseEntity.status(429).body(Map.of(
-                "error", "Too Many Requests",
-                "details", "Rate limit exceeded for heavy compute endpoints."
-        ));
-    }
-
-    private ResponseEntity<Map<String, Object>> unauthorizedHeavyResponse() {
-        return ResponseEntity.status(401).body(Map.of(
-                "error", "Unauthorized",
-                "details", "Missing or invalid API token for heavy compute endpoints."
-        ));
-    }
-
-    private ResponseEntity<Map<String, Object>> queueBusyResponse() {
-        return ResponseEntity.status(429).body(Map.of(
-                "error", "Server Busy",
-                "details", "Too many concurrent compute requests. Please retry shortly."
-        ));
-    }
-
-    private ResponseEntity<Map<String, Object>> crossSiteBlockedResponse() {
-        return ResponseEntity.status(403).body(Map.of(
-                "error", "Forbidden",
-                "details", "Cross-site invocation is blocked for this endpoint."
-        ));
-    }
-
-    private ResponseEntity<Map<String, Object>> preflightHeavyRequest(
-            HttpServletRequest request,
-            boolean blockCrossSite) {
-        if (!hasValidHeavyToken(request)) {
-            return unauthorizedHeavyResponse();
-        }
-        if (!allowHeavyRequest(request)) {
-            return rateLimitResponse();
-        }
-        if (blockCrossSite && isCrossSiteFetch(request)) {
-            return crossSiteBlockedResponse();
-        }
-        return null;
-    }
-
-    public ApiController(
-            BenchmarkService benchmarkService,
-            InMemoryRateLimiter rateLimiter,
-            @Value("${app.security.max-heavy-concurrency:2}") int maxHeavyConcurrency,
-            @Value("${app.security.max-heavy-queue:20}") int maxHeavyQueue,
-            @Value("${app.security.heavy-rate-limit-per-minute:30}") int heavyRateLimitPerMinute,
-            @Value("${app.security.max-sse-clients:200}") int maxSseClients,
-            @Value("${app.security.sse-connect-rate-per-minute:30}") int sseConnectRateLimitPerMinute,
-            @Value("${app.security.heavy-endpoint-token:}") String heavyEndpointToken,
-            @Value("${app.security.allow-public-heavy-endpoints:false}") boolean allowPublicHeavyEndpoints,
-            @Value("${app.security.expose-version:false}") boolean exposeVersion,
-            @Value("${app.debug.endpoints.enabled:false}") boolean debugEndpointsEnabled) {
+    public ApiController(BenchmarkService benchmarkService) {
         this.benchmarkService = benchmarkService;
-        this.rateLimiter = rateLimiter;
-        this.heavyJobPermits = new Semaphore(Math.max(1, maxHeavyConcurrency), true);
-        this.maxHeavyQueue = Math.max(1, maxHeavyQueue);
-        this.heavyRateLimitPerMinute = Math.max(1, heavyRateLimitPerMinute);
-        this.maxSseClients = Math.max(1, maxSseClients);
-        this.sseConnectRateLimitPerMinute = Math.max(1, sseConnectRateLimitPerMinute);
-        this.heavyEndpointToken = heavyEndpointToken == null ? "" : heavyEndpointToken.trim();
-        this.allowPublicHeavyEndpoints = allowPublicHeavyEndpoints;
-        this.exposeVersion = exposeVersion;
-        this.debugEndpointsEnabled = debugEndpointsEnabled;
         // At startup assume CPU is online and idle.
         maybeNotifyStatus("ONLINE", cpuTemplate("online"));
         // Run a lightweight CPU benchmark in background to estimate GFLOPs
-        runCpuBenchmark();
+        // Run a lightweight CPU benchmark only when explicitly enabled via system property
+        if (Boolean.parseBoolean(System.getProperty("faulj.benchmark.runOnStartup", "false"))) {
+            runCpuBenchmark();
+        }
     }
 
     private void runCpuBenchmark() {
@@ -430,9 +303,6 @@ public class ApiController {
      */
     @GetMapping("/api/ping")
     public Map<String, String> ping() {
-        if (!exposeVersion) {
-            return Map.of("message", "pong from Java backend");
-        }
         return Map.of("message", "pong from Java backend", "version", getServerVersion());
     }
 
@@ -458,34 +328,63 @@ public class ApiController {
     }
 
     /**
+     * Admin endpoint to reset the compute governor state when troubleshooting.
+     * This clears stuck active-job counts and restores available permits.
+     * Intended for local/dev recovery only.
+     */
+    @PostMapping("/api/admin/reset-governor")
+    public Map<String, Object> resetGovernor() {
+        try {
+            governor.forceReset();
+            maybeNotifyStatus(null, null);
+            return Map.of(
+                    "result", "ok",
+                    "activeJobs", governor.getActiveJobs(),
+                    "acquiredCount", governor.getAcquiredCount(),
+                    "rejectedCount", governor.getRejectedCount(),
+                    "resetCount", governor.getResetCount()
+            );
+        } catch (Exception ex) {
+            return Map.of("result", "error", "message", ex.getMessage());
+        }
+    }
+
+    @GetMapping("/api/admin/governor-metrics")
+    public Map<String, Object> governorMetrics() {
+        try {
+            return Map.of(
+                    "activeJobs", governor.getActiveJobs(),
+                    "maxParallelJobs", governor.getMaxParallelJobs(),
+                    "acquiredCount", governor.getAcquiredCount(),
+                    "rejectedCount", governor.getRejectedCount(),
+                    "resetCount", governor.getResetCount(),
+                    "oldestAcquireAgeSeconds", governor.getOldestAcquireAgeSeconds()
+            );
+        } catch (Exception ex) {
+            return Map.of("result", "error", "message", ex.getMessage());
+        }
+    }
+
+    /**
      * Run Diagnostic512 benchmark flow from backend.
      */
     @GetMapping("/api/benchmark/diagnostic512")
     public ResponseEntity<Map<String, Object>> benchmarkDiagnostic512(
-            @RequestParam(value = "iterations", required = false, defaultValue = "5") int iterations,
-            HttpServletRequest request) {
-        ResponseEntity<Map<String, Object>> preflight = preflightHeavyRequest(request, true);
-        if (preflight != null) return preflight;
-        
-        // SECURITY PATCH: Enforce absolute maximum iterations
-        if (iterations < 1 || iterations > MAX_BENCHMARK_ITERATIONS) {
-            return ResponseEntity.badRequest().body(Map.of(
-                "error", "Invalid iterations parameter",
-                "details", "Iterations must be between 1 and " + MAX_BENCHMARK_ITERATIONS
-            ));
+            @RequestParam(value = "iterations", required = false, defaultValue = "5") int iterations) {
+        String clientIp = null;
+        try { clientIp = org.springframework.web.context.request.RequestContextHolder.currentRequestAttributes().getSessionId(); } catch (Throwable ignored) {}
+
+        // admission control: IP rate limit
+        if (!ipRateLimiter.allowRequest(clientIp)) {
+            return ResponseEntity.status(429).body(Map.of("error", "rate limit exceeded"));
         }
-        
-        queuedJobs.incrementAndGet();
+
+        // Try to acquire compute slot
+        if (!governor.tryAcquire()) {
+            return ResponseEntity.status(429).body(Map.of("error", "server busy - try again later"));
+        }
         maybeNotifyStatus(null, Map.of("state", "online"));
-        boolean permitAcquired = false;
         try {
-            if (queuedJobs.get() > maxHeavyQueue) {
-                return queueBusyResponse();
-            }
-            permitAcquired = heavyJobPermits.tryAcquire();
-            if (!permitAcquired) {
-                return queueBusyResponse();
-            }
             Map<String, Object> result = benchmarkService.runDiagnostic512(iterations);
             Object cpuObj = result.get("cpu");
             if (cpuObj instanceof Map<?, ?> cpuMap) {
@@ -497,18 +396,10 @@ public class ApiController {
             }
             return ResponseEntity.ok(result);
         } catch (Exception ex) {
-            // SECURITY PATCH: Log the actual error internally, do not leak to client
-            log.error("Diagnostic512 benchmark failed due to internal error", ex);
             maybeNotifyStatus(null, Map.of("state", "degraded"));
-            return ResponseEntity.status(500).body(Map.of(
-                "error", "Internal Server Error", 
-                "details", "An unexpected error occurred while processing the benchmark."
-            ));
+            return ResponseEntity.status(500).body(Map.of("error", "diagnostic512 benchmark failed", "details", ex.getMessage()));
         } finally {
-            if (permitAcquired) {
-                heavyJobPermits.release();
-            }
-            queuedJobs.updateAndGet(v -> Math.max(0, v - 1));
+            governor.release();
             maybeNotifyStatus(null, null);
         }
     }
@@ -517,16 +408,7 @@ public class ApiController {
      * SSE stream that emits status updates only when they change.
      */
     @GetMapping("/api/diagnostics/stream")
-    public SseEmitter streamDiagnostics(HttpServletRequest request) {
-        if (isCrossSiteFetch(request)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Cross-site invocation is blocked");
-        }
-        if (!allowSseConnect(request)) {
-            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "Too many stream connection attempts");
-        }
-        if (sseEmitters.size() >= maxSseClients) {
-            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "Too many active diagnostics streams");
-        }
+    public SseEmitter streamDiagnostics() {
         // Use a finite timeout to avoid long-running servlet async edge-cases
         // (0L = never timeout) — set a large timeout but not infinite.
         SseEmitter emitter = new SseEmitter(300_000L); // 5 minutes
@@ -585,30 +467,26 @@ public class ApiController {
      * @return diagnostics response
      */
     @PostMapping("/api/diagnostics")
-    public ResponseEntity<Map<String, Object>> diagnostics(
-            @RequestBody Map<String, Object> payload,
-            HttpServletRequest request) {
-        ResponseEntity<Map<String, Object>> preflight = preflightHeavyRequest(request, false);
-        if (preflight != null) return preflight;
-
+    public ResponseEntity<Map<String, Object>> diagnostics(@RequestBody Map<String, Object> payload) {
         Object matrixObj = payload == null ? null : payload.get("matrix");
         if (matrixObj == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "matrix field is required"));
         }
-        queuedJobs.incrementAndGet();
+        String clientIp = null;
+        try { clientIp = org.springframework.web.context.request.RequestContextHolder.currentRequestAttributes().getSessionId(); } catch (Throwable ignored) {}
+
+        // admission control: IP rate limit
+        if (!ipRateLimiter.allowRequest(clientIp)) {
+            return ResponseEntity.status(429).body(Map.of("error", "rate limit exceeded"));
+        }
+
+        // Try to acquire compute slot
+        if (!governor.tryAcquire()) {
+            return ResponseEntity.status(429).body(Map.of("error", "server busy - try again later"));
+        }
         maybeNotifyStatus(null, Map.of("state", "online"));
-        boolean permitAcquired = false;
         try {
-            if (queuedJobs.get() > maxHeavyQueue) {
-                return queueBusyResponse();
-            }
-            permitAcquired = heavyJobPermits.tryAcquire();
-            if (!permitAcquired) {
-                return queueBusyResponse();
-            }
             double[][] data = objectMapper.convertValue(matrixObj, double[][].class);
-            // SECURITY PATCH: Validate geometry and contents before native processing
-            validateMatrixSafety(data);
             if (tooLargeForFullDiagnostics(data)) {
                 maybeNotifyStatus(null, Map.of("state", "degraded"));
                 return ResponseEntity.unprocessableEntity().body(largeMatrixDiagnosticsHint(data.length, data[0].length));
@@ -617,23 +495,11 @@ public class ApiController {
             MatrixDiagnostics diagnostics = DiagnosticMetrics.analyze(A);
             maybeNotifyStatus(null, Map.of("state", "online"));
             return ResponseEntity.ok(buildDiagnosticsResponse(diagnostics));
-        } catch (IllegalArgumentException ex) {
-            // Input validation errors can be returned to client
-            maybeNotifyStatus(null, Map.of("state", "degraded"));
-            return ResponseEntity.badRequest().body(Map.of("error", "Invalid matrix data", "details", ex.getMessage()));
         } catch (Exception ex) {
-            // SECURITY PATCH: Log the actual error internally, do not leak to client
-            log.error("Diagnostics processing failed due to internal error", ex);
             maybeNotifyStatus(null, Map.of("state", "degraded"));
-            return ResponseEntity.status(500).body(Map.of(
-                "error", "Internal Server Error", 
-                "details", "An unexpected error occurred while processing the matrix."
-            ));
+            return ResponseEntity.status(500).body(Map.of("error", "diagnostics failed", "details", ex.getMessage()));
         } finally {
-            if (permitAcquired) {
-                heavyJobPermits.release();
-            }
-            queuedJobs.updateAndGet(v -> Math.max(0, v - 1));
+            governor.release();
             maybeNotifyStatus(null, null);
         }
     }
@@ -645,35 +511,25 @@ public class ApiController {
      * @return diagnostics response
      */
     @GetMapping("/api/diagnostics")
-    public ResponseEntity<Map<String, Object>> diagnosticsGet(
-            @RequestParam(value = "matrix", required = false) String matrixJson,
-            HttpServletRequest request) {
-        ResponseEntity<Map<String, Object>> preflight = preflightHeavyRequest(request, true);
-        if (preflight != null) return preflight;
-
+    public ResponseEntity<Map<String, Object>> diagnosticsGet(@RequestParam(value = "matrix", required = false) String matrixJson) {
         if (matrixJson == null || matrixJson.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("error", "matrix query param is required"));
         }
-        if (matrixJson.length() > MAX_DIAGNOSTICS_QUERY_CHARS) {
-            return ResponseEntity.status(413).body(Map.of(
-                    "error", "matrix query payload too large",
-                    "details", "Use POST /api/diagnostics with a JSON body for larger matrices."
-            ));
+        String clientIp = null;
+        try { clientIp = org.springframework.web.context.request.RequestContextHolder.currentRequestAttributes().getSessionId(); } catch (Throwable ignored) {}
+
+        // admission control: IP rate limit
+        if (!ipRateLimiter.allowRequest(clientIp)) {
+            return ResponseEntity.status(429).body(Map.of("error", "rate limit exceeded"));
         }
-        queuedJobs.incrementAndGet();
+
+        // Try to acquire compute slot
+        if (!governor.tryAcquire()) {
+            return ResponseEntity.status(429).body(Map.of("error", "server busy - try again later"));
+        }
         maybeNotifyStatus(null, Map.of("state", "online"));
-        boolean permitAcquired = false;
         try {
-            if (queuedJobs.get() > maxHeavyQueue) {
-                return queueBusyResponse();
-            }
-            permitAcquired = heavyJobPermits.tryAcquire();
-            if (!permitAcquired) {
-                return queueBusyResponse();
-            }
             double[][] data = objectMapper.readValue(matrixJson, double[][].class);
-            // SECURITY PATCH: Validate geometry and contents before native processing
-            validateMatrixSafety(data);
             if (tooLargeForFullDiagnostics(data)) {
                 maybeNotifyStatus(null, Map.of("state", "degraded"));
                 return ResponseEntity.unprocessableEntity().body(largeMatrixDiagnosticsHint(data.length, data[0].length));
@@ -684,23 +540,11 @@ public class ApiController {
             return ResponseEntity.ok(buildDiagnosticsResponse(diagnostics));
         } catch (JsonProcessingException ex) {
             return ResponseEntity.badRequest().body(Map.of("error", "invalid matrix JSON", "details", ex.getMessage()));
-        } catch (IllegalArgumentException ex) {
-            // Input validation errors can be returned to client
-            maybeNotifyStatus(null, Map.of("state", "degraded"));
-            return ResponseEntity.badRequest().body(Map.of("error", "Invalid matrix data", "details", ex.getMessage()));
         } catch (Exception ex) {
-            // SECURITY PATCH: Log the actual error internally, do not leak to client
-            log.error("Diagnostics processing failed due to internal error", ex);
             maybeNotifyStatus(null, Map.of("state", "degraded"));
-            return ResponseEntity.status(500).body(Map.of(
-                "error", "Internal Server Error", 
-                "details", "An unexpected error occurred while processing the matrix."
-            ));
+            return ResponseEntity.status(500).body(Map.of("error", "diagnostics failed", "details", ex.getMessage()));
         } finally {
-            if (permitAcquired) {
-                heavyJobPermits.release();
-            }
-            queuedJobs.updateAndGet(v -> Math.max(0, v - 1));
+            governor.release();
             maybeNotifyStatus(null, null);
         }
     }
@@ -712,41 +556,15 @@ public class ApiController {
      * @return Schur matrices and eigenvalue details
      */
     @PostMapping("/api/debug/schur")
-    public ResponseEntity<Map<String, Object>> debugSchur(
-            @RequestBody Map<String, Object> payload,
-            HttpServletRequest request) {
-        if (!debugEndpointsEnabled || !isLocalRequest(request)) {
-            return ResponseEntity.status(404).body(Map.of("error", "Not Found"));
-        }
-        ResponseEntity<Map<String, Object>> preflight = preflightHeavyRequest(request, false);
-        if (preflight != null) return preflight;
-
+    public ResponseEntity<Map<String, Object>> debugSchur(@RequestBody Map<String, Object> payload) {
         Object matrixObj = payload == null ? null : payload.get("matrix");
         if (matrixObj == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "matrix field is required"));
         }
-
-        queuedJobs.incrementAndGet();
-        maybeNotifyStatus(null, Map.of("state", "online"));
-        boolean permitAcquired = false;
+        double[][] data = objectMapper.convertValue(matrixObj, double[][].class);
+        Matrix A = new Matrix(data);
 
         try {
-            if (queuedJobs.get() > maxHeavyQueue) {
-                return queueBusyResponse();
-            }
-            permitAcquired = heavyJobPermits.tryAcquire();
-            if (!permitAcquired) {
-                return queueBusyResponse();
-            }
-
-            double[][] data = objectMapper.convertValue(matrixObj, double[][].class);
-            // SECURITY PATCH: Validate geometry and contents before native processing
-            validateMatrixSafety(data);
-            if (tooLargeForFullDiagnostics(data)) {
-                maybeNotifyStatus(null, Map.of("state", "degraded"));
-                return ResponseEntity.unprocessableEntity().body(largeMatrixDiagnosticsHint(data.length, data[0].length));
-            }
-            Matrix A = new Matrix(data);
             net.faulj.decomposition.result.SchurResult schur = RealSchurDecomposition.decompose(A);
 
             // Re-run extractor on returned T/U to obtain eigenvectors and eigenvalues via same codepath
@@ -797,21 +615,8 @@ public class ApiController {
             out.put("blocks", blocks);
 
             return ResponseEntity.ok(out);
-        } catch (IllegalArgumentException ex) {
-            return ResponseEntity.badRequest().body(Map.of("error", "Invalid matrix data", "details", ex.getMessage()));
         } catch (Exception ex) {
-            // SECURITY PATCH: Log the actual error internally, do not leak to client
-            log.error("Schur decomposition failed due to internal error", ex);
-            return ResponseEntity.status(500).body(Map.of(
-                "error", "Internal Server Error", 
-                "details", "An unexpected error occurred while processing the Schur decomposition."
-            ));
-        } finally {
-            if (permitAcquired) {
-                heavyJobPermits.release();
-            }
-            queuedJobs.updateAndGet(v -> Math.max(0, v - 1));
-            maybeNotifyStatus(null, null);
+            return ResponseEntity.status(500).body(Map.of("error", "exception during schur debug", "details", ex.getMessage()));
         }
     }
 
@@ -1097,34 +902,6 @@ public class ApiController {
         return cells > FULL_DIAGNOSTIC_CELL_LIMIT;
     }
 
-    /**
-     * SECURITY PATCH: Deep validation of matrix data before JNI/Native processing.
-     * Prevents ragged arrays, null references, and non-finite floats from causing 
-     * native buffer overflows or segmentation faults.
-     */
-    private void validateMatrixSafety(double[][] data) {
-        if (data == null || data.length == 0 || data[0] == null) {
-            throw new IllegalArgumentException("Matrix data cannot be null or empty.");
-        }
-        
-        int expectedCols = data[0].length;
-        for (int i = 0; i < data.length; i++) {
-            double[] row = data[i];
-            if (row == null) {
-                throw new IllegalArgumentException("Matrix cannot contain null rows at index " + i);
-            }
-            if (row.length != expectedCols) {
-                throw new IllegalArgumentException("Matrix must be strictly rectangular. Ragged arrays are rejected.");
-            }
-            
-            for (int j = 0; j < row.length; j++) {
-                if (!Double.isFinite(row[j])) {
-                    throw new IllegalArgumentException("Matrix contains invalid numeric data (NaN or Infinity) at [" + i + "][" + j + "].");
-                }
-            }
-        }
-    }
-
     private static Map<String, Object> largeMatrixDiagnosticsHint(int rows, int cols) {
         LinkedHashMap<String, Object> out = new LinkedHashMap<>();
         out.put("error", "matrix too large for synchronous full diagnostics");
@@ -1144,55 +921,23 @@ public class ApiController {
             @RequestParam(value = "sizex", required = false, defaultValue = "512") int sizex,
             @RequestParam(value = "sizey", required = false, defaultValue = "512") int sizey,
             @RequestParam(value = "test", required = false, defaultValue = "GEMM") String test,
-            @RequestParam(value = "iterations", required = false, defaultValue = "5") int iterations,
-            HttpServletRequest request) {
-        return benchmarkDiagnosticInternal(sizex, sizey, test, iterations, request, true);
-    }
-
-    @PostMapping("/api/benchmark/diagnostic")
-    public ResponseEntity<Map<String, Object>> benchmarkDiagnosticPost(
-            @RequestBody(required = false) Map<String, Object> payload,
-            HttpServletRequest request) {
-        int sizex = parseInt(payload == null ? null : payload.get("sizex"), 512);
-        int sizey = parseInt(payload == null ? null : payload.get("sizey"), 512);
-        String test = payload == null ? "GEMM" : Objects.toString(payload.getOrDefault("test", "GEMM"), "GEMM");
-        int iterations = parseInt(payload == null ? null : payload.get("iterations"), 5);
-        return benchmarkDiagnosticInternal(sizex, sizey, test, iterations, request, false);
-    }
-
-    private ResponseEntity<Map<String, Object>> benchmarkDiagnosticInternal(
-            int sizex,
-            int sizey,
-            String test,
-            int iterations,
-            HttpServletRequest request,
-            boolean blockCrossSite) {
-        ResponseEntity<Map<String, Object>> preflight = preflightHeavyRequest(request, blockCrossSite);
-        if (preflight != null) return preflight;
-
-        // SECURITY PATCH: Enforce absolute maximum iterations
-        if (iterations < 1 || iterations > MAX_BENCHMARK_ITERATIONS) {
-            return ResponseEntity.badRequest().body(Map.of(
-                    "error", "Invalid iterations parameter",
-                    "details", "Iterations must be between 1 and " + MAX_BENCHMARK_ITERATIONS
-            ));
+            @RequestParam(value = "iterations", required = false, defaultValue = "5") int iterations) {
+        // admission control
+        String clientIp = null;
+        try { clientIp = org.springframework.web.context.request.RequestContextHolder.currentRequestAttributes().getSessionId(); } catch (Throwable ignored) {}
+        if (!ipRateLimiter.allowRequest(clientIp)) {
+            return ResponseEntity.status(429).body(Map.of("error", "rate limit exceeded"));
         }
-
-        queuedJobs.incrementAndGet();
+        if (!governor.tryAcquire()) {
+            return ResponseEntity.status(429).body(Map.of("error", "server busy - try again later"));
+        }
         maybeNotifyStatus(null, Map.of("state", "online"));
-        boolean permitAcquired = false;
         try {
-            if (queuedJobs.get() > maxHeavyQueue) {
-                return queueBusyResponse();
-            }
-            permitAcquired = heavyJobPermits.tryAcquire();
-            if (!permitAcquired) {
-                return queueBusyResponse();
-            }
             // Only 512x512 GEMM is supported by the existing runner implementation.
             if (sizex == 512 && sizey == 512 && (test == null || test.equalsIgnoreCase("GEMM"))) {
                 // Run a dedicated GEMM throughput benchmark instead of the full decomposition runner
-                Map<String, Object> result = benchmarkService.runGemm(512, iterations);
+                int threadsPerJob = governor.computeThreadsPerJob();
+                Map<String, Object> result = benchmarkService.runGemm(512, iterations, threadsPerJob);
                 Object cpuObj = result.get("cpu");
                 if (cpuObj instanceof Map<?, ?> cpuMap) {
                     @SuppressWarnings("unchecked")
@@ -1210,29 +955,11 @@ public class ApiController {
                     "recommendedEndpoint", "/api/benchmark/diagnostic?sizex=512&sizey=512&test=GEMM&iterations=5"
             ));
         } catch (Exception ex) {
-            // SECURITY PATCH: Log the actual error internally, do not leak to client
-            log.error("Diagnostic benchmark failed due to internal error", ex);
             maybeNotifyStatus(null, Map.of("state", "degraded"));
-            return ResponseEntity.status(500).body(Map.of(
-                    "error", "Internal Server Error",
-                    "details", "An unexpected error occurred while processing the benchmark."
-            ));
+            return ResponseEntity.status(500).body(Map.of("error", "diagnostic benchmark failed", "details", ex.getMessage()));
         } finally {
-            if (permitAcquired) {
-                heavyJobPermits.release();
-            }
-            queuedJobs.updateAndGet(v -> Math.max(0, v - 1));
+            governor.release();
             maybeNotifyStatus(null, null);
-        }
-    }
-
-    private int parseInt(Object value, int fallback) {
-        if (value == null) return fallback;
-        if (value instanceof Number n) return n.intValue();
-        try {
-            return Integer.parseInt(value.toString().trim());
-        } catch (Exception ex) {
-            return fallback;
         }
     }
 

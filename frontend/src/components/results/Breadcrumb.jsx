@@ -9,7 +9,7 @@ import { navigate } from '../../utils/navigation'
  */
 export default function Breadcrumb({ items }) {
   return (
-    <div className="flex items-center gap-2 text-xs font-medium text-slate-400">
+    <div className="flex items-center gap-2 text-xs font-medium text-slate-400 dark:text-slate-500">
       {items.map((item, idx) => (
         <React.Fragment key={idx}>
           {idx > 0 && <span className="material-symbols-outlined text-[14px]">chevron_right</span>}
@@ -28,7 +28,7 @@ export default function Breadcrumb({ items }) {
               {item.label}
             </a>
           ) : (
-            <span className="text-slate-900">{item.label}</span>
+            <span className="text-slate-900 dark:text-slate-100">{item.label}</span>
           )}
         </React.Fragment>
       ))}

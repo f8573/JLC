@@ -432,7 +432,8 @@ public class DispatchPolicy {
         private boolean enableParallel = true;
         private boolean enableBlas3 = true;
         private int blas3Threshold = 256;
-        private boolean enableSimd = true;
+        // Disable SIMD by default to improve numerical robustness for small matrices
+        private boolean enableSimd = false;
         private int simdThreshold = 256;
         private boolean enableStrassen = false;
         private boolean enableCuda = true;

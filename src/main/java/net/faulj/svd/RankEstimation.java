@@ -151,6 +151,8 @@ public class RankEstimation {
 		if (maxSigma == 0.0) {
 			return 0.0;
 		}
-		return Math.max(rows, cols) * maxSigma * EPS;
+		// Use a slightly more conservative cutoff to avoid treating tiny
+		// numerical singular values as significant due to round-off.
+		return Math.max(rows, cols) * maxSigma * (EPS * 10.0);
 	}
 }

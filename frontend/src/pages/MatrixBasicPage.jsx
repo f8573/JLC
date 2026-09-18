@@ -101,7 +101,7 @@ export default function MatrixBasicPage({ matrixString }) {
           </div>
         </div>
       ),
-      iconBg: 'bg-emerald-100',
+      iconBg: 'bg-emerald-100 dark:bg-emerald-500/20',
       iconColor: 'text-emerald-600'
     },
     {
@@ -113,7 +113,7 @@ export default function MatrixBasicPage({ matrixString }) {
           <div><Latex tex={`${determinantLabel} = ${formatNumber(displayedDeterminant, 4)}`} /></div>
         </div>
       ),
-      iconBg: 'bg-sky-100',
+      iconBg: 'bg-sky-100 dark:bg-sky-500/20',
       iconColor: 'text-sky-600'
     },
     {
@@ -136,7 +136,7 @@ export default function MatrixBasicPage({ matrixString }) {
           <div className="text-xs">Row echelon: {diagnostics?.rowEchelon ? 'Yes' : 'No'}</div>
         </div>
       ),
-      iconBg: 'bg-amber-100',
+      iconBg: 'bg-amber-100 dark:bg-amber-500/20',
       iconColor: 'text-amber-600'
     }
   ]
@@ -181,8 +181,8 @@ export default function MatrixBasicPage({ matrixString }) {
     }
   ]
 
-  const qrQ = diagnostics?.qr?.q?.data
-  const qrR = diagnostics?.qr?.r?.data
+  const qrQ = diagnostics?.qr?.q
+  const qrR = diagnostics?.qr?.r
 
   const structurePreview = [
     { label: 'Rank', value: diagnostics?.rank ?? '—' },
@@ -220,7 +220,7 @@ export default function MatrixBasicPage({ matrixString }) {
               <PropertyCard key={idx} {...prop} />
             ))}
           </div>
-          <div className="bg-slate-50 rounded-xl p-6 border border-slate-100">
+          <div className="bg-slate-50 dark:bg-slate-800/60 rounded-xl p-6 border border-slate-100 dark:border-slate-700">
             <h4 className="text-xs font-bold text-slate-400 uppercase mb-4 tracking-tighter">Quick Summary</h4>
             <ul className="space-y-4">
               {summaryItems.map((item, idx) => (
@@ -237,41 +237,41 @@ export default function MatrixBasicPage({ matrixString }) {
             <div className="h-[1px] flex-1 bg-slate-200"></div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="p-4 border border-dashed border-slate-200 rounded-lg">
+            <div className="p-4 border border-dashed border-slate-200 dark:border-slate-700 rounded-lg">
               <h5 className="text-[10px] font-bold mb-3 uppercase text-slate-400">Spectral Analysis</h5>
               <div className="space-y-2">
                 {spectralPreview.map((item, idx) => (
                   <div key={idx} className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500">{item.label}</span>
+                    <span className="text-slate-500 dark:text-slate-400">{item.label}</span>
                     <span className={`font-semibold ${item.color || 'text-slate-700'}`}>{item.value}</span>
                   </div>
                 ))}
               </div>
             </div>
-            <div className="p-4 border border-dashed border-slate-200 rounded-lg">
+            <div className="p-4 border border-dashed border-slate-200 dark:border-slate-700 rounded-lg">
               <h5 className="text-[10px] font-bold mb-3 uppercase text-slate-400">Decompositions</h5>
-              <div className="grid grid-cols-2 gap-3 text-[10px] text-slate-500">
+              <div className="grid grid-cols-2 gap-3 text-[10px] text-slate-500 dark:text-slate-400">
                 <div>
                   <p className="mb-1 text-[10px] font-bold uppercase text-slate-400">Q</p>
-                  <div className="border border-slate-100 rounded p-2 bg-slate-50">
+                  <div className="border border-slate-100 dark:border-slate-700 rounded p-2 bg-slate-50 dark:bg-slate-800/60">
                     <MatrixLatex data={qrQ} className="text-[9px] math-font" precision={2} />
                   </div>
                 </div>
                 <div>
                   <p className="mb-1 text-[10px] font-bold uppercase text-slate-400">R</p>
-                  <div className="border border-slate-100 rounded p-2 bg-slate-50">
+                  <div className="border border-slate-100 dark:border-slate-700 rounded p-2 bg-slate-50 dark:bg-slate-800/60">
                     <MatrixLatex data={qrR} className="text-[9px] math-font" precision={2} />
                   </div>
                 </div>
               </div>
             </div>
-            <div className="p-4 border border-dashed border-slate-200 rounded-lg">
+            <div className="p-4 border border-dashed border-slate-200 dark:border-slate-700 rounded-lg">
               <h5 className="text-[10px] font-bold mb-3 uppercase text-slate-400">Structure</h5>
               <div className="space-y-2">
                 {structurePreview.map((item, idx) => (
                   <div key={idx} className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500">{item.label}</span>
-                    <span className="font-semibold text-slate-700">{item.value}</span>
+                    <span className="text-slate-500 dark:text-slate-400">{item.label}</span>
+                    <span className="font-semibold text-slate-700 dark:text-slate-200">{item.value}</span>
                   </div>
                 ))}
               </div>

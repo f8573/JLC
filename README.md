@@ -1,237 +1,365 @@
-# JLC
+# LambdaCompute
 
-JLC is a Java/C++ dense linear-algebra system that combines a hand-optimized native FP64 GEMM backend, JNI-backed runtime dispatch, and an opt-in matrix-program compiler with whole-expression optimization, affine/dependence analysis, legality-checked scheduling, and CPU lowering.
+LambdaCompute is a Java linear algebra library and web application for matrix diagnostics, decomposition, and spectral analysis.
 
-> **Project status:** the CPU/native/compiler work described here is complete and published. The matrix compiler is intentionally bounded at M4; GPU/CUDA lowering, autotuning, and broader code generation are separate extensions rather than unfinished milestones.
+## Technology Stack
 
-## Measured results
+- Backend: Java 21, Spring Boot 3.2, Gradle
+- Frontend: React 18, Vite 5, Tailwind CSS, KaTeX
+- Native/Performance: C++17, CMake, JNI, JCuda, optional BLAS/LAPACK integration
+- Testing/Tooling: JUnit 4, Node.js scripts, Python analysis utilities
 
-| Result | Measured or verified value |
-| --- | ---: |
-| Native FP64 GEMM, 2048³, controlled median | **520.959 GFLOP/s** |
-| Controlled same-host AOCL-BLIS reference | 583.348 GFLOP/s |
-| JLC / controlled reference | **89.3%** |
-| JLC / nominal Zen 2 FP64 peak (896 GFLOP/s) | **58.1%** |
-| Matrix-chain planner example | **20,000,000 → 200,000** scalar multiplications |
-| 256² scale+add fusion | **0.089060 ms eager → 0.047110 ms compiled** |
-| 256² measured allocation | **1,048,672 B eager → 525,072 B compiled** |
-| Full Java test suite | **447 / 447 passed** |
-| Focused compiler correctness tests | **121 / 121 passed** |
-| Native-focused Java tests | **14 / 14 passed** |
+Live site: https://lambdacompute.org/
 
-The controlled GEMM result used 16 physical workers with physical-core affinity on an AMD Ryzen 9 3950X. The AOCL-BLIS figure is a controlled same-host reference, not a current vendor-library run. Compiler timings are separate JVM measurements on the same host.
+## What this project includes
 
-## System capabilities
+- `src/main/java/net/faulj`: Java core library (matrix/vector types, decompositions, solvers, eigen/spectral routines, condition/accuracy metrics, benchmarking helpers)
+- `src/main/java/net/faulj/kernels/gemm`: first-class GEMM nucleus (canonical GEMM facade, dispatch, microkernel, packing, SIMD adapters)
+- `src/main/java/net/faulj/nativeblas`: backend registry and JNI bridge for the optional native compute backend
+- `src/main/java/net/faulj/web`: Spring Boot API layer (`/api/diagnostics`, `/api/status`, `/api/contact`, benchmark/status streams)
+- `native-backend`: C++/JNI shared library sources built through CMake for the optional native compute backend
+- `frontend`: React + Vite client for matrix input, analysis views, decompositions, spectral reports, favorites/history, and settings
 
-| Layer | What JLC implements |
-| --- | --- |
-| Java/native runtime | JNI-backed native backend with Java fallback, persistent native context, heap/off-heap handling, and strided GEMM entry points. |
-| Backend selection | `auto`, `java`, and `native` runtime modes plus per-algorithm Java/C++ selection. |
-| Calibration-driven dispatch | Optional calibration profiles gate native selection on correctness, sample count, shape/size, and measured speedup thresholds. |
-| Native GEMM | AVX2/FMA 6×8 FP64 microkernel, twelve vector accumulator chains, cache blocking/packing, multithreaded worker pool, and optional physical-core affinity. |
-| Matrix compiler | Expression DAG → planning → affine/access IR → dependence graph → legality-checked schedule → executable CPU plan. |
-| Fusion lowering | Legality-checked scale+add fusion with a guarded primitive fast path for canonical real heap matrices and a generic schedule fallback otherwise. |
+## Current CPU/compiler/runtime scope
 
-## Architecture
+The current checkpoint is the CPU-focused compiler and numerical runtime:
 
 ```text
-                         ┌───────────────────────────────┐
-                         │          Matrix API           │
-                         └───────────────┬───────────────┘
+                                  LambdaCompute / JLC
                                          │
-                                         ▼
-                                      Gemm facade
-                                         │
-                          ┌──────────────┴──────────────┐
-                          │ BackendRegistry / dispatch │
-                          └──────────────┬──────────────┘
-                                         │
-                         ┌───────────────┴───────────────┐
-                         ▼                               ▼
-                   JavaBackend                     NativeBackend
-                                                       │
-                                                       ▼
-                                                      JNI
-                                                       │
-                                                       ▼
-                                      blocked / packed AVX2 FP64 GEMM
+                    ┌────────────────────┴────────────────────┐
+                    │                                         │
+          Numerical Algorithm Runtime                 Matrix Compiler
+                    │                                         │
+          Java implementations                           MatrixExpr
+          Native C++ algorithms                              │
+          GEMM / decompositions                      M1 — Graph optimization
+                    │                                         │
+          Algorithm dispatch                       M2 — Affine/dependence IR
+             ┌──────┴──────┐                                  │
+             │             │                         M3 — Legal scheduling
+           Java         C++ / JNI                              │
+             │             │                         M4 — CPU lowering
+             │             │                                  │
+             │             │                         R2 — Generalized fusion
+             │             │                                  │
+             │             │                  ┌───────────────┴───────────────┐
+             │             │                  │                               │
+             │             │         R1 — Physical buffer planning   R3 — Verified Kernel IR
+             │             │                  │                               │
+             │             │                  │                      R4 — Native codegen
+             │             │                  │                       ┌───────┴────────┐
+             │             │                  │                       │                │
+             │             │                  │                  Scalar C++     Generated AVX2
+             │             │                  │                       │                │
+             │             │                  │                       └───────┬────────┘
+             │             │                  │                               │
+             │             │                  │                      R5 — Empirical tuning
+             │             │                  │                               │
+             │             │                  │                    Backend calibration
+             │             │                  │                               │
+             │             │                  │                    KernelDispatchSelector
+             │             │                  │                 ┌────────┼─────────┐
+             │             │                  │                 │        │         │
+             │             │                  │              R2 Java   Scalar    AVX2
+             │             │                  │                 │        │         │
+             │             │                  │                 └────────┴─────────┘
+             │             │                  │                          │
+             └──────┬──────┘                  └────────────┬─────────────┘
+                    │                                      │
+                    └──────────────────┬───────────────────┘
+                                       │
+                                  JLC execution
+                                       │
+                           correctness-preserving fallback
 
-MatrixExpr DAG
-    │
-    ▼
-graph optimization / matrix-chain planning
-    │
-    ▼
-ExecutionPlan
-    │
-    ▼
-AffineProgram → DependenceGraph
-    │
-    ▼
-SchedulePlan
-    │
-    ▼
-CpuExecutionPlan
-    ├─ MatMul → Gemm facade → Java/native dispatch
-    └─ elementwise regions → primitive fused loop or generic schedule executor
+
+                        ───── Current CPU checkpoint ─────
+
+                                       │
+                                       ▼
+                               Future compiler backends
+                          ┌────────────┼────────────┐
+                          │            │            │
+                       AVX-512      CUDA/GPU     other ISA
+                                       │
+                            heterogeneous placement
 ```
 
-The compiler plans across a matrix expression, but optimized matrix multiplication remains an opaque library kernel at execution. This keeps the compiler responsible for program-level optimization while the GEMM backend owns its internal blocking, packing, threading, and reduction order.
+The runtime combines Java numerical implementations, optimized native algorithms,
+JNI/native registry execution, correctness-gated generated kernels, and a
+correctness-preserving Java fallback. M4 is the terminal matrix-compiler
+milestone; R1–R5 are post-M4 research, and typed backend dispatch is the
+production integration pass. There is no R6 in this checkpoint.
 
-## Backend selection and JNI boundary
+`R1–R5` names reflect research chronology, not a single linear compiler pipeline.
+After R2 determines fusion and materialization, R1 handles physical storage for
+executable values while R3–R5 form the generated-kernel path.
 
-`BackendRegistry` exposes three runtime preferences:
+**CPU performance checkpoint:** on the documented Ryzen 9 3950X same-host
+benchmark, JLC's built-in native FP64 GEMM reached 520.959 GFLOP/s at 2048³
+with 16 physical workers, or 89.3% of the measured AOCL-BLIS throughput. See
+[`docs/GEMM_PUBLICATION_BENCHMARK.md`](docs/GEMM_PUBLICATION_BENCHMARK.md) for
+the methodology and limitations.
 
-```text
--Djlc.backend=auto
--Djlc.backend=java
--Djlc.backend=native
+Existing or legacy CUDA-capable runtime infrastructure, including JCuda-related
+configuration and execution-policy switches, may still exist elsewhere in JLC.
+That infrastructure is separate from this checkpoint: the typed Kernel IR
+backend path dispatches only R2 Java, scalar native, and generated AVX2. It does
+not generate a CUDA backend; a CUDA `BackendChoice` for typed Kernel IR is future
+work.
+
+The public design and evidence are documented in
+[`docs/COMPILER_RUNTIME_RESEARCH.md`](docs/COMPILER_RUNTIME_RESEARCH.md) and
+[`docs/MATRIX_COMPILER.md`](docs/MATRIX_COMPILER.md).
+
+Future work is intentionally outside this CPU checkpoint: CUDA/GPU execution,
+AVX-512, heterogeneous CPU/GPU placement, broader shape-family calibration,
+thread-count tuning, mixed precision, and runtime JIT.
+
+## Primary use cases
+
+- Run matrix diagnostics from raw matrix input
+- Inspect decomposition results (QR, LU, SVD, Schur, Hessenberg, spectral, etc.)
+- Evaluate numerical stability and accuracy metadata
+- Benchmark selected compute paths via API endpoints
+
+## Requirements
+
+- Java 21 (project toolchain target)
+- Node.js 18+
+- npm 9+
+
+## Run locally
+
+### 1) Start backend (Spring Boot)
+
+From repository root:
+
+```powershell
+.\gradlew.bat bootRun
 ```
 
-`auto` is the default. The native backend is JNI-backed and falls back to Java when the native library is unavailable or an operand/layout is unsupported. Native integration includes ordinary heap-backed GEMM, direct/off-heap matrices, and strided entry points.
+Backend default: `http://localhost:8080`
 
-Algorithm selection is separate from the global backend preference. `AlgorithmDispatch` supports per-algorithm `AUTO`, `JAVA`, and `CPP` choices and can load calibration profiles. A calibrated native choice must have passed correctness validation, have enough samples, and clear the configured speedup threshold; otherwise JLC retains the Java path. Cold-start rules remain conservative when no profile is present.
+### 2) Start frontend (Vite)
 
-This boundary is deliberate: JNI calls stay coarse, while backend selection and failure handling stay visible to Java.
+In a second terminal:
 
-## Native GEMM
-
-The built-in native FP64 path uses:
-
-- AVX2/FMA with a 6×8 microkernel;
-- twelve vector accumulator chains;
-- packed/blocking-based execution;
-- a persistent multithreaded worker pool;
-- optional physical-core affinity;
-- Java fallback for unsupported execution cases.
-
-On the controlled 2048³ run, JLC reached **520.959 GFLOP/s median**, or **89.3%** of the historical controlled same-host AOCL-BLIS reference at **583.348 GFLOP/s**. That is about **58.1%** of the Ryzen 9 3950X host's nominal 896 GFLOP/s FP64 peak.
-
-See [PERFORMANCE_SUMMARY.md](docs/PERFORMANCE_SUMMARY.md) and [EXPERIMENTAL_GEMM_PATHS.md](docs/EXPERIMENTAL_GEMM_PATHS.md) for methodology, rejected experiments, and comparison limits.
-
-## Matrix compiler
-
-| Milestone | Delivered layer |
-| --- | --- |
-| M1 | Typed expression DAG, shape/semantic checks, shared-node planning, matrix-chain optimization. |
-| M2 | Logical buffers, bounded affine accesses/domains, alias analysis, dependence analysis. |
-| M3 | Legality-checked interchange, tiling and fusion, with parallel/vector eligibility metadata. |
-| M4 | Executable CPU plans, opaque GEMM lowering, and bounded elementwise fusion. |
-
-The compiler is intentionally conservative. Schedule queries classify transformations as **LEGAL**, **ILLEGAL**, or **UNKNOWN**; `UNKNOWN` rejects the transformation. STRICT semantics preserve compiler-visible expression association/order constraints, while RELAXED/FAST modes allow explicitly permitted reassociation.
-
-For a matrix multiplication update such as:
-
-```text
-C[i,j] += A[i,k] * B[k,j]
-```
-
-the affine layer records reads from `A[i,k]` and `B[k,j]` and a reduction dependence on `C[i,j]`. This is bounded affine/polyhedral-style scheduling over JLC's supported matrix IR, not a general Presburger/polyhedral compiler.
-
-See [MATRIX_COMPILER.md](docs/MATRIX_COMPILER.md) for the exact IR, legality model, lowering contract, audit history, and benchmark methodology.
-
-## Compiler performance
-
-### Matrix-chain planning
-
-For:
-
-```text
-A: 1000×10
-B:   10×1000
-C: 1000×10
-```
-
-STRICT preserves `(A×B)×C`, estimated at **20,000,000 scalar multiplications**. RELAXED chooses `A×(B×C)`, estimated at **200,000** — a **100× reduction in planner arithmetic**.
-
-In the fixed benchmark, measured execution medians were **5.921 ms STRICT** and **5.094 ms RELAXED**, a **1.162× observed runtime ratio**. The planner result is therefore not presented as a 100× runtime speedup: backend dispatch, allocations, and intermediate shapes materially affect wall-clock execution.
-
-### Profitable elementwise fusion
-
-M4 can fuse the supported canonical scale+add family into one primitive pass. The first correct implementation routed each element through the generic schedule interpreter; profiling found map binding, affine evaluation, recursive schedule traversal, and transient allocation in the hot path. The repaired lowering proves the canonical identity case once, resolves storage before the loop, and executes:
-
-```java
-for (int p = 0; p < count; p++) {
-    out[p] = alpha * a[p] + b[p];
-}
-```
-
-Unsupported, complex, off-heap, shifted, or transformed schedules retain the generic correctness path.
-
-Adequately warmed measurements used independent path warmup, 31 timed calls per run, and medians across three repaired runs:
-
-| Size | Eager | Compiled fused | Eager / fused |
-| ---: | ---: | ---: | ---: |
-| 64×64 | 0.006160 ms | 0.003470 ms | **1.78×** |
-| 128×128 | 0.022600 ms | 0.011460 ms | **1.97×** |
-| 256×256 | 0.089060 ms | 0.047110 ms | **1.89×** |
-| 512×512 | 0.426281 ms | 0.203941 ms | **2.09×** |
-| 1024×1024 | 2.562306 ms | 1.469823 ms | **1.74×** |
-
-At 256², the fused matrix payload is **524,288 bytes** versus **1,048,576 bytes** for eager execution. Measured total allocation was **525,072 bytes compiled** versus **1,048,672 bytes eager**. These are one-host observations, not portable speedup guarantees.
-
-## Correctness and validation
-
-The final CPU/compiler state was validated with:
-
-- **447 / 447** full Java tests;
-- **121 / 121** focused compiler correctness tests;
-- **14 / 14** native-focused Java tests;
-- zero skips, failures, or errors in the final validation;
-- `git diff --check` clean;
-- `Matrix.java`, `Gemm.java`, and `native-backend/**` unchanged by the bounded fused-lowering repair.
-
-Adversarial compiler review previously exposed and repaired cross-iteration fusion legality, conservative alias/dependence handling, tile binding safety, mixed real/complex signed-zero semantics, off-heap intermediate ownership, retained-stage provenance, executable-subset validation, and benchmark-boundary issues. The later performance investigation isolated the generic per-element interpreter bottleneck without changing compiler semantics.
-
-## Build and run
-
-Requirements for the validated native path:
-
-- Java 21 JDK;
-- CMake 3.20+;
-- C++17 compiler;
-- x86-64 AVX2/FMA CPU.
-
-Vendor BLAS/LAPACK libraries are optional. Node.js/npm are needed only for the React diagnostics frontend.
-
-The Gradle wrapper is mode `100644`, so invoke it with `bash` on Unix-like systems:
-
-```bash
-bash ./gradlew build
-bash ./gradlew buildNativeBackend
-bash ./gradlew test --rerun-tasks
-bash ./gradlew testNativeBackend
-```
-
-To force the built-in native provider while building:
-
-```bash
-bash ./gradlew -Djlc.native.vendor.blas=NONE buildNativeBackend
-```
-
-The Spring Boot diagnostics service starts with:
-
-```bash
-bash ./gradlew bootRun
-```
-
-The optional React frontend starts from `frontend/` after `npm install`:
-
-```bash
+```powershell
+cd frontend
+npm install
 npm run dev
 ```
 
-On Windows, use `gradlew.bat`.
+Frontend default: `http://localhost:5173`
 
-## Repository guide
+The Vite dev server proxies `/api` to `http://localhost:8080` via `frontend/vite.config.js`.
 
-- [Compiler design, lowering, benchmarks, and validation](docs/MATRIX_COMPILER.md)
-- [Native GEMM performance evidence](docs/PERFORMANCE_SUMMARY.md)
-- [Experimental GEMM paths and rejected variants](docs/EXPERIMENTAL_GEMM_PATHS.md)
-- [License](LICENSE)
+## Build
 
-## Scope
+### Backend
 
-JLC's current compiler is deliberately bounded. It does **not** claim a general Presburger solver, arbitrary generated SIMD/parallel code, CUDA/GPU lowering, or an autotuner. GEMM lowers through the optimized library boundary, while supported elementwise regions use explicit CPU lowering with conservative fallbacks.
+```powershell
+.\gradlew.bat build
+```
 
-The project is intended to demonstrate end-to-end systems work across Java API/runtime design, JNI/native ownership boundaries, hardware-aware kernel engineering, calibrated backend dispatch, compiler legality analysis, executable lowering, profiling, and measurement-driven optimization.
+### Native Backend
+
+```powershell
+.\gradlew.bat buildNativeBackend
+.\gradlew.bat testNativeBackend
+.\gradlew.bat runGemmBackendComparison
+```
+
+### Frontend
+
+```powershell
+cd frontend
+npm run build
+```
+
+## Test
+
+```powershell
+.\gradlew.bat test
+```
+
+Default `test` is intentionally limited to correctness, dispatch logic, lightweight smoke coverage, and non-crashing unit tests. Heavy benchmark and stress suites are not part of the default test task.
+
+Explicit benchmark / stress entrypoints:
+
+```powershell
+.\gradlew.bat benchmarkTest
+.\gradlew.bat stressTest
+.\gradlew.bat runComprehensivePerfBenchmark
+```
+
+If you only want a targeted API smoke test:
+
+```powershell
+.\gradlew.bat test --tests net.faulj.web.ApiControllerStatusTest
+```
+
+## API at a glance
+
+- `GET /api/ping`
+- `GET /api/status`
+- `POST /api/diagnostics`
+- `GET /api/diagnostics?matrix=...`
+- `GET /api/diagnostics/stream` (SSE)
+- `GET /api/benchmark/diagnostic`
+- `GET /api/benchmark/diagnostic512`
+- `POST /api/contact`
+
+## Notes
+
+- Contact form delivery uses `DISCORD_WEBHOOK_URL` from environment variables.
+- Large matrices are intentionally limited for synchronous full diagnostics in the API.
+- GEMM kernel docs:
+  - `src/main/java/net/faulj/kernels/gemm/README.md`
+  - `src/main/java/net/faulj/kernels/gemm/PERFORMANCE.md`
+
+## Execution Policy Flags
+
+Runtime policy can be controlled without refactoring the architecture yet.
+
+- `faulj.runtime.profile` / `FAULJ_RUNTIME_PROFILE`:
+  - `default` (adaptive)
+  - `legacy` (single-thread, scalar-friendly defaults for low-spec hardware)
+- `faulj.exec.policy` / `FAULJ_EXEC_POLICY`:
+  - `AUTO`
+  - `SCALAR_SAFE` (single-thread, no SIMD/BLAS3/CUDA; guaranteed fallback tier)
+  - `SCALAR_PARALLEL` (parallel scalar only)
+  - `SIMD` (CPU vectorized, no CUDA)
+  - `ACCEL` (allow hardware acceleration including CUDA)
+- Fine-grained toggles:
+  - `faulj.parallel.enabled`, `faulj.parallelism`
+  - `faulj.simd.enabled` (or `faulj.vectorization.enabled`)
+  - `faulj.blas3.enabled`
+  - `faulj.cuda.enabled`
+
+Example:
+
+```powershell
+.\gradlew.bat bootRun "-Dfaulj.exec.policy=SCALAR_SAFE"
+```
+
+## Backend Selection
+
+JLC routes dense linear algebra through calibrated algorithm dispatch. Java is the correctness baseline. C++ is the performance backend only when the dispatch policy or an explicit `cpp` override selects it for the matching calibration bucket.
+
+- `jlc.algorithm.backend=auto|java|cpp`: global algorithm-dispatch mode; default is `auto`
+- `jlc.algorithm.<name>.backend=auto|java|cpp`: per-algorithm override, for example `jlc.algorithm.gemm.backend=cpp`
+- `jlc.backend=auto`: default native-library probe mode; algorithm dispatch still decides Java vs C++
+- `jlc.backend=java`: disables JNI probing and keeps Java implementations active
+- `jlc.backend=native`: probes `jlc_native`, but still routes through the calibrated algorithm policy
+
+Current calibrated native scope:
+
+- GEMM coverage: heap-backed `Matrix` GEMM, compatible strided GEMM variants, and supported direct/off-heap layouts
+- Decomposition coverage: optional C++/JNI LU and QR hooks routed by algorithm dispatch; Cholesky has an explicitly enabled native hook
+- Stage-level native helpers: guarded C++/JNI Hessenberg and SVD-bidiagonal paths are available for validated shapes; full SVD remains primarily Java, the iterative Schur stage and general eigenvalue path remain Java, and native Hessenberg coverage is bounded by policy and shape rules
+- These lower-level helpers are separate from generated Kernel IR backends; the typed compiler path remains limited to R2 Java, scalar native, and generated AVX2
+- Java fallback: unsupported shapes/layouts, unavailable native libraries, failed native calls, failed validation, and numerically sensitive or uncalibrated paths
+- Diagnostics: `/api/status` and benchmark responses expose requested/effective backend and native load status
+
+Public LAPACK/provider selection is no longer part of runtime routing. Optional vendor linkage may remain a build-time/native implementation detail, but runtime users select only `auto`, `java`, or `cpp`.
+
+Calibration profiles are versioned Java properties files. Bucket keys use:
+
+```text
+{algorithm, mode, shape-family, size-band, thread-count}
+```
+
+Shape families are `square`, `tall`, and `wide`; size bands are `small`, `medium`, and `large`. A bucket stores Java/C++ timing summaries, sample counts, and C++ correctness status, for example:
+
+```properties
+version=1
+bucket.gemm.multiply.square.medium.1.java.samples=5
+bucket.gemm.multiply.square.medium.1.java.meanNanos=1100000
+bucket.gemm.multiply.square.medium.1.cpp.samples=5
+bucket.gemm.multiply.square.medium.1.cpp.meanNanos=850000
+bucket.gemm.multiply.square.medium.1.cpp.correctness=PASS
+```
+
+In `auto`, C++ is selected only when correctness is `PASS`, the C++ sample count meets `jlc.algorithm.calibration.minSamples` (default `5`), and speedup clears `jlc.algorithm.speedupThreshold` (default `1.10`). SVD, Schur, and Polar use `jlc.algorithm.sensitive.speedupThreshold` (default `1.25`) and default to Java on cold start.
+
+Use the QR comparison runner to seed calibration data on a target machine:
+
+```powershell
+.\gradlew.bat runQrBackendComparison --args="--mode=decompose --shapes=512x128,1024x128,2048x256"
+.\gradlew.bat runQrBackendComparison --args="--mode=factorize --shapes=256x32,512x64,1024x64,2048x64,512x128,1024x256"
+```
+
+To persist measured crossover data into a reusable profile:
+
+```powershell
+.\gradlew.bat runQrBackendComparison --args="--mode=decompose --shapes=128x128,256x256,512x512 --calibrationOut=build/reports/qr_backend_calibration.properties"
+.\gradlew.bat runQrBackendComparison --args="--mode=factorize --shapes=256x32,512x64,1024x64,2048x64,512x128,1024x256 --calibrationOut=build/reports/qr_backend_calibration.properties"
+```
+
+Then point runtime at that file:
+
+```powershell
+.\gradlew.bat bootRun "-Djlc.backend=auto" "-Djlc.algorithm.calibration.path=build/reports/qr_backend_calibration.properties"
+```
+
+Precedence is:
+
+1. `jlc.algorithm.<name>.backend`
+2. `jlc.algorithm.backend`
+3. matching calibration bucket from `jlc.algorithm.calibration.path`
+4. conservative cold-start policy
+
+Current cold-start QR policy:
+
+- `qr.factorize_only`: native is allowed by default
+- `qr.decompose_thin` / `qr.decompose_full`:
+  - native is allowed for non-tall shapes
+  - tall shapes stay on Java unless calibration explicitly proves C++ wins
+- This policy is intentionally conservative: native QR is promoted only where measured wins are stable, while tall `thin/full` QR keeps the Java fallback
+
+Current performance status:
+
+- GEMM has two distinct performance references: the smaller `512x512` JNI array-backed regression guard remains a targeted test boundary, while the publication-scale `2048x2048x2048` FP64 run on the Ryzen 9 3950X measured `520.959 GFLOP/s` with 16 physical workers, or `89.3%` of the same-host AOCL-BLIS reference. See [`docs/GEMM_PUBLICATION_BENCHMARK.md`](docs/GEMM_PUBLICATION_BENCHMARK.md) for the exact methodology and scope
+- QR is the strongest native subsystem today, with large stable wins for factorize-only and improved square `thin/full` performance after the native direct trailing-update promotion
+
+Default verification boundary:
+
+- `test`: correctness, dispatch, smoke coverage, and non-crashing unit tests
+- `benchmarkTest` / `stressTest` / benchmark runners: performance, stress, and large native workloads kept out of the default correctness suite
+
+Gradle run/test tasks auto-wire `jlc.native.lib.path` after `buildNativeBackend`. Outside Gradle, point Java at the built shared library explicitly:
+
+```powershell
+"-Djlc.native.lib.path=build/native-backend/lib/jlc_native.dll"
+```
+
+Native build knobs for CI or alternate local toolchains:
+
+- `jlc.native.cmake` / `JLC_NATIVE_CMAKE`
+- `jlc.native.cmake.generator` / `JLC_NATIVE_CMAKE_GENERATOR`
+- `jlc.native.cxx.compiler` / `JLC_NATIVE_CXX_COMPILER`
+- `jlc.native.make.program` / `JLC_NATIVE_MAKE_PROGRAM`
+- `jlc.native.build.type` / `JLC_NATIVE_BUILD_TYPE`
+- `jlc.native.enable.march.native` / `JLC_NATIVE_ENABLE_MARCH_NATIVE`
+- `jlc.native.enable.vendor.blas` / `JLC_NATIVE_ENABLE_VENDOR_BLAS`
+- `jlc.native.vendor.blas` / `JLC_NATIVE_VENDOR_BLAS` (`AUTO`, `NONE`, `OPENBLAS`, `MKL`)
+
+`AUTO` keeps the C++ backend available when CMake cannot find BLAS/LAPACK. Explicit `OPENBLAS` or `MKL` requests fail configuration if the requested vendor stack is not found. These build knobs do not create public runtime provider selection.
+
+When passing `-D...` values through PowerShell, quote each argument as shown below so the Gradle wrapper receives it intact.
+
+Examples:
+
+```powershell
+.\gradlew.bat bootRun "-Djlc.backend=native"
+.\gradlew.bat runGemm512Benchmark "-Djlc.backend=auto"
+.\gradlew.bat runNativeGemm512Benchmark
+.\gradlew.bat runGemmBackendComparison --args="--size=512 --warmup=6 --runs=4"
+```
+
+## License
+
+See `LICENSE`.

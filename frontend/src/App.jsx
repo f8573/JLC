@@ -21,12 +21,6 @@ import { SettingsProvider } from './context/SettingsContext'
  * sections.
  */
 function App() {
-  useEffect(() => {
-    // Theme is now managed by ThemeContext
-    const savedTheme = localStorage.getItem('theme') || 'light'
-    document.documentElement.classList.remove('light', 'dark')
-    document.documentElement.classList.add(savedTheme)
-  }, [])
   const [path, setPath] = useState(window.location.pathname || '/')
 
   useEffect(() => {
@@ -66,4 +60,3 @@ function AppWrapper() {
 }
 
 export default AppWrapper
-

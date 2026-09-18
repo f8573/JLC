@@ -31,28 +31,45 @@ import net.faulj.matrix.Matrix;
  * M4 lowering from the immutable M3 schedule to a small executable CPU plan.
  *
  * <p>MatMul is deliberately lowered to one opaque call to the existing GEMM
- * facade. Only the bounded Add/Scale/Transpose loop forms and one
- * scale-then-add fusion family become explicit Java loops.</p>
+ * facade. The legacy scale-then-add family remains independently executable;
+ * the post-M4 generalized fusion strategy emits inspectable fused regions for
+ * legal bounded Add/Scale/Transpose schedules.</p>
  */
 public final class CpuLowerer {
     private CpuLowerer() {
     }
 
-    /** Lower an M1 plan using the default M4 schedule, including safe fusion. */
+    /** Lower an M1 plan using the selected fusion implementation. */
     public static CpuExecutionPlan lower(ExecutionPlan plan) {
+        return lower(plan, FusionStrategy.fromSystemProperty());
+    }
+
+    /** Lower an M1 plan with an explicit fusion implementation. */
+    public static CpuExecutionPlan lower(ExecutionPlan plan, FusionStrategy strategy) {
         if (plan == null) {
             throw new IllegalArgumentException("Execution plan must not be null");
         }
+        if (strategy == null) {
+            throw new IllegalArgumentException("Fusion strategy must not be null");
+        }
         AffineProgram affine = AffineProgram.lower(plan);
-        return lower(defaultSchedule(affine), plan);
+        return lower(defaultSchedule(affine, strategy), plan, strategy);
     }
 
     /** Lower an affine program for inspection when no runtime plan is available. */
     public static CpuExecutionPlan lower(AffineProgram program) {
+        return lower(program, FusionStrategy.fromSystemProperty());
+    }
+
+    /** Lower an affine program with an explicit fusion implementation. */
+    public static CpuExecutionPlan lower(AffineProgram program, FusionStrategy strategy) {
         if (program == null) {
             throw new IllegalArgumentException("Affine program must not be null");
         }
-        return lower(defaultSchedule(program));
+        if (strategy == null) {
+            throw new IllegalArgumentException("Fusion strategy must not be null");
+        }
+        return lower(defaultSchedule(program, strategy), null, strategy);
     }
 
     /**
@@ -60,7 +77,7 @@ public final class CpuLowerer {
      * result is inspectable and can be executed only with external bindings.
      */
     public static CpuExecutionPlan lower(net.faulj.compiler.matrix.schedule.SchedulePlan schedule) {
-        return lower(schedule, null);
+        return lower(schedule, null, FusionStrategy.fromSystemProperty());
     }
 
     /**
@@ -68,8 +85,27 @@ public final class CpuLowerer {
      * originating M1 plan. The matrices are referenced, not copied.
      */
     public static CpuExecutionPlan lower(SchedulePlan schedule, ExecutionPlan executionPlan) {
+        return lower(schedule, executionPlan, FusionStrategy.fromSystemProperty());
+    }
+
+    /** Lower a plan-only schedule with an explicit fusion implementation. */
+    public static CpuExecutionPlan lower(SchedulePlan schedule, FusionStrategy strategy) {
+        return lower(schedule, null, strategy);
+    }
+
+    /**
+     * Lower a schedule with an explicit fusion implementation. Generalized
+     * fusion is selected after scheduling and before executable steps or
+     * physical-memory planning are derived.
+     */
+    public static CpuExecutionPlan lower(SchedulePlan schedule,
+                                         ExecutionPlan executionPlan,
+                                         FusionStrategy strategy) {
         if (schedule == null) {
             throw new IllegalArgumentException("Schedule plan must not be null");
+        }
+        if (strategy == null) {
+            throw new IllegalArgumentException("Fusion strategy must not be null");
         }
         if (executionPlan != null
             && executionPlan.semantics() != schedule.program().semantics()) {
@@ -90,19 +126,36 @@ public final class CpuLowerer {
         List<CpuStep> steps = new ArrayList<>();
         Set<AffineStatement> emitted = Collections.newSetFromMap(new IdentityHashMap<>());
         Set<LogicalBuffer> elided = Collections.newSetFromMap(new IdentityHashMap<>());
+        GeneralizedFusionPlanner.Result generalized = strategy == FusionStrategy.GENERALIZED
+            ? GeneralizedFusionPlanner.plan(schedule) : null;
+        List<FusedRegionPlan> acceptedRegions = generalized == null
+            ? new ArrayList<>() : new ArrayList<>(generalized.acceptedRegions());
+        List<String> fusionDecisions = generalized == null
+            ? new ArrayList<>() : new ArrayList<>(generalized.decisions());
 
-        for (ScheduleRegion region : schedule.regions()) {
-            FusedSpec fused = fusableRegion(region, schedule.program(), statementOwners);
+        for (int regionIndex = 0; regionIndex < schedule.regions().size();) {
+            ScheduleRegion region = schedule.region(regionIndex);
+            FusedRegionPlan generalizedRegion = generalized == null
+                ? null : generalized.startingAt(region);
+            if (generalizedRegion != null) {
+                steps.add(generalizedRegion.step(steps.size()));
+                emitted.addAll(generalizedRegion.statements());
+                elided.addAll(generalizedRegion.eliminatedBuffers());
+                regionIndex = generalizedRegion.endRegionIndex() + 1;
+                continue;
+            }
+
+            FusedSpec fused = strategy == FusionStrategy.LEGACY
+                ? fusableRegion(region, schedule.program(), statementOwners) : null;
             if (fused != null) {
                 steps.add(fused.step(steps.size()));
                 emitted.add(fused.scaleStatement);
                 emitted.add(fused.addStatement);
                 elided.add(fused.eliminatedBuffer);
+                fusionDecisions.add("legacy scale-add S" + fused.scaleStatement.id()
+                    + " -> S" + fused.addStatement.id() + " accepted");
+                regionIndex++;
                 continue;
-            }
-            if (region.statements().size() != 1) {
-                throw new IllegalArgumentException(
-                    "CPU lowering supports only singleton regions and validated scale-add fusion");
             }
 
             for (AffineStatement statement : region.statements()) {
@@ -123,6 +176,7 @@ public final class CpuLowerer {
                     emitted.add(statement);
                 }
             }
+            regionIndex++;
         }
 
         if (emitted.size() != schedule.program().statements().size()) {
@@ -151,8 +205,17 @@ public final class CpuLowerer {
                 bindings.add(new CpuBufferBinding(buffer, matrix));
             }
         }
+        FusionMetrics metrics = FusionMetrics.create(
+            strategy,
+            schedule.program(),
+            steps,
+            acceptedRegions,
+            elidedInOrder,
+            generalized == null ? 0 : generalized.candidateRegionCount(),
+            generalized == null ? 0 : generalized.rejectedRegionCount(),
+            fusionDecisions);
         return new CpuExecutionPlan(
-            schedule, steps, bindings, temporaries, materialized, elidedInOrder);
+            schedule, steps, bindings, temporaries, materialized, elidedInOrder, metrics);
     }
 
     /** Alias with the schedule first, useful when a caller has a transformed schedule. */
@@ -161,15 +224,34 @@ public final class CpuLowerer {
         return lower(schedule, executionPlan);
     }
 
+    /** Alias with an explicit fusion implementation. */
+    public static CpuExecutionPlan lower(ExecutionPlan executionPlan,
+                                         SchedulePlan schedule,
+                                         FusionStrategy strategy) {
+        return lower(schedule, executionPlan, strategy);
+    }
+
     /**
      * Build the bounded default M4 schedule. It starts with M3's initial
      * schedule and applies only the validated scale-then-add fusion family.
      */
     public static SchedulePlan defaultSchedule(AffineProgram program) {
+        return defaultSchedule(program, FusionStrategy.fromSystemProperty());
+    }
+
+    /** Build the default schedule for an explicit fusion implementation. */
+    public static SchedulePlan defaultSchedule(AffineProgram program,
+                                               FusionStrategy strategy) {
         if (program == null) {
             throw new IllegalArgumentException("Affine program must not be null");
         }
+        if (strategy == null) {
+            throw new IllegalArgumentException("Fusion strategy must not be null");
+        }
         SchedulePlan schedule = SchedulePlan.initial(program);
+        if (strategy != FusionStrategy.LEGACY) {
+            return schedule;
+        }
         int index = 0;
         while (index + 1 < schedule.regions().size()) {
             ScheduleRegion first = schedule.region(index);

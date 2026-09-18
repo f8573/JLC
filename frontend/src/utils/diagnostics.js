@@ -1,22 +1,20 @@
-import { withHeavyAuthHeaders } from './apiHeaders'
+﻿import { matrixToRealData, normalizeParsedMatrixData } from './matrixInput'
 
 /**
  * Parse a serialized matrix string into a 2D array.
  *
  * @param {string} matrixString
- * @returns {number[][] | null}
+ * @returns {number[][] | {data: number[][], imag: number[][]} | null}
  */
 export function parseMatrixString(matrixString) {
   if (!matrixString) return null
   try {
     const parsed = JSON.parse(matrixString)
-    if (!Array.isArray(parsed)) return null
-    return parsed
+    return normalizeParsedMatrixData(parsed)
   } catch {
     return null
   }
 }
-
 
 
 /**
@@ -54,33 +52,43 @@ function cacheKey(matrixString) {
   return `diagnostics:${encodeURIComponent(matrixString)}`
 }
 
-// In-memory cache only (intentionally not persisted to web storage).
-const diagnosticsCache = new Map()
-
 /**
- * Load cached diagnostics from in-memory cache.
+ * Load cached diagnostics from session storage.
  *
  * @param {string} matrixString
  * @returns {any | null}
  */
 export function loadCachedDiagnostics(matrixString) {
   if (!matrixString) return null
-  const entry = diagnosticsCache.get(cacheKey(matrixString))
-  return entry?.data ?? null
+  try {
+    const raw = sessionStorage.getItem(cacheKey(matrixString))
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    return parsed?.data ?? null
+  } catch {
+    return null
+  }
 }
 
 /**
- * Persist diagnostics to in-memory cache.
+ * Persist diagnostics to session storage.
  *
  * @param {string} matrixString
  * @param {any} diagnostics
  */
 function cacheDiagnostics(matrixString, diagnostics) {
   if (!matrixString || !diagnostics) return
-  diagnosticsCache.set(cacheKey(matrixString), {
-    ts: Date.now(),
-    data: diagnostics
-  })
+  try {
+    sessionStorage.setItem(
+      cacheKey(matrixString),
+      JSON.stringify({
+        ts: Date.now(),
+        data: diagnostics
+      })
+    )
+  } catch {
+    // ignore cache failures
+  }
 }
 
 /**
@@ -90,6 +98,8 @@ function cacheDiagnostics(matrixString, diagnostics) {
  * @returns {Promise<any>}
  */
 async function fetchDiagnostics(matrixData) {
+  const realMatrix = matrixToRealData(matrixData)
+
   // Determine current queue position and record a local pending-job marker so
   // UI components can reason about whether the user's job is within thresholds.
   try {
@@ -109,8 +119,9 @@ async function fetchDiagnostics(matrixData) {
 
   const response = await fetch('/api/diagnostics', {
     method: 'POST',
-    headers: withHeavyAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ matrix: matrixData })
+    headers: { 'Content-Type': 'application/json' },
+    // Backend diagnostics currently accepts real matrices only.
+    body: JSON.stringify({ matrix: realMatrix })
   })
 
   if (!response.ok) {
@@ -463,15 +474,15 @@ function classifySpectrum(eigenvalues, tol = 1e-8) {
 
   let location = 'Mixed/General (across half-planes)'
   if (allImagAxis) {
-    location = 'Imaginary Axis (Re ? = 0)'
+    location = 'Imaginary Axis (Re λ = 0)'
   } else if (allRealNeg) {
     location = 'Left Half-Plane (Hurwitz)'
   } else if (allRealPos) {
     location = 'Right Half-Plane'
   } else if (allRealNonPos) {
-    location = 'Closed Left Half-Plane (Re ? = 0)'
+    location = 'Closed Left Half-Plane (Re λ ≤ 0)'
   } else if (allRealNonNeg) {
-    location = 'Closed Right Half-Plane (Re ? = 0)'
+    location = 'Closed Right Half-Plane (Re λ ≥ 0)'
   } else if (allReal) {
     location = 'Real Axis (mixed sign)'
   }
@@ -480,7 +491,7 @@ function classifySpectrum(eigenvalues, tol = 1e-8) {
   if (allRealNeg) {
     odeStability = 'Asymptotically Stable (Hurwitz)'
   } else if (!anyRealPos && allRealNonPos) {
-    odeStability = 'Marginal (Re ? = 0)'
+    odeStability = 'Marginal (Re λ ≤ 0)'
   }
 
   const allInside = mags.every(m => m < 1 - tol)

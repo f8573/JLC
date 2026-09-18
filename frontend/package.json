@@ -5,20 +5,23 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "stress:node": "node ../tools/load-generator.js",
+    "stress:browser:serve": "npx http-server ./tests -p 8081 -c-1"
   },
   "dependencies": {
-    "katex": "^0.16.32",
+    "katex": "^0.16.8",
     "react": "18.2.0",
     "react-dom": "18.2.0"
   },
   "devDependencies": {
-    "@tailwindcss/container-queries": "^0.1.1",
-    "@tailwindcss/forms": "^0.5.10",
-    "@vitejs/plugin-react": "^5.1.0",
-    "autoprefixer": "^10.4.21",
+    "@vitejs/plugin-react": "^4.0.0",
+    "autoprefixer": "^10.4.24",
+    "vite": "^5.0.0",
     "postcss": "^8.5.6",
-    "tailwindcss": "^3.4.18",
-    "vite": "^6.4.1"
+    "tailwindcss": "^3.4.17",
+    "axios": "^1.4.0",
+    "minimist": "^1.2.8",
+    "http-server": "^14.1.1"
   }
 }

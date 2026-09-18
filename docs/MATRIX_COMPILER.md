@@ -413,7 +413,11 @@ future projects, but they must not extend the matrix-compiler milestone path.
 
 ## Post-M4 ideas
 
-CUDA/GPU backends, heterogeneous placement, autotuning, ML cost models, more
-general polyhedral solving, JIT/code generation, and additional fusion families
-are separate future projects, not unfinished M4 work. They do not extend the
-M1–M4 matrix-compiler pathway.
+CUDA/GPU backends, heterogeneous placement, ML cost models, more general
+polyhedral solving, JIT/code generation, and additional fusion families are
+separate future projects, not unfinished M4 work. The completed R5 research
+and its narrow post-M4 typed runtime integration live alongside this pathway:
+`KernelSignature` remains the semantic identity, `KernelVariantSignature`
+remains a generated implementation identity, and `BackendChoice` is the
+runtime decision consumed by `KernelDispatchSelector`. This does not extend
+the M1–M4 compiler passes or begin R6.

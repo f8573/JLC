@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useRef } from 'react'
-import { withHeavyAuthHeaders } from '../utils/apiHeaders'
 
 /**
  * Unified navigation sidebar across all pages.
@@ -28,13 +27,15 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
   const [barWidthPercent, setBarWidthPercent] = useState(45)
   const [barColorClass, setBarColorClass] = useState('bg-primary')
   const [showInfoModal, setShowInfoModal] = useState(false)
-  const initialBenchmarkDone = useRef(false)
-  const benchmarkIntervalRef = useRef(null)
+  // Do not auto-run benchmarks on mount or on interval; manual only.
+  const esRef = useRef(null)
+  const reconnectAttemptsRef = useRef(0)
+  const previousQueuedRef = useRef(0)
 
   useEffect(() => {
     function load() {
       try {
-        const raw = sessionStorage.getItem('recentSessions')
+        const raw = localStorage.getItem('recentSessions')
         const arr = raw ? JSON.parse(raw) : []
         setSessions(arr.slice(0, 5)) // Show only 5 recent sessions in sidebar
       } catch (e) {
@@ -55,14 +56,10 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
       const res = await fetch('/api/status')
       if (!res.ok) throw new Error('no-status')
       const json = await res.json()
-      setDiagnostics(json)
-      // If CPU is online and we haven't run initial benchmark, run it
+      // reconcile pending-job markers with authoritative server queuedJobs
+      reconcilePendingJobs(json)
+      // If CPU is online, do not auto-run benchmarks here; manual only
       const cpuOnline = json && json.cpu && String(json.cpu.state).toLowerCase() === 'online'
-      if (cpuOnline && !initialBenchmarkDone.current) {
-        initialBenchmarkDone.current = true
-        // run initial benchmark but account it as queued job
-        runSystemBenchmark()
-      }
     } catch (e) {
       setDiagnostics({ status: 'SERVICE_INTERRUPTION', cpu: { name: 'CPU', gflops: null, state: 'offline', queuedJobs: 0 } })
     } finally {
@@ -73,41 +70,95 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
   useEffect(() => {
     // attempt to load diagnostics on mount
     fetchDiagnostics()
-    // open SSE stream for status updates (only apply when changed)
-    const es = new EventSource('/api/diagnostics/stream')
-    es.addEventListener('status', (ev) => {
+
+    // Robust SSE connection with automatic reconnect/backoff.
+    function connectSse() {
       try {
-        const data = JSON.parse(ev.data)
-        setDiagnostics(data)
-        // start initial benchmark if CPU becomes online via SSE
-        const cpuOnline = data && data.cpu && String(data.cpu.state).toLowerCase() === 'online'
-        if (cpuOnline && !initialBenchmarkDone.current) {
-          initialBenchmarkDone.current = true
-          runSystemBenchmark()
+        // close previous if any
+        if (esRef.current) {
+          try { esRef.current.close() } catch (e) {}
+          esRef.current = null
+        }
+        const es = new EventSource('/api/diagnostics/stream')
+        esRef.current = es
+
+        es.addEventListener('status', (ev) => {
+          try {
+            const data = JSON.parse(ev.data)
+            // reconcile pending-job markers with authoritative server queuedJobs
+            reconcilePendingJobs(data)
+            // start initial benchmark if CPU becomes online via SSE
+            // Do not auto-run benchmarks on SSE status events; manual only
+            const cpuOnline = data && data.cpu && String(data.cpu.state).toLowerCase() === 'online'
+          } catch (e) {
+            // ignore malformed events
+          }
+        })
+
+        es.onopen = () => {
+          // reset backoff on successful open
+          reconnectAttemptsRef.current = 0
+        }
+
+        es.onerror = () => {
+          // close and schedule reconnect with exponential backoff
+          try { es.close() } catch (e) {}
+          const attempt = (reconnectAttemptsRef.current || 0) + 1
+          reconnectAttemptsRef.current = attempt
+          const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(attempt, 6)))
+          setTimeout(connectSse, delay)
         }
       } catch (e) {
-        // ignore malformed events
+        // on immediate failure schedule reconnect
+        const attempt = (reconnectAttemptsRef.current || 0) + 1
+        reconnectAttemptsRef.current = attempt
+        const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(attempt, 6)))
+        setTimeout(connectSse, delay)
       }
-    })
-    es.onerror = () => {
-      // if stream fails, close and leave current diagnostics as-is
-      try { es.close() } catch (e) {}
     }
-    return () => { try { es.close() } catch (e) {} }
+
+    connectSse()
+    return () => { try { if (esRef.current) esRef.current.close() } catch (e) {} }
   }, [])
 
-  // schedule periodic benchmarks every 5 minutes
+  // Debug: log when diagnostics change to help debug staleness.
   useEffect(() => {
-    // runSystemBenchmark is stable within this component scope
-    // schedule interval
-    benchmarkIntervalRef.current = setInterval(() => {
-      // don't start a new one if one is running
-      if (!benchmarkRunning) runSystemBenchmark()
-    }, 5 * 60 * 1000)
-    return () => {
-      if (benchmarkIntervalRef.current) clearInterval(benchmarkIntervalRef.current)
+    try { console.debug('[Sidebar] diagnostics updated', diagnostics) } catch (e) {}
+  }, [diagnostics])
+
+  // Reconcile client pending-job markers with authoritative server queuedJobs
+  function reconcilePendingJobs(serverDiagnostics) {
+    try {
+      const serverQueued = serverDiagnostics && serverDiagnostics.cpu && Number.isFinite(Number(serverDiagnostics.cpu.queuedJobs))
+        ? Number(serverDiagnostics.cpu.queuedJobs)
+        : 0
+      // If server reports ONLINE or queuedJobs decreased to zero, clear local pending-job marker
+      const prev = Number(previousQueuedRef.current) || 0
+      const serverStatus = serverDiagnostics && serverDiagnostics.status ? String(serverDiagnostics.status).toUpperCase() : null
+      if (serverStatus === 'ONLINE' || serverQueued === 0 || serverQueued < prev) {
+        try {
+          if (window && window.__myPendingJob) {
+            window.__myPendingJob = null
+            console.debug('[Sidebar] cleared local pending-job marker due to server status/queued change', { prev, serverQueued, serverStatus })
+          }
+        } catch (e) {}
+      }
+      previousQueuedRef.current = serverQueued
+      setDiagnostics(serverDiagnostics)
+    } catch (e) {
+      setDiagnostics(serverDiagnostics)
     }
-  }, [benchmarkRunning])
+  }
+
+  // Fallback polling: if SSE misses an event (browser/network), poll status periodically.
+  useEffect(() => {
+    const id = setInterval(() => {
+      try { fetchDiagnostics() } catch (e) {}
+    }, 5000)
+    return () => clearInterval(id)
+  }, [])
+
+  // Benchmarks are triggered only by user action (manual button). No auto-interval.
 
   const cpuState = diagnostics && diagnostics.cpu && diagnostics.cpu.state ? String(diagnostics.cpu.state).toLowerCase() : null
   const queuedJobs = diagnostics && diagnostics.cpu && Number.isFinite(Number(diagnostics.cpu.queuedJobs))
@@ -118,7 +169,13 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
   let userPendingJobPos = null
   try {
     if (window && window.__myPendingJob && Number.isFinite(Number(window.__myPendingJob.position))) {
-      userPendingJobPos = Number(window.__myPendingJob.position)
+      const entry = window.__myPendingJob
+      // only trust a recent pending-job marker (TTL 60s) to avoid stale positions
+      if (!entry.ts || (Date.now() - Number(entry.ts) <= 60000)) {
+        userPendingJobPos = Number(entry.position)
+      } else {
+        try { window.__myPendingJob = null } catch (e) {}
+      }
     }
   } catch {}
 
@@ -137,10 +194,10 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
   })()
   const cpuColor = cpuState === 'online' ? 'emerald' : (cpuState === 'offline' ? 'rose' : 'amber')
   const cpuPillClass = cpuColor === 'emerald'
-    ? 'inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-700 text-sm font-medium'
+    ? 'inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-100 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-300 text-sm font-medium'
     : (cpuColor === 'rose'
-      ? 'inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-rose-50 border border-rose-100 text-rose-700 text-sm font-medium'
-      : 'inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-50 border border-amber-100 text-amber-700 text-sm font-medium')
+      ? 'inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-rose-50 dark:bg-rose-500/10 border border-rose-100 dark:border-rose-500/30 text-rose-700 dark:text-rose-300 text-sm font-medium'
+      : 'inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-50 dark:bg-amber-500/10 border border-amber-100 dark:border-amber-500/30 text-amber-700 dark:text-amber-300 text-sm font-medium')
   const cpuPingClass = cpuColor === 'emerald' ? 'animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75'
     : (cpuColor === 'rose' ? 'animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75'
       : 'animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75')
@@ -316,17 +373,8 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
     try {
       // mark as queued locally so diagnostics reflect queue impact
       setDiagnostics((prev) => ({ ...(prev || {}), cpu: { ...(prev?.cpu || {}), queuedJobs: (Number(prev?.cpu?.queuedJobs) || 0) + 1 } }))
-      setBenchmarkProgress((prev) => ({ ...prev, phase: `calling POST /api/benchmark/diagnostic (${BENCHMARK_TEST} ${BENCHMARK_SIZES[0]}x${BENCHMARK_SIZES[0]})` }))
-      const res = await fetch('/api/benchmark/diagnostic', {
-        method: 'POST',
-        headers: withHeavyAuthHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({
-          sizex: BENCHMARK_SIZES[0],
-          sizey: BENCHMARK_SIZES[0],
-          test: BENCHMARK_TEST,
-          iterations: BENCHMARK_ITERATIONS,
-        }),
-      })
+      setBenchmarkProgress((prev) => ({ ...prev, phase: `calling /api/benchmark/diagnostic?sizex=${BENCHMARK_SIZES[0]}&sizey=${BENCHMARK_SIZES[0]}&test=${BENCHMARK_TEST}` }))
+      const res = await fetch(`/api/benchmark/diagnostic?sizex=${BENCHMARK_SIZES[0]}&sizey=${BENCHMARK_SIZES[0]}&test=${encodeURIComponent(BENCHMARK_TEST)}&iterations=${BENCHMARK_ITERATIONS}`)
       if (!res.ok) throw new Error('diagnostic-benchmark-failed')
       const json = await res.json()
       const rows = Array.isArray(json?.iterations) ? json.iterations : []
@@ -383,6 +431,10 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
       console.groupEnd()
       setBenchmarkRunning(false)
       setBenchmarkProgress((prev) => ({ ...prev, phase: '' }))
+      try {
+        // Immediately refresh authoritative status so UI removes finished jobs promptly
+        fetchDiagnostics().catch(() => {})
+      } catch (e) {}
     }
   }
 
@@ -522,7 +574,7 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
         {showInfoModal && (
           <div aria-modal="true" className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6" role="dialog">
             <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={() => setShowInfoModal(false)}></div>
-            <div className="relative w-full max-w-2xl transform overflow-hidden rounded-xl bg-white shadow-2xl transition-all flex flex-col max-h-[90vh]">
+            <div className="relative w-full max-w-2xl transform overflow-hidden rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-2xl transition-all flex flex-col max-h-[90vh]">
               <div className="flex items-center justify-between bg-primary px-6 py-4 border-b border-primary-hover shrink-0">
                 <h3 className="text-lg font-bold text-white flex items-center gap-2.5">
                   <span className="material-symbols-outlined">dns</span>
@@ -532,7 +584,7 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
                   <span className="material-symbols-outlined">close</span>
                 </button>
               </div>
-              <div className="p-6 md:p-8 space-y-8 overflow-y-auto">
+              <div className="p-6 md:p-8 space-y-8 overflow-y-auto text-slate-900 dark:text-slate-100">
                 <section>
                   <div className="flex flex-col items-center justify-center">
                     <div className="flex items-start justify-center gap-8 md:gap-12 mb-6 w-full">
@@ -544,22 +596,22 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
                         <span className="text-[11px] font-bold text-emerald-600 tracking-wider">ONLINE</span>
                       </div>
                         <div className={`flex flex-col items-center gap-3 ${systemStatus !== 'BUSY' ? 'opacity-30 grayscale' : ''}`}>
-                          <div className="flex items-center justify-center size-14 rounded-full bg-slate-50 border-2 border-slate-100">
+                          <div className="flex items-center justify-center size-14 rounded-full bg-slate-50 dark:bg-slate-700 border-2 border-slate-100 dark:border-slate-600">
                             <span className="material-symbols-outlined text-3xl text-sky-500">autorenew</span>
                           </div>
-                          <span className="text-[11px] font-bold text-slate-600 tracking-wider">BUSY</span>
+                          <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 tracking-wider">BUSY</span>
                         </div>
                       <div className={`flex flex-col items-center gap-3 ${systemStatus !== 'LARGE_QUEUE' ? 'opacity-30 grayscale' : ''}`}>
-                        <div className="flex items-center justify-center size-14 rounded-full bg-slate-50 border-2 border-slate-100">
+                        <div className="flex items-center justify-center size-14 rounded-full bg-slate-50 dark:bg-slate-700 border-2 border-slate-100 dark:border-slate-600">
                           <span className="material-symbols-outlined text-3xl text-yellow-500">hourglass_top</span>
                         </div>
-                        <span className="text-[11px] font-bold text-slate-600 tracking-wider">LARGE QUEUE</span>
+                        <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 tracking-wider">LARGE QUEUE</span>
                       </div>
                       <div className={`flex flex-col items-center gap-3 ${systemStatus !== 'SERVICE_INTERRUPTION' ? 'opacity-30 grayscale' : ''}`}>
-                        <div className="flex items-center justify-center size-14 rounded-full bg-slate-50 border-2 border-slate-100">
+                        <div className="flex items-center justify-center size-14 rounded-full bg-slate-50 dark:bg-slate-700 border-2 border-slate-100 dark:border-slate-600">
                           <span className="material-symbols-outlined text-3xl text-red-500">warning</span>
                         </div>
-                        <span className="text-[11px] font-bold text-slate-600 tracking-wider">SERVICE INTERRUPTION</span>
+                        <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300 tracking-wider">SERVICE INTERRUPTION</span>
                       </div>
                     </div>
                       <div className={cpuPillClass}>
@@ -575,20 +627,20 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
                 </section>
 
                 <section>
-                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Computation Nodes</h4>
+                  <h4 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-4">Computation Nodes</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="relative group cursor-pointer">
-                      <label className="block p-5 rounded-xl border-2 border-border-color bg-white hover:border-primary/60 transition-all shadow-sm">
+                      <label className="block p-5 rounded-xl border-2 border-border-color dark:border-slate-600 bg-white dark:bg-slate-800 hover:border-primary/60 transition-all shadow-sm">
                         <div className="flex justify-between items-start mb-4">
-                          <div className="p-2.5 rounded-lg bg-slate-100 text-slate-600 transition-colors">
+                          <div className="p-2.5 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors">
                             <span className="material-symbols-outlined text-2xl">memory</span>
                           </div>
                         </div>
                         <div>
-                          <h5 className="text-sm font-bold text-slate-900">CPU Node</h5>
-                          <p className="text-xs text-slate-500 font-mono mt-1">{diagnostics && diagnostics.cpu && diagnostics.cpu.name ? diagnostics.cpu.name : 'CPU'}</p>
+                          <h5 className="text-sm font-bold text-slate-900 dark:text-slate-100">CPU Node</h5>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-1">{diagnostics && diagnostics.cpu && diagnostics.cpu.name ? diagnostics.cpu.name : 'CPU'}</p>
                         </div>
-                        <div className="mt-4 pt-4 border-t border-slate-100">
+                        <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
                           <div className="flex items-baseline gap-1">
                             {(() => {
                               let g = null
@@ -598,13 +650,13 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
                               const f = g != null ? formatFlopsFromGflops(g) : { value: '—', unit: 'FLOPs' }
                               return (
                                 <>
-                                  <span className="text-2xl font-mono font-bold text-slate-900">{f.value}</span>
-                                  <span className="text-xs font-bold text-slate-400 uppercase">{f.unit}</span>
+                                  <span className="text-2xl font-mono font-bold text-slate-900 dark:text-slate-100">{f.value}</span>
+                                  <span className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase">{f.unit}</span>
                                 </>
                               )
                             })()}
                           </div>
-                          <div className="w-full bg-slate-100 h-1.5 rounded-full mt-2 overflow-hidden">
+                          <div className="w-full bg-slate-100 dark:bg-slate-700 h-1.5 rounded-full mt-2 overflow-hidden">
                             <div className={`h-full ${barColorClass} rounded-full`} style={{ width: `${barWidthPercent}%` }}></div>
                           </div>
                         </div>
@@ -612,22 +664,22 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
                     </div>
 
                     <div className="relative group cursor-pointer opacity-30">
-                      <label className="block p-5 rounded-xl border-2 border-border-color bg-white hover:border-primary/60 transition-all shadow-sm">
+                      <label className="block p-5 rounded-xl border-2 border-border-color dark:border-slate-600 bg-white dark:bg-slate-800 hover:border-primary/60 transition-all shadow-sm">
                         <div className="flex justify-between items-start mb-4">
-                          <div className="p-2.5 rounded-lg bg-slate-100 text-slate-600 transition-colors">
+                          <div className="p-2.5 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors">
                             <span className="material-symbols-outlined text-2xl">grid_view</span>
                           </div>
                         </div>
                         <div>
-                          <h5 className="text-sm font-bold text-slate-900">GPU Node</h5>
-                          <p className="text-xs text-slate-500 font-mono mt-1">(disabled)</p>
+                          <h5 className="text-sm font-bold text-slate-900 dark:text-slate-100">GPU Node</h5>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-1">(disabled)</p>
                         </div>
-                        <div className="mt-4 pt-4 border-t border-slate-100">
+                        <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-700">
                           <div className="flex items-baseline gap-1">
                             <span className="text-2xl font-mono font-bold text-slate-900">—</span>
                             <span className="text-xs font-bold text-slate-400 uppercase">TFLOPs</span>
                           </div>
-                          <div className="w-full bg-slate-100 h-1.5 rounded-full mt-2 overflow-hidden">
+                          <div className="w-full bg-slate-100 dark:bg-slate-700 h-1.5 rounded-full mt-2 overflow-hidden">
                             <div className="bg-indigo-500 h-full w-[0%] rounded-full"></div>
                           </div>
                         </div>
@@ -636,7 +688,7 @@ export default function Sidebar({ active = 'home', showCurrentAnalysis = false }
                   </div>
                 </section>
               </div>
-              <div className="p-6 md:px-8 md:pb-8 pt-0 bg-white shrink-0">
+              <div className="p-6 md:px-8 md:pb-8 pt-0 bg-white dark:bg-slate-800 shrink-0">
                 <button
                   onClick={() => { if (!benchmarkRunning) runSystemBenchmark() }}
                   disabled={benchmarkRunning}

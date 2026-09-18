@@ -4,6 +4,7 @@ import jdk.incubator.vector.DoubleVector;
 import jdk.incubator.vector.VectorMask;
 import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
+import net.faulj.util.PerfTimers;
 
 /**
  * Optimized register-blocked microkernel for GEMM.
@@ -42,7 +43,17 @@ public final class MicroKernel {
      * Using 8 provides good ILP and hides FMA latency effectively.
      */
     public static int optimalKUnroll(int vecLen) {
-        return 8;  // Use 8 for both AVX2 and AVX-512
+        // Allow runtime override
+        try {
+            String ku = System.getProperty("la.gemm.kunroll");
+            if (ku != null) {
+                int kuv = Integer.parseInt(ku);
+                if (kuv > 0) return kuv;
+            }
+        } catch (Exception ignored) {
+        }
+        // Tuned default: use k-unroll=6 based on sweep results
+        return 6;
     }
 
     /**
@@ -61,6 +72,11 @@ public final class MicroKernel {
     public static void compute(int mr, int kBlock, int packedN, int actualN,
                                double[] aPack, double[] bPack,
                                double[] c, int cOffset, int ldc) {
+        if (mr == 5) {
+            compute5(kBlock, packedN, actualN, aPack, bPack, c, cOffset, ldc);
+            return;
+        }
+
         int vecLen = SPECIES.length();
         int kUnroll = optimalKUnroll(vecLen);
 
@@ -87,6 +103,159 @@ public final class MicroKernel {
         }
     }
 
+    private static void compute5(int kBlock, int packedN, int actualN,
+                                 double[] aPack, double[] bPack,
+                                 double[] c, int cOffset, int ldc) {
+        int vecLen = SPECIES.length();
+        boolean aligned = (actualN % vecLen) == 0;
+        int jLimit = aligned ? actualN : actualN - (actualN % vecLen);
+
+        for (int j = 0; j < jLimit; j += vecLen) {
+            computeBlock5(kBlock, packedN, j, aPack, bPack, c, cOffset, ldc, false, null);
+        }
+
+        if (!aligned) {
+            VectorMask<Double> mask = SPECIES.indexInRange(jLimit, actualN);
+            computeBlock5(kBlock, packedN, jLimit, aPack, bPack, c, cOffset, ldc, true, mask);
+        }
+    }
+
+    private static void computeBlock5(int kBlock, int packedN, int j,
+                                      double[] aPack, double[] bPack,
+                                      double[] c, int cOffset, int ldc,
+                                      boolean useMask, VectorMask<Double> mask) {
+        long tMK = PerfTimers.start();
+        int cBase = cOffset + j;
+
+        DoubleVector c0;
+        DoubleVector c1;
+        DoubleVector c2;
+        DoubleVector c3;
+        DoubleVector c4;
+
+        if (useMask) {
+            c0 = DoubleVector.fromArray(SPECIES, c, cBase, mask);
+            c1 = DoubleVector.fromArray(SPECIES, c, cBase + ldc, mask);
+            c2 = DoubleVector.fromArray(SPECIES, c, cBase + 2 * ldc, mask);
+            c3 = DoubleVector.fromArray(SPECIES, c, cBase + 3 * ldc, mask);
+            c4 = DoubleVector.fromArray(SPECIES, c, cBase + 4 * ldc, mask);
+        } else {
+            c0 = DoubleVector.fromArray(SPECIES, c, cBase);
+            c1 = DoubleVector.fromArray(SPECIES, c, cBase + ldc);
+            c2 = DoubleVector.fromArray(SPECIES, c, cBase + 2 * ldc);
+            c3 = DoubleVector.fromArray(SPECIES, c, cBase + 3 * ldc);
+            c4 = DoubleVector.fromArray(SPECIES, c, cBase + 4 * ldc);
+        }
+
+        int off1 = kBlock;
+        int off2 = 2 * kBlock;
+        int off3 = 3 * kBlock;
+        int off4 = 4 * kBlock;
+
+        int p = 0;
+        int kLimit = kBlock - 7;
+        for (; p < kLimit; p += 8) {
+            int bBase = p * packedN + j;
+
+            DoubleVector b0 = useMask
+                ? DoubleVector.fromArray(SPECIES, bPack, bBase, mask)
+                : DoubleVector.fromArray(SPECIES, bPack, bBase);
+            DoubleVector b1 = useMask
+                ? DoubleVector.fromArray(SPECIES, bPack, bBase + packedN, mask)
+                : DoubleVector.fromArray(SPECIES, bPack, bBase + packedN);
+            DoubleVector b2 = useMask
+                ? DoubleVector.fromArray(SPECIES, bPack, bBase + 2 * packedN, mask)
+                : DoubleVector.fromArray(SPECIES, bPack, bBase + 2 * packedN);
+            DoubleVector b3 = useMask
+                ? DoubleVector.fromArray(SPECIES, bPack, bBase + 3 * packedN, mask)
+                : DoubleVector.fromArray(SPECIES, bPack, bBase + 3 * packedN);
+            DoubleVector b4 = useMask
+                ? DoubleVector.fromArray(SPECIES, bPack, bBase + 4 * packedN, mask)
+                : DoubleVector.fromArray(SPECIES, bPack, bBase + 4 * packedN);
+            DoubleVector b5 = useMask
+                ? DoubleVector.fromArray(SPECIES, bPack, bBase + 5 * packedN, mask)
+                : DoubleVector.fromArray(SPECIES, bPack, bBase + 5 * packedN);
+            DoubleVector b6 = useMask
+                ? DoubleVector.fromArray(SPECIES, bPack, bBase + 6 * packedN, mask)
+                : DoubleVector.fromArray(SPECIES, bPack, bBase + 6 * packedN);
+            DoubleVector b7 = useMask
+                ? DoubleVector.fromArray(SPECIES, bPack, bBase + 7 * packedN, mask)
+                : DoubleVector.fromArray(SPECIES, bPack, bBase + 7 * packedN);
+
+            c0 = b0.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[p]), c0);
+            c0 = b1.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[p + 1]), c0);
+            c0 = b2.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[p + 2]), c0);
+            c0 = b3.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[p + 3]), c0);
+            c0 = b4.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[p + 4]), c0);
+            c0 = b5.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[p + 5]), c0);
+            c0 = b6.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[p + 6]), c0);
+            c0 = b7.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[p + 7]), c0);
+
+            c1 = b0.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off1 + p]), c1);
+            c1 = b1.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off1 + p + 1]), c1);
+            c1 = b2.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off1 + p + 2]), c1);
+            c1 = b3.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off1 + p + 3]), c1);
+            c1 = b4.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off1 + p + 4]), c1);
+            c1 = b5.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off1 + p + 5]), c1);
+            c1 = b6.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off1 + p + 6]), c1);
+            c1 = b7.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off1 + p + 7]), c1);
+
+            c2 = b0.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off2 + p]), c2);
+            c2 = b1.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off2 + p + 1]), c2);
+            c2 = b2.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off2 + p + 2]), c2);
+            c2 = b3.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off2 + p + 3]), c2);
+            c2 = b4.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off2 + p + 4]), c2);
+            c2 = b5.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off2 + p + 5]), c2);
+            c2 = b6.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off2 + p + 6]), c2);
+            c2 = b7.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off2 + p + 7]), c2);
+
+            c3 = b0.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off3 + p]), c3);
+            c3 = b1.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off3 + p + 1]), c3);
+            c3 = b2.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off3 + p + 2]), c3);
+            c3 = b3.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off3 + p + 3]), c3);
+            c3 = b4.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off3 + p + 4]), c3);
+            c3 = b5.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off3 + p + 5]), c3);
+            c3 = b6.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off3 + p + 6]), c3);
+            c3 = b7.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off3 + p + 7]), c3);
+
+            c4 = b0.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off4 + p]), c4);
+            c4 = b1.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off4 + p + 1]), c4);
+            c4 = b2.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off4 + p + 2]), c4);
+            c4 = b3.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off4 + p + 3]), c4);
+            c4 = b4.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off4 + p + 4]), c4);
+            c4 = b5.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off4 + p + 5]), c4);
+            c4 = b6.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off4 + p + 6]), c4);
+            c4 = b7.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off4 + p + 7]), c4);
+        }
+
+        for (; p < kBlock; p++) {
+            DoubleVector b0 = useMask
+                ? DoubleVector.fromArray(SPECIES, bPack, p * packedN + j, mask)
+                : DoubleVector.fromArray(SPECIES, bPack, p * packedN + j);
+
+            c0 = b0.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[p]), c0);
+            c1 = b0.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off1 + p]), c1);
+            c2 = b0.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off2 + p]), c2);
+            c3 = b0.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off3 + p]), c3);
+            c4 = b0.lanewise(VectorOperators.FMA, DoubleVector.broadcast(SPECIES, aPack[off4 + p]), c4);
+        }
+
+        if (useMask) {
+            c0.intoArray(c, cBase, mask);
+            c1.intoArray(c, cBase + ldc, mask);
+            c2.intoArray(c, cBase + 2 * ldc, mask);
+            c3.intoArray(c, cBase + 3 * ldc, mask);
+            c4.intoArray(c, cBase + 4 * ldc, mask);
+        } else {
+            c0.intoArray(c, cBase);
+            c1.intoArray(c, cBase + ldc);
+            c2.intoArray(c, cBase + 2 * ldc);
+            c3.intoArray(c, cBase + 3 * ldc);
+            c4.intoArray(c, cBase + 4 * ldc);
+        }
+        PerfTimers.record("MicroKernel.compute", tMK);
+    }
+
     /**
      * Compute one NR block of the microkernel.
      * Uses scalar variables instead of arrays to avoid allocations in inner loop.
@@ -96,6 +265,7 @@ public final class MicroKernel {
                                      double[] c, int cOffset, int ldc,
                                      int vecLen, int kUnroll,
                                      boolean useMask, VectorMask<Double> mask) {
+        long tMK = PerfTimers.start();
         // Load C registers
         int cBase = cOffset + j;
         DoubleVector c0, c1, c2, c3, c4, c5;
@@ -268,6 +438,7 @@ public final class MicroKernel {
             if (mr > 4) c4.intoArray(c, cBase + 4 * ldc);
             if (mr > 5) c5.intoArray(c, cBase + 5 * ldc);
         }
+        PerfTimers.record("MicroKernel.compute", tMK);
     }
 
     /**

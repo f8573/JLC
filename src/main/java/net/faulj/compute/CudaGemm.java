@@ -14,10 +14,12 @@ import static jcuda.jcublas.cublasOperation.CUBLAS_OP_N;
  * CUDA-backed GEMM implementation using JCublas.
  */
 final class CudaGemm {
-    static {
-        JCuda.setExceptionsEnabled(true);
-        JCublas2.setExceptionsEnabled(true);
-    }
+    // Lazy enablement of JCuda/JCublas exceptions is performed inside
+    // the gemm method to avoid triggering native library load during
+    // class initialization (which causes UnsatisfiedLinkError on
+    // systems without CUDA drivers). The gemm call is already guarded
+    // by CudaSupport and all native failures are caught and result in
+    // a graceful fallback to CPU paths.
 
     private CudaGemm() {
     }
@@ -85,6 +87,19 @@ final class CudaGemm {
         cublasHandle handle = new cublasHandle();
 
         try {
+            // Enable JCuda/JCublas exceptions lazily to avoid classloading
+            // native libraries during static initialization. Any failures
+            // to initialize native components will be caught and the
+            // caller will fall back to CPU implementations.
+            try {
+                JCuda.setExceptionsEnabled(true);
+                JCublas2.setExceptionsEnabled(true);
+            } catch (Throwable ignored) {
+                // If enabling exceptions triggers a native load failure,
+                // propagate to outer catch which returns false.
+                throw ignored;
+            }
+
             JCublas2.cublasCreate(handle);
             JCuda.cudaMalloc(deviceA, sizeA);
             JCuda.cudaMalloc(deviceB, sizeB);

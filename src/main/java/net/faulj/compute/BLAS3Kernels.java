@@ -13,7 +13,10 @@ import jdk.incubator.vector.VectorSpecies;
 
 /**
  * Provides optimized Level-3 BLAS kernel operations.
+ *
+ * @deprecated Use {@link net.faulj.kernels.gemm.Gemm} as the canonical GEMM entry point.
  */
+@Deprecated(forRemoval = false, since = "1.0")
 public class BLAS3Kernels {
     private static final double ZERO_EPS = 1e-15;
     private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
@@ -73,6 +76,8 @@ public class BLAS3Kernels {
      * @param policy dispatch policy
      */
     public static void gemm(Matrix a, Matrix b, Matrix c, double alpha, double beta, DispatchPolicy policy) {
+        long tG = net.faulj.util.PerfTimers.start();
+        try {
         if (a == null || b == null || c == null) {
             throw new IllegalArgumentException("Matrices must not be null");
         }
@@ -136,6 +141,9 @@ public class BLAS3Kernels {
                     dgemmNaive(a, b, c, alpha, beta);
                 }
         }
+        } finally {
+            net.faulj.util.PerfTimers.record("GEMM.total", tG);
+        }
     }
 
     static void dgemm(Matrix a, Matrix b, Matrix c, double alpha, double beta, int blockSize) {
@@ -186,6 +194,7 @@ public class BLAS3Kernels {
 
     static void dgemmSimdPacked(double[] ad, double[] bd, double[] cd,
                                int m, int k, int n, double alpha, double beta, int blockSize) {
+        long tGemm = net.faulj.util.PerfTimers.start();
         if (beta == 0.0) {
             java.util.Arrays.fill(cd, 0.0);
         } else if (beta != 1.0) {
@@ -206,20 +215,27 @@ public class BLAS3Kernels {
                 int kMax = Math.min(kk + blockSize, k);
                 int kBlock = kMax - kk;
                 double[] bPack = ensureCapacity(PACK_B_BUFFER, kBlock * packedN);
+                long tPB = net.faulj.util.PerfTimers.start();
                 packB(bd, n, kk, kBlock, jj, blockWidth, packedN, bPack);
+                net.faulj.util.PerfTimers.record("GEMM.packB", tPB);
                 for (int ii = 0; ii < m; ii += blockSize) {
                     int iMax = Math.min(ii + blockSize, m);
                     for (int i = ii; i < iMax; i += microRows) {
                         int rows = Math.min(microRows, iMax - i);
                         double[] aPack = ensureCapacity(PACK_A_BUFFER, rows * kBlock);
+                        long tPA = net.faulj.util.PerfTimers.start();
                         packA(ad, k, i, rows, kk, kBlock, alpha, aPack);
+                        net.faulj.util.PerfTimers.record("GEMM.packA", tPA);
                         int cOffset = i * n + jj;
+                        long tMK = net.faulj.util.PerfTimers.start();
                         microKernel(rows, kBlock, packedN, blockWidth, aPack, bPack,
                             cd, cOffset, n, vecLen, kUnroll);
+                        net.faulj.util.PerfTimers.record("GEMM.microkernel.call", tMK);
                     }
                 }
             }
         }
+        net.faulj.util.PerfTimers.record("GEMM.total", tGemm);
     }
 
     /**
@@ -307,6 +323,7 @@ public class BLAS3Kernels {
                                        double[] cd, int cOff, int ldc,
                                        int m, int k, int n,
                                        double alpha, double beta, int blockSize) {
+        long tGemm = net.faulj.util.PerfTimers.start();
         if (m <= 0 || n <= 0) {
             return;
         }
@@ -340,20 +357,27 @@ public class BLAS3Kernels {
                 int kMax = Math.min(kk + bs, k);
                 int kBlock = kMax - kk;
                 double[] bPack = ensureCapacity(PACK_B_BUFFER, kBlock * packedN);
+                long tPB = net.faulj.util.PerfTimers.start();
                 packBStrided(bd, bOff, ldb, kk, kBlock, jj, blockWidth, packedN, bPack);
+                net.faulj.util.PerfTimers.record("GEMM.packB", tPB);
                 for (int ii = 0; ii < m; ii += bs) {
                     int iMax = Math.min(ii + bs, m);
                     for (int i = ii; i < iMax; i += microRows) {
                         int rows = Math.min(microRows, iMax - i);
                         double[] aPack = ensureCapacity(PACK_A_BUFFER, rows * kBlock);
+                        long tPA = net.faulj.util.PerfTimers.start();
                         packAStrided(ad, aOff, lda, i, rows, kk, kBlock, alpha, aPack);
+                        net.faulj.util.PerfTimers.record("GEMM.packA", tPA);
                         int cOffset = cOff + i * ldc + jj;
+                        long tMK = net.faulj.util.PerfTimers.start();
                         microKernel(rows, kBlock, packedN, blockWidth, aPack, bPack,
                             cd, cOffset, ldc, vecLen, kUnroll);
+                        net.faulj.util.PerfTimers.record("GEMM.microkernel.call", tMK);
                     }
                 }
             }
         }
+        net.faulj.util.PerfTimers.record("GEMM.total", tGemm);
     }
 
     static void dgemmSimdPackedStridedTransA(double[] ad, int aOff, int lda,
@@ -361,6 +385,7 @@ public class BLAS3Kernels {
                                              double[] cd, int cOff, int ldc,
                                              int m, int k, int n,
                                              double alpha, double beta, int blockSize) {
+        long tGemm = net.faulj.util.PerfTimers.start();
         int mT = k;
         int kT = m;
         if (mT <= 0 || n <= 0) {
@@ -396,20 +421,27 @@ public class BLAS3Kernels {
                 int kMax = Math.min(kk + bs, kT);
                 int kBlock = kMax - kk;
                 double[] bPack = ensureCapacity(PACK_B_BUFFER, kBlock * packedN);
+                long tPB = net.faulj.util.PerfTimers.start();
                 packBStrided(bd, bOff, ldb, kk, kBlock, jj, blockWidth, packedN, bPack);
+                net.faulj.util.PerfTimers.record("GEMM.packB", tPB);
                 for (int ii = 0; ii < mT; ii += bs) {
                     int iMax = Math.min(ii + bs, mT);
                     for (int i = ii; i < iMax; i += microRows) {
                         int rows = Math.min(microRows, iMax - i);
                         double[] aPack = ensureCapacity(PACK_A_BUFFER, rows * kBlock);
+                        long tPA = net.faulj.util.PerfTimers.start();
                         packAStridedTransposed(ad, aOff, lda, i, rows, kk, kBlock, alpha, aPack);
+                        net.faulj.util.PerfTimers.record("GEMM.packA", tPA);
                         int cOffset = cOff + i * ldc + jj;
+                        long tMK = net.faulj.util.PerfTimers.start();
                         microKernel(rows, kBlock, packedN, blockWidth, aPack, bPack,
                             cd, cOffset, ldc, vecLen, kUnroll);
+                        net.faulj.util.PerfTimers.record("GEMM.microkernel.call", tMK);
                     }
                 }
             }
         }
+        net.faulj.util.PerfTimers.record("GEMM.total", tGemm);
     }
 
     static void dgemmSimdPackedStridedColMajorA(double[] ad, int aOff, int lda,
@@ -787,6 +819,15 @@ public class BLAS3Kernels {
     }
 
     private static int microRowsForVector(int vecLen) {
+        // Allow runtime override via system property
+        try {
+            String mrProp = System.getProperty("la.gemm.mr");
+            if (mrProp != null) {
+                int mrv = Integer.parseInt(mrProp);
+                if (mrv > 0) return Math.min(6, Math.max(1, mrv));
+            }
+        } catch (Exception ignored) {
+        }
         if (vecLen >= 8) {
             return 4;
         }
@@ -797,6 +838,15 @@ public class BLAS3Kernels {
     }
 
     private static int kUnrollForVector(int vecLen) {
+        // Allow runtime override for K unroll
+        try {
+            String ku = System.getProperty("la.gemm.kunroll");
+            if (ku != null) {
+                int kuv = Integer.parseInt(ku);
+                if (kuv > 0) return kuv;
+            }
+        } catch (Exception ignored) {
+        }
         if (vecLen >= 16) {
             return 8;
         }
@@ -821,6 +871,7 @@ public class BLAS3Kernels {
     }
 
     static void dgemmParallel(Matrix a, Matrix b, Matrix c, double alpha, double beta, int blockSize, int parallelism) {
+        long tPar = net.faulj.util.PerfTimers.start();
         int m = a.getRowCount();
         int k = a.getColumnCount();
         int n = b.getColumnCount();
@@ -872,10 +923,12 @@ public class BLAS3Kernels {
         ForkJoinPool pool = new ForkJoinPool(threads);
         try {
             if (bs <= 1) {
-                pool.submit(() ->
-                    java.util.stream.IntStream.range(0, m).parallel().forEach(row -> {
-                        int aRowOffset = row * k;
-                        int cRowOffset = row * n;
+                java.util.List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<>();
+                for (int row = 0; row < m; row++) {
+                    final int r = row;
+                    futures.add(pool.submit(() -> {
+                        int aRowOffset = r * k;
+                        int cRowOffset = r * n;
                         for (int kk = 0; kk < k; kk++) {
                             double aVal = ad[aRowOffset + kk];
                             double aImg = ai == null ? 0.0 : ai[aRowOffset + kk];
@@ -904,18 +957,28 @@ public class BLAS3Kernels {
                                 }
                             }
                         }
-                    })
-                ).get();
+                    }));
+                }
+                for (java.util.concurrent.Future<?> f : futures) {
+                    f.get();
+                }
             } else {
                 int blockRows = (m + bs - 1) / bs;
-                pool.submit(() ->
-                    java.util.stream.IntStream.range(0, blockRows).parallel().forEach(blockRow -> {
-                        int ii = blockRow * bs;
-                        int iMax = Math.min(ii + bs, m);
-                        for (int kk = 0; kk < k; kk += bs) {
-                            int kMax = Math.min(kk + bs, k);
-                            for (int jj = 0; jj < n; jj += bs) {
-                                int jMax = Math.min(jj + bs, n);
+                int blockCols = (n + bs - 1) / bs;
+                java.util.List<java.util.concurrent.Future<?>> futures = new java.util.ArrayList<>();
+                for (int br = 0; br < blockRows; br++) {
+                    final int blockRow = br;
+                    for (int bc = 0; bc < blockCols; bc++) {
+                        final int blockCol = bc;
+                        futures.add(pool.submit(() -> {
+                            int ii = blockRow * bs;
+                            int iMax = Math.min(ii + bs, m);
+                            int jj = blockCol * bs;
+                            int jMax = Math.min(jj + bs, n);
+                            for (int kk = 0; kk < k; kk += bs) {
+                                int kMax = Math.min(kk + bs, k);
+                                double[] bPack = ensureCapacity(PACK_B_BUFFER, (kMax - kk) * Math.max(1, jMax - jj));
+                                packB(bd, n, kk, kMax - kk, jj, jMax - jj, Math.max(1, jMax - jj), bPack);
                                 for (int i = ii; i < iMax; i++) {
                                     int aRowOffset = i * k;
                                     int cRowOffset = i * n;
@@ -949,9 +1012,12 @@ public class BLAS3Kernels {
                                     }
                                 }
                             }
-                        }
-                    })
-                ).get();
+                        }));
+                    }
+                }
+                for (java.util.concurrent.Future<?> f : futures) {
+                    f.get();
+                }
             }
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
@@ -962,6 +1028,7 @@ public class BLAS3Kernels {
             dgemm(a, b, c, alpha, beta, blockSize);
         } finally {
             shutdownPool(pool);
+            net.faulj.util.PerfTimers.record("GEMM.parallel.total", tPar);
         }
     }
 

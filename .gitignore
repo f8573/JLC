@@ -1,47 +1,34 @@
-# Java / Gradle
+# Gradle and IDE state
 .gradle/
-build/
-out/
-target/
-
-# CMake / native builds
-cmake-build-*/
-CMakeCache.txt
-CMakeFiles/
-compile_commands.json
-
-# Python
-.venv/
-venv/
-__pycache__/
-*.py[cod]
-
-# Node / Vite
-frontend/node_modules/
-frontend/dist/
-frontend/.vite/
-
-# IDEs / editors
 .idea/
 .vscode/
-*.iml
+build/
 
-# Logs
-*.log
+# Frontend dependencies and local configuration
+node_modules/
+frontend/dist/
+.env
+.venv/
 status.log
+
+# Generated benchmark outputs
+Algorithm_FLOP_results
+autotune_output_full.txt
+comprehensive_performance_results.csv
+consolidated_gemm_pes.csv
+REPORT_GEMM_PES.md
 hs_err_pid*.log
 
-# Benchmark and generated outputs
-rerun_*.out
-*_analysis.out
-*.class
-*.exe
+# Compiled standalone tooling
+tools/*.class
+tools/out/
+tools/bench/*.class
 
-# Legacy benchmark outputs
-/Algorithm_FLOP_results
-/comprehensive_performance_results.csv
-
-# OS junk
-.DS_Store
-Thumbs.db
-Desktop.ini
+# Generated flop benchmark artifacts
+tools/flop_bench/bench_novec
+tools/flop_bench/bench_novec.exe
+tools/flop_bench/bench_vec
+tools/flop_bench/bench_vec.exe
+tools/flop_bench/bench_cuda
+tools/flop_bench/bench_cuda.exe
+tools/flop_bench/flop_report.html

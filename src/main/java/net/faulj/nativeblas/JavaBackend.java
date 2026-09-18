@@ -40,14 +40,7 @@ final class JavaBackend implements ComputeBackend {
                             double[] c, int cOffset, int ldc,
                             int m, int k, int n,
                             double alpha, double beta) {
-        if (!transposeA) {
-            gemmStrided(a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta);
-            return;
-        }
-        BLAS3Kernels.gemmStridedTransA(
-            a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc,
-            m, k, n, alpha, beta, 64
-        );
+        OptimizedBLAS3.gemmStrided(transposeA, a, aOffset, lda, b, bOffset, ldb, c, cOffset, ldc, m, k, n, alpha, beta);
     }
 
     @Override

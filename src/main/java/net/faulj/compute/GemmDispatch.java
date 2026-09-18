@@ -20,7 +20,6 @@ import jdk.incubator.vector.VectorSpecies;
  */
 public final class GemmDispatch {
     private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
-    private static final int MAX_PARALLELISM = Math.max(1, Runtime.getRuntime().availableProcessors());
 
     // Cache size estimates (bytes)
     private static final int L1_CACHE = 32 * 1024;      // 32 KB typical L1D
@@ -31,9 +30,22 @@ public final class GemmDispatch {
     private static final long TINY_THRESHOLD = 8 * 8 * 8;          // 512 FLOPs
     private static final long SMALL_THRESHOLD = 50_000;            // 50k FLOPs
     private static final long CUDA_THRESHOLD = 200_000_000;        // 200M FLOPs
-    private static final long PARALLEL_THRESHOLD = 5_000_000;      // 5M FLOPs
+    private static final long PARALLEL_THRESHOLD;      // 5M FLOPs (default, overridable)
 
     private GemmDispatch() {}
+
+    static {
+        long def = 5_000_000L;
+        String v = System.getProperty("la.gemm.parallelThreshold");
+        long parsed = def;
+        if (v != null) {
+            try {
+                parsed = Long.parseLong(v);
+            } catch (Exception ignored) {
+            }
+        }
+        PARALLEL_THRESHOLD = parsed;
+    }
 
     /**
      * Kernel selection result.
@@ -118,8 +130,30 @@ public final class GemmDispatch {
      */
     public static BlockSizes computeBlockSizes() {
         int vecLen = SPECIES.length();
-        int nr = vecLen;
-        int mr = MicroKernel.optimalMR(vecLen);
+        // Tuned defaults: MR=5, NR=4 gave best small-GEMM results on target hardware.
+        int nr = 4;
+        int mr = 5;
+        // Allow defaults to be adjusted by SIMD width when appropriate
+        if (vecLen >= 8 && nr < vecLen) {
+            // If AVX-512, allow larger NR but keep MR tuned
+            nr = vecLen;
+        }
+
+        // Allow runtime override for microkernel block sizes via system properties
+        try {
+            String mrProp = System.getProperty("la.gemm.mr");
+            String nrProp = System.getProperty("la.gemm.nr");
+            if (mrProp != null) {
+                int mrv = Integer.parseInt(mrProp);
+                if (mrv > 0) mr = mrv;
+            }
+            if (nrProp != null) {
+                int nrv = Integer.parseInt(nrProp);
+                if (nrv > 0) nr = nrv;
+            }
+        } catch (Exception e) {
+            // ignore and fall back to defaults
+        }
 
         // KC: size B panel (KC × NC) to fit in L2
         // Goal: KC × NC × 8 bytes ≈ L2_CACHE / 2 (leave room for A and C)
@@ -182,8 +216,7 @@ public final class GemmDispatch {
      * Determine optimal parallelism level based on problem size and threads.
      */
     public static int optimalParallelism(int m, int n, int k, int maxThreads, BlockSizes blocks) {
-        int boundedMaxThreads = boundedParallelism(maxThreads);
-        if (boundedMaxThreads <= 1) {
+        if (maxThreads <= 1) {
             return 1;
         }
 
@@ -205,12 +238,8 @@ public final class GemmDispatch {
         maxUsefulThreads = Math.min(maxUsefulThreads, totalTiles);
 
         // Use power-of-2 threads for better load balance
-        int threads = Math.min(boundedMaxThreads, maxUsefulThreads);
+        int threads = Math.min(maxThreads, maxUsefulThreads);
         return Math.max(1, Integer.highestOneBit(threads));
-    }
-
-    static int boundedParallelism(int requestedParallelism) {
-        return Math.max(1, Math.min(requestedParallelism, MAX_PARALLELISM));
     }
 
     /**

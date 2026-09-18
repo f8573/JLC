@@ -2,7 +2,11 @@ package net.faulj.matrix;
 
 import java.util.Arrays;
 
+import net.faulj.compute.DispatchPolicy;
 import net.faulj.core.Tolerance;
+import net.faulj.kernels.gemm.Gemm;
+import net.faulj.nativeblas.AlgorithmBackend;
+import net.faulj.nativeblas.NativeAlgorithmScope;
 
 /**
  * Utility methods for matrix operations and validation.
@@ -14,6 +18,13 @@ public class MatrixUtils {
 
     /** Machine epsilon for double precision */
     private static final double EPS = 2.220446049250313e-16;
+    private static final DispatchPolicy STABLE_GEMM_POLICY = DispatchPolicy.builder()
+        .enableCuda(false)
+        .enableParallel(false)
+        .parallelism(1)
+        .enableBlas3(true)
+        .enableSimd(true)
+        .build();
 
     /**
      * Compute relative Frobenius norm error: ||A - Ahat||_F / ||A||_F
@@ -27,6 +38,14 @@ public class MatrixUtils {
         if (normA < EPS) return 0.0;
         return A.subtract(Ahat).frobeniusNorm() / normA;
     }
+
+    /**
+     * Multiply matrices using a stable single-threaded GEMM policy for verification paths.
+     */
+    public static Matrix multiplyStable(Matrix left, Matrix right) {
+        return NativeAlgorithmScope.withOverride("gemm", AlgorithmBackend.JAVA,
+            () -> Gemm.multiply(left, right, STABLE_GEMM_POLICY));
+    }
     
     /**
      * Compute orthogonality error: ||Q^T*Q - I||_F
@@ -36,7 +55,7 @@ public class MatrixUtils {
      */
     public static double orthogonalityError(Matrix Q) {
         int n = Q.getColumnCount();
-        Matrix QtQ = Q.transpose().multiply(Q);
+        Matrix QtQ = multiplyStable(Q.transpose(), Q);
         Matrix I = Matrix.Identity(n);
         return QtQ.subtract(I).frobeniusNorm();
     }
@@ -169,6 +188,52 @@ public class MatrixUtils {
             pivotRow++;
         }
         return new RowReductionResult(exchanges, Arrays.copyOf(pivotCols, pivotCount));
+    }
+
+    /**
+     * Produce a one-line concise summary of a matrix for logging/diagnostics.
+     *
+     * The summary includes shape, Frobenius norm, orthogonality error (or 'n/a'),
+     * and a small top-left sample of entries up to the provided limits.
+     */
+    public static String matrixSummary(Matrix m, int maxRows, int maxCols) {
+        if (m == null) return "null";
+        int rows = m.getRowCount();
+        int cols = m.getColumnCount();
+        double frob = m.frobeniusNorm();
+        String ortho = m.isSquare() ? String.format("%.6e", orthogonalityError(m)) : "n/a";
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("%dx%d", rows, cols));
+        sb.append(", frob=").append(String.format("%.6e", frob));
+        sb.append(", ortho=").append(ortho);
+
+        int r = Math.min(rows, Math.max(0, maxRows));
+        int c = Math.min(cols, Math.max(0, maxCols));
+        if (r > 0 && c > 0) {
+            sb.append(", sample=");
+            sb.append('[');
+            for (int i = 0; i < r; i++) {
+                if (i > 0) sb.append(',');
+                sb.append('[');
+                for (int j = 0; j < c; j++) {
+                    if (j > 0) sb.append(',');
+                    double re = m.get(i, j);
+                    if (!m.hasImagData()) {
+                        sb.append(String.format("%.6e", re));
+                    } else {
+                        double im = m.getImag(i, j);
+                        if (im == 0.0) sb.append(String.format("%.6e", re));
+                        else if (im > 0) sb.append(String.format("%.6e+%.6ei", re, im));
+                        else sb.append(String.format("%.6e%.6ei", re, im));
+                    }
+                }
+                sb.append(']');
+            }
+            sb.append(']');
+        }
+
+        return sb.toString();
     }
 
     public static final class RowReductionResult {

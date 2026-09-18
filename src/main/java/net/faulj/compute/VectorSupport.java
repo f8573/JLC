@@ -11,8 +11,10 @@ final class VectorSupport {
     private static final String PROP_FORCE = "faulj.simd.force";
     private static final String PROP_ENABLED = "faulj.simd.enabled";
     private static final String PROP_AVAILABLE = "faulj.simd.available";
+    private static final String PROP_ALLOW_NON_X86 = "faulj.simd.allow_non_x86";
     private static final String ENV_ENABLED = "FAULJ_SIMD_ENABLED";
     private static final String ENV_AVAILABLE = "FAULJ_SIMD_AVAILABLE";
+    private static final String ENV_ALLOW_NON_X86 = "FAULJ_SIMD_ALLOW_NON_X86";
     private static final String VECTOR_CLASS = "jdk.incubator.vector.DoubleVector";
 
     private static volatile Boolean cached;
@@ -44,6 +46,12 @@ final class VectorSupport {
             return false;
         }
 
+        // Conservative default: disable SIMD on non-x86 unless explicitly allowed.
+        // This avoids AVX-assumptive paths on older/ARM hardware.
+        if (!isLikelyX86() && !isExplicitlyAllowNonX86()) {
+            return false;
+        }
+
         Boolean explicitAvailable = readFlag(System.getProperty(PROP_AVAILABLE));
         if (explicitAvailable != null) {
             return explicitAvailable;
@@ -54,6 +62,20 @@ final class VectorSupport {
         }
 
         return hasVectorApi();
+    }
+
+    private static boolean isLikelyX86() {
+        String arch = System.getProperty("os.arch", "").toLowerCase(Locale.ROOT);
+        return arch.contains("x86") || arch.contains("amd64");
+    }
+
+    private static boolean isExplicitlyAllowNonX86() {
+        Boolean prop = readFlag(System.getProperty(PROP_ALLOW_NON_X86));
+        if (prop != null) {
+            return prop;
+        }
+        Boolean env = readFlag(System.getenv(ENV_ALLOW_NON_X86));
+        return env != null && env;
     }
 
     private static boolean isDisabled(String propValue, String envValue) {

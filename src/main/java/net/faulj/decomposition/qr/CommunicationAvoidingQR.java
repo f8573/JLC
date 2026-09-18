@@ -15,6 +15,10 @@ public class CommunicationAvoidingQR {
      * @return QR result containing Q and R
      */
     public static QRResult decompose(Matrix A) {
-        return TallSkinnyQR.decompose(A);
+        return net.faulj.decomposition.qr.caqr.CommunicationAvoidingQR.factor(
+            A,
+            true,
+            net.faulj.decomposition.qr.caqr.QRConfig.defaultConfig()
+        );
     }
 }

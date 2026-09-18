@@ -1,8 +1,8 @@
 package net.faulj.benchmark;
 
 import net.faulj.matrix.Matrix;
-import net.faulj.compute.OptimizedBLAS3;
 import net.faulj.compute.BlockedMultiply;
+import net.faulj.kernels.gemm.Gemm;
 import net.faulj.decomposition.lu.LUDecomposition;
 import org.junit.Test;
 
@@ -21,7 +21,7 @@ public class DiagnosticBench {
         for (int n : sizes) {
             System.out.printf("=== Testing n=%d ===\n", n);
 
-            // Test 1: Optimized GEMM (direct call)
+            // Test 1: Canonical GEMM facade
             {
                 Matrix a = Matrix.randomMatrix(n, n);
                 Matrix b = Matrix.randomMatrix(n, n);
@@ -29,13 +29,13 @@ public class DiagnosticBench {
 
                 // Warmup
                 for (int i = 0; i < 3; i++) {
-                    OptimizedBLAS3.gemm(a, b, c, 1.0, 0.0, null);
+                    Gemm.gemm(a, b, c, 1.0, 0.0, null);
                 }
 
                 // Measure
                 long start = System.nanoTime();
                 for (int i = 0; i < 5; i++) {
-                    OptimizedBLAS3.gemm(a, b, c, 1.0, 0.0, null);
+                    Gemm.gemm(a, b, c, 1.0, 0.0, null);
                 }
                 long end = System.nanoTime();
 
@@ -43,7 +43,7 @@ public class DiagnosticBench {
                 long flops = 2L * n * n * n;
                 double gflops = (flops / (timeMs / 1000.0)) / 1e9;
 
-                System.out.printf("  Optimized GEMM (direct):  %8.3f ms  |  %8.2f GFLOPS\n",
+                System.out.printf("  GEMM facade (canonical):  %8.3f ms  |  %8.2f GFLOPS\n",
                     timeMs, gflops);
             }
 

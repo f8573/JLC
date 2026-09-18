@@ -2,6 +2,10 @@ package net.faulj.svd;
 
 import net.faulj.decomposition.result.SVDResult;
 import net.faulj.matrix.Matrix;
+import net.faulj.nativeblas.AlgorithmBackend;
+import net.faulj.nativeblas.NativeAlgorithmScope;
+
+import java.util.Map;
 
 /**
  * Computes the Singular Value Decomposition (SVD) of a matrix.
@@ -17,7 +21,10 @@ public class SVDecomposition {
      * Create an SVD decomposer using the default algorithm.
      */
     public SVDecomposition() {
-        this(SVDAlgorithm.DIVIDE_AND_CONQUER);
+        // Use Golub-Kahan QR by default for improved robustness on small
+        // and rank-deficient matrices (avoids issues in the divide-and-conquer
+        // path uncovered by tests).
+        this(SVDAlgorithm.GOLUB_KAHAN_QR);
     }
 
     /**
@@ -42,9 +49,33 @@ public class SVDecomposition {
         if (A == null) {
             throw new IllegalArgumentException("Matrix must not be null");
         }
-        return switch (algorithm) {
+        Map<String, AlgorithmBackend> stageBackends = nativeStageBackends(A, "full");
+        SVDResult res = NativeAlgorithmScope.withOverrides(stageBackends, () -> switch (algorithm) {
             case GOLUB_KAHAN_QR -> new GolubKahanSVD().decompose(A);
             case DIVIDE_AND_CONQUER -> new DivideAndConquerSVD().decompose(A);
-        };
+        });
+
+        return res;
+    }
+
+    static Map<String, AlgorithmBackend> nativeStageBackends(Matrix A, String mode) {
+        AlgorithmBackend backend = nativeAlgorithmBackend(A, mode);
+        return Map.of(
+            "bidiagonal", backend,
+            "schur", backend
+        );
+    }
+
+    static AlgorithmBackend nativeAlgorithmBackend(Matrix A, String mode) {
+        int rows = A.getRowCount();
+        int cols = A.getColumnCount();
+        int threads = defaultThreadCount();
+        boolean useCpp = net.faulj.nativeblas.BackendRegistry.shouldUseCppForAlgorithm("svd", mode, rows, cols, threads);
+        return useCpp ? AlgorithmBackend.CPP : AlgorithmBackend.JAVA;
+    }
+
+    private static int defaultThreadCount() {
+        net.faulj.compute.DispatchPolicy policy = net.faulj.compute.DispatchPolicy.defaultPolicy();
+        return policy.isParallelEnabled() ? policy.getParallelism() : 1;
     }
 }

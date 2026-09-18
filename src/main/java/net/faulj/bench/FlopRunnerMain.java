@@ -1,5 +1,6 @@
 package net.faulj.bench;
 
+import net.faulj.compute.RuntimeProfile;
 import net.faulj.decomposition.hessenberg.HessenbergReduction;
 import net.faulj.decomposition.qr.HouseholderQR;
 import net.faulj.matrix.Matrix;
@@ -10,6 +11,7 @@ import java.util.Random;
 
 public class FlopRunnerMain {
     public static void main(String[] args) throws Exception {
+        RuntimeProfile.applyConfiguredProfile();
         int max = 2048;
         String env = System.getenv("BENCH_MAX_SIZE");
         if (env != null) {

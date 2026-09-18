@@ -11,6 +11,18 @@ import net.faulj.matrix.OffHeapMatrix;
 final class CpuExecutionContext {
     private final IdentityHashMap<LogicalBuffer, Matrix> values = new IdentityHashMap<>();
     private final IdentityHashMap<LogicalBuffer, Boolean> owned = new IdentityHashMap<>();
+    private final PhysicalMemoryPlan physicalMemoryPlan;
+    private final ExecutionArena arena;
+
+    /** Preserve the pre-R1 context for focused step and ownership tests. */
+    CpuExecutionContext() {
+        this(null);
+    }
+
+    CpuExecutionContext(PhysicalMemoryPlan physicalMemoryPlan) {
+        this.physicalMemoryPlan = physicalMemoryPlan;
+        this.arena = physicalMemoryPlan == null ? null : new ExecutionArena(physicalMemoryPlan);
+    }
 
     void bind(LogicalBuffer buffer, Matrix matrix) {
         values.put(buffer, matrix);
@@ -31,6 +43,19 @@ final class CpuExecutionContext {
     }
 
     Matrix allocate(LogicalBuffer buffer) {
+        if (arena != null) {
+            if (buffer == null || !buffer.isTemporary() || !arenaPlanHasSlot(buffer)) {
+                throw new IllegalStateException(
+                    "Only materialized owned temporaries may use physical storage");
+            }
+            Matrix existing = values.get(buffer);
+            if (existing != null) {
+                return existing;
+            }
+            Matrix created = arena.activate(buffer);
+            values.put(buffer, created);
+            return created;
+        }
         Matrix existing = values.get(buffer);
         if (existing != null) {
             return existing;
@@ -41,15 +66,45 @@ final class CpuExecutionContext {
         return created;
     }
 
+    boolean reusesStorage() {
+        return arena != null;
+    }
+
+    /** Release logical reachability after the inclusive lifetime ends. */
+    void releaseExpired(int stepId) {
+        if (arena == null) {
+            return;
+        }
+        for (ExecutionLifetime lifetime : physicalMemoryPlan.executionLifetimes()) {
+            if (lifetime.liveThroughReturn() || lifetime.endStep() != stepId) {
+                continue;
+            }
+            LogicalBuffer buffer = lifetime.logicalBuffer();
+            if (values.remove(buffer) != null) {
+                arena.release(buffer);
+            }
+        }
+    }
+
     Map<LogicalBuffer, Matrix> values() {
         return values;
     }
 
+    /** R1 plan visible to an optional backend binding layer. */
+    PhysicalMemoryPlan physicalMemoryPlan() {
+        return physicalMemoryPlan;
+    }
+
     boolean isOwned(LogicalBuffer buffer) {
-        return owned.containsKey(buffer);
+        return owned.containsKey(buffer)
+            || (arena != null && arenaPlanHasSlot(buffer));
     }
 
     void closeOwnedExcept(Matrix transferredResult, Throwable failure) {
+        if (arena != null) {
+            arena.closeExcept(transferredResult, failure);
+            return;
+        }
         IdentityHashMap<Matrix, Boolean> closed = new IdentityHashMap<>();
         RuntimeException cleanupFailure = null;
         for (Map.Entry<LogicalBuffer, Boolean> entry : owned.entrySet()) {
@@ -76,5 +131,9 @@ final class CpuExecutionContext {
                 throw cleanupFailure;
             }
         }
+    }
+
+    private boolean arenaPlanHasSlot(LogicalBuffer buffer) {
+        return buffer != null && physicalMemoryPlan.hasSlot(buffer);
     }
 }

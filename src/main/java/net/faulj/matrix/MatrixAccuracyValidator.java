@@ -374,29 +374,40 @@ public class MatrixAccuracyValidator {
     }
     
     /**
-     * Estimate condition number using simple max/min diagonal ratio
-     * (rough estimate, not precise)
-     * 
+     * Estimate condition number using the singular value decomposition (SVD).
+     * This returns sigma_max / sigma_min where sigma_min ignores tiny
+     * singular values below a practical threshold. If all singular values
+     * are below threshold the matrix is effectively singular and a large
+     * sentinel value is returned.
+     *
      * @param A Matrix to estimate
-     * @return Rough condition number estimate
+     * @return Condition number estimate (large value for near-singular)
      */
     public static double estimateCondition(Matrix A) {
-        int n = Math.min(A.getRowCount(), A.getColumnCount());
-        double maxDiag = 0.0;
-        double minDiag = Double.MAX_VALUE;
-        
-        for (int i = 0; i < n; i++) {
-            double val = Math.abs(A.get(i, i));
-            if (val > EPS) {  // Avoid near-zero diagonals
-                maxDiag = Math.max(maxDiag, val);
-                minDiag = Math.min(minDiag, val);
+        // Use SVD to obtain singular values for a correct condition estimate.
+        net.faulj.svd.SVDecomposition svd = new net.faulj.svd.SVDecomposition();
+        net.faulj.decomposition.result.SVDResult res = svd.decompose(A);
+        double[] s = res.getSingularValues();
+
+        double max = 0.0;
+        double min = Double.MAX_VALUE;
+
+        // Threshold below which a singular value is considered numerically zero.
+        final double SINGULAR_THRESHOLD = 1e-15;
+
+        for (double sigma : s) {
+            double abs = Math.abs(sigma);
+            max = Math.max(max, abs);
+            if (abs > SINGULAR_THRESHOLD) {
+                min = Math.min(min, abs);
             }
         }
-        
-        if (minDiag < EPS || minDiag == Double.MAX_VALUE) {
-            return 1e16;  // Nearly singular
+
+        if (min == Double.MAX_VALUE || min <= 0.0 || max == 0.0) {
+            // Matrix is effectively singular or all singular values tiny.
+            return 1e16;
         }
-        
-        return maxDiag / minDiag;
+
+        return max / min;
     }
 }

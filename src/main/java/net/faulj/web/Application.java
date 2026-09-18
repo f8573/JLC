@@ -1,5 +1,6 @@
 package net.faulj.web;
 
+import net.faulj.compute.RuntimeProfile;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
@@ -14,6 +15,7 @@ public class Application {
      * @param args command-line arguments
      */
     public static void main(String[] args) {
+        RuntimeProfile.applyConfiguredProfile();
         SpringApplication.run(Application.class, args);
     }
 }

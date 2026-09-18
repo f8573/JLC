@@ -26,18 +26,29 @@ public record NativeGemmProfile(
     long lastKc,
     long lastNc,
     long lastMr,
-    long lastNr
+    long lastNr,
+    long allocNanos,
+    long jcLoopNanos,
+    long pcLoopNanos,
+    long icLoopNanos,
+    long edgeNanos,
+    long jcPanels,
+    long pcPanels,
+    long icBlocks
 ) {
-    private static final int SNAPSHOT_FIELDS = 23;
+    private static final int LEGACY_SNAPSHOT_FIELDS = 23;
+    private static final int SNAPSHOT_FIELDS = 31;
     public static final NativeGemmProfile EMPTY = new NativeGemmProfile(
-        0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L,
-        0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L
+        0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L,
+        0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L
     );
 
     static NativeGemmProfile fromSnapshot(long[] snapshot) {
-        if (snapshot == null || snapshot.length != SNAPSHOT_FIELDS) {
+        if (snapshot == null
+            || (snapshot.length != LEGACY_SNAPSHOT_FIELDS && snapshot.length != SNAPSHOT_FIELDS)) {
             return EMPTY;
         }
+        final boolean hasExtendedFields = snapshot.length == SNAPSHOT_FIELDS;
         return new NativeGemmProfile(
             snapshot[0],
             snapshot[1],
@@ -61,7 +72,15 @@ public record NativeGemmProfile(
             snapshot[19],
             snapshot[20],
             snapshot[21],
-            snapshot[22]
+            snapshot[22],
+            hasExtendedFields ? snapshot[23] : 0L,
+            hasExtendedFields ? snapshot[24] : 0L,
+            hasExtendedFields ? snapshot[25] : 0L,
+            hasExtendedFields ? snapshot[26] : 0L,
+            hasExtendedFields ? snapshot[27] : 0L,
+            hasExtendedFields ? snapshot[28] : 0L,
+            hasExtendedFields ? snapshot[29] : 0L,
+            hasExtendedFields ? snapshot[30] : 0L
         );
     }
 

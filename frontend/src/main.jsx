@@ -1,9 +1,9 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
+import './index.css'
 // KaTeX styles for math rendering (requires `npm install katex`)
 import 'katex/dist/katex.min.css'
-import './index.css'
 
 /**
  * Application entry point.

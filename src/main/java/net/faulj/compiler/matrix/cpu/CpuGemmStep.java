@@ -3,6 +3,7 @@ package net.faulj.compiler.matrix.cpu;
 import java.util.List;
 import java.util.Objects;
 
+import net.faulj.compute.DispatchPolicy;
 import net.faulj.compiler.matrix.affine.LogicalBuffer;
 import net.faulj.matrix.Matrix;
 import net.faulj.kernels.gemm.Gemm;
@@ -77,7 +78,16 @@ public final class CpuGemmStep implements CpuStep {
     void execute(CpuExecutionContext context) {
         Matrix left = context.value(lhs);
         Matrix right = context.value(rhs);
-        context.bindOwned(outputBuffer, Gemm.multiply(left, right));
+        if (context.reusesStorage()) {
+            // R1 owns the destination slot, while the canonical facade still
+            // selects the production backend, packing, and worker policy.
+            Matrix output = context.allocate(outputBuffer);
+            Gemm.gemm(left, right, output, 1.0, 0.0, DispatchPolicy.defaultPolicy());
+        } else {
+            // The legacy path remains an independently executable A/B
+            // baseline with the pre-R1 one-result-per-temporary behavior.
+            context.bindOwned(outputBuffer, Gemm.multiply(left, right));
+        }
     }
 
     private static int requireStatementId(int statementId) {

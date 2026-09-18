@@ -1,6 +1,7 @@
 package net.faulj.compiler.matrix.cpu;
 
 import java.util.Map;
+import java.util.IdentityHashMap;
 
 import net.faulj.compiler.matrix.affine.LogicalBuffer;
 import net.faulj.matrix.Matrix;
@@ -31,7 +32,7 @@ public final class CpuExecutor {
             }
         }
 
-        CpuExecutionContext context = new CpuExecutionContext();
+        IdentityHashMap<LogicalBuffer, Matrix> effectiveBindings = new IdentityHashMap<>();
         for (CpuBufferBinding captured : plan.inputBindings()) {
             Matrix matrix = captured.matrix();
             Matrix supplied = runtimeBindings.get(captured.buffer());
@@ -44,7 +45,15 @@ public final class CpuExecutor {
                         + captured.buffer().id() + " is unbound");
             }
             validateShape(captured.buffer(), matrix);
-            context.bind(captured.buffer(), matrix);
+            effectiveBindings.put(captured.buffer(), matrix);
+        }
+
+        MemoryPlannerStrategy strategy = MemoryPlannerStrategy.fromSystemProperty();
+        PhysicalMemoryPlan physicalPlan = strategy == MemoryPlannerStrategy.REUSE
+            ? PhysicalMemoryPlanner.plan(plan, effectiveBindings) : null;
+        CpuExecutionContext context = new CpuExecutionContext(physicalPlan);
+        for (Map.Entry<LogicalBuffer, Matrix> binding : effectiveBindings.entrySet()) {
+            context.bind(binding.getKey(), binding.getValue());
         }
 
         Matrix result = null;
@@ -59,10 +68,13 @@ public final class CpuExecutor {
                     transpose.execute(context);
                 } else if (step instanceof CpuFusedElementwiseStep fused) {
                     fused.execute(context);
+                } else if (step instanceof CpuFusedRegionStep fusedRegion) {
+                    fusedRegion.execute(context);
                 } else {
                     throw new IllegalStateException(
                         "Unsupported CPU step type: " + step.getClass().getName());
                 }
+                context.releaseExpired(step.id());
             }
             result = context.value(plan.outputBuffer());
             return result;

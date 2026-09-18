@@ -20,20 +20,20 @@ export function ThemeProvider({ children }) {
     return saved || DEFAULT_ACCENT
   })
 
-  // Apply theme class and accent variables to document root.
+  // Apply theme class to document
   useEffect(() => {
     const root = document.documentElement
-    root.classList.remove('light', 'dark')
-    root.classList.add(theme)
+    root.classList.toggle('dark', theme === 'dark')
+    root.classList.toggle('light', theme !== 'dark')
     
     // Update CSS variables for accent color (used in custom styles)
     root.style.setProperty('--accent-color', accentColor)
     
     // Calculate lighter/darker variants
     const hex = accentColor.replace('#', '')
-    const r = parseInt(hex.slice(0, 2), 16)
-    const g = parseInt(hex.slice(2, 4), 16)
-    const b = parseInt(hex.slice(4, 6), 16)
+    const r = parseInt(hex.substr(0, 2), 16)
+    const g = parseInt(hex.substr(2, 2), 16)
+    const b = parseInt(hex.substr(4, 2), 16)
     
     // Lighter variant (for backgrounds)
     const lighterR = Math.min(255, r + Math.round((255 - r) * 0.9))
@@ -49,7 +49,32 @@ export function ThemeProvider({ children }) {
     const darkerColor = `rgb(${darkerR}, ${darkerG}, ${darkerB})`
     root.style.setProperty('--accent-hover', darkerColor)
     
+    // Re-configure Tailwind with new colors and force rebuild
+    if (typeof tailwind !== 'undefined' && tailwind.config) {
+      tailwind.config.theme.extend.colors.primary = accentColor
+      tailwind.config.theme.extend.colors['primary-hover'] = darkerColor
+      tailwind.config.theme.extend.colors['purple-light'] = lighterColor
+      tailwind.config.theme.extend.colors['primary-light'] = lighterColor
+
+      // Force Tailwind CDN to rebuild styles by triggering a config change
+      const configScript = document.getElementById('tailwind-config')
+      if (configScript) {
+        const newConfig = `tailwind.config = ${JSON.stringify(tailwind.config)}`
+        // Dispatch event to trigger rebuild
+        window.dispatchEvent(new CustomEvent('tailwind-config-changed'))
+      }
+    }
   }, [theme, accentColor])
+
+  // Remove first-load transition/animation suppression once initial paint is complete.
+  useEffect(() => {
+    const root = document.documentElement
+    if (!root.classList.contains('no-theme-fade')) return
+    const id = window.requestAnimationFrame(() => {
+      root.classList.remove('no-theme-fade')
+    })
+    return () => window.cancelAnimationFrame(id)
+  }, [])
 
   const setTheme = (newTheme) => {
     setThemeState(newTheme)

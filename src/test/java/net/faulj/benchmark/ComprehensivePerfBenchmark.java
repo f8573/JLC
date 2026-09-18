@@ -1,10 +1,8 @@
 package net.faulj.benchmark;
 
 import net.faulj.matrix.Matrix;
-import net.faulj.compute.OptimizedBLAS3;
-import net.faulj.compute.BLAS3Kernels;
-import net.faulj.compute.BlockedMultiply;
 import net.faulj.compute.DispatchPolicy;
+import net.faulj.kernels.gemm.Gemm;
 import net.faulj.decomposition.qr.HouseholderQR;
 import net.faulj.decomposition.hessenberg.HessenbergReduction;
 import net.faulj.decomposition.bidiagonal.Bidiagonalization;
@@ -19,6 +17,7 @@ import java.io.PrintWriter;
 import java.util.*;
 
 import org.junit.Test;
+import org.junit.Ignore;
 
 /**
  * Comprehensive performance benchmark measuring theoretical peak FLOPs
@@ -55,6 +54,7 @@ public class ComprehensivePerfBenchmark {
         System.getProperty("bench.clock", "3.5"));
     private static final int FLOPS_PER_CYCLE = Integer.getInteger("bench.fpc", 8); // AVX2 FMA
 
+    @Ignore("Heavy benchmark harness; excluded from default test so correctness runs stay stable and non-performance-oriented.")
     @Test
     public void runBenchmark() {
         main(new String[0]);
@@ -232,14 +232,14 @@ public class ComprehensivePerfBenchmark {
 
         // Warmup
         for (int i = 0; i < WARMUP_ITERATIONS; i++) {
-            OptimizedBLAS3.gemm(a, b, c, 1.0, 0.0, singleThread);
+            Gemm.gemm(a, b, c, 1.0, 0.0, singleThread);
         }
 
         // Measure
         long ops = 2L * n * n * n;
         long start = System.nanoTime();
         for (int i = 0; i < MEASUREMENT_ITERATIONS; i++) {
-            OptimizedBLAS3.gemm(a, b, c, 1.0, 0.0, singleThread);
+            Gemm.gemm(a, b, c, 1.0, 0.0, singleThread);
         }
         long end = System.nanoTime();
 
@@ -258,14 +258,14 @@ public class ComprehensivePerfBenchmark {
 
         // Warmup
         for (int i = 0; i < WARMUP_ITERATIONS; i++) {
-            OptimizedBLAS3.gemm(a, b, c, 1.0, 0.0, parallel);
+            Gemm.gemm(a, b, c, 1.0, 0.0, parallel);
         }
 
         // Measure
         long ops = 2L * n * n * n;
         long start = System.nanoTime();
         for (int i = 0; i < MEASUREMENT_ITERATIONS; i++) {
-            OptimizedBLAS3.gemm(a, b, c, 1.0, 0.0, parallel);
+            Gemm.gemm(a, b, c, 1.0, 0.0, parallel);
         }
         long end = System.nanoTime();
 
@@ -289,7 +289,7 @@ public class ComprehensivePerfBenchmark {
         // Warmup
         for (int i = 0; i < WARMUP_ITERATIONS; i++) {
             java.util.Arrays.fill(cd, 0.0);
-            BLAS3Kernels.gemmStrided(ad, 0, n, bd, 0, n, cd, 0, n, n, n, n, 1.0, 0.0, blockSize);
+            Gemm.gemmStrided(ad, 0, n, bd, 0, n, cd, 0, n, n, n, n, 1.0, 0.0, blockSize);
         }
 
         // Measure
@@ -297,7 +297,7 @@ public class ComprehensivePerfBenchmark {
         long start = System.nanoTime();
         for (int i = 0; i < MEASUREMENT_ITERATIONS; i++) {
             java.util.Arrays.fill(cd, 0.0);
-            BLAS3Kernels.gemmStrided(ad, 0, n, bd, 0, n, cd, 0, n, n, n, n, 1.0, 0.0, blockSize);
+            Gemm.gemmStrided(ad, 0, n, bd, 0, n, cd, 0, n, n, n, n, 1.0, 0.0, blockSize);
         }
         long end = System.nanoTime();
 

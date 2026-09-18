@@ -1,10 +1,11 @@
 package net.faulj.polar;
 
-import net.faulj.decomposition.bidiagonal.Bidiagonalization;
-import net.faulj.decomposition.result.BidiagonalizationResult;
 import net.faulj.decomposition.result.PolarResult;
 import net.faulj.matrix.Matrix;
-import net.faulj.svd.SVDecomposition;
+import net.faulj.svd.ThinSVD;
+import net.faulj.decomposition.result.SVDResult;
+import net.faulj.nativeblas.AlgorithmBackend;
+import net.faulj.nativeblas.NativeAlgorithmScope;
 
 /**
  * Computes the Polar Decomposition of a matrix using Singular Value Decomposition (SVD).
@@ -113,13 +114,48 @@ public class PolarDecomposition {
      * @throws IllegalArgumentException if the matrix dimensions are invalid or memory allocation fails.
      */
     public static PolarResult decompose(Matrix A) {
-        Bidiagonalization bidiagonalization = new Bidiagonalization();
-        BidiagonalizationResult bidiagonalizationResult = bidiagonalization.decompose(A);
-        Matrix W = bidiagonalizationResult.getU();
-        Matrix B = bidiagonalizationResult.getB();
-        Matrix V = bidiagonalizationResult.getV();
-        Matrix P = V.multiply(B.multiply(V.transpose()));
+        AlgorithmBackend svdBackend = nativeSvdBackend(A);
+        SVDResult svd = NativeAlgorithmScope.withOverride("svd", svdBackend, () -> new ThinSVD().decompose(A));
+        int rows = A.getRowCount();
+        int cols = A.getColumnCount();
+        int rank = Math.min(rows, cols);
+
+        Matrix W = thinColumns(svd.getU(), rows, rank);
+        Matrix V = thinColumns(svd.getV(), cols, rank);
+        Matrix Sigma = diagonal(svd.getSingularValues(), rank);
+        Matrix P = V.multiply(Sigma).multiply(V.transpose());
         Matrix U = W.multiply(V.transpose());
         return new PolarResult(A, U, P);
+    }
+
+    private static Matrix thinColumns(Matrix factor, int expectedRows, int rank) {
+        if (rank == 0) {
+            return new Matrix(expectedRows, 0);
+        }
+        return factor.getColumnCount() == rank
+            ? factor
+            : factor.crop(0, expectedRows - 1, 0, rank - 1);
+    }
+
+    private static Matrix diagonal(double[] singularValues, int rank) {
+        Matrix sigma = new Matrix(rank, rank);
+        int diag = Math.min(rank, singularValues.length);
+        for (int i = 0; i < diag; i++) {
+            sigma.set(i, i, singularValues[i]);
+        }
+        return sigma;
+    }
+
+    private static AlgorithmBackend nativeSvdBackend(Matrix A) {
+        int rows = A.getRowCount();
+        int cols = A.getColumnCount();
+        int threads = defaultThreadCount();
+        boolean useCpp = net.faulj.nativeblas.BackendRegistry.shouldUseCppForAlgorithm("polar", "decompose", rows, cols, threads);
+        return useCpp ? AlgorithmBackend.CPP : AlgorithmBackend.JAVA;
+    }
+
+    private static int defaultThreadCount() {
+        net.faulj.compute.DispatchPolicy policy = net.faulj.compute.DispatchPolicy.defaultPolicy();
+        return policy.isParallelEnabled() ? policy.getParallelism() : 1;
     }
 }
