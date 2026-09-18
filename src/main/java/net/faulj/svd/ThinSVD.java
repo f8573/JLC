@@ -3,6 +3,7 @@ package net.faulj.svd;
 import net.faulj.matrix.Matrix;
 import net.faulj.decomposition.result.SVDResult;
 import net.faulj.nativeblas.AlgorithmBackend;
+import net.faulj.nativeblas.BackendRegistry;
 import net.faulj.nativeblas.NativeAlgorithmScope;
 
 import java.util.Map;
@@ -90,6 +91,10 @@ public class ThinSVD {
 		if (A == null) {
 			throw new IllegalArgumentException("Matrix must not be null");
 		}
+        SVDResult nativeResult = BackendRegistry.tryNativeSvd(A, true);
+        if (nativeResult != null) {
+            return nativeResult;
+        }
         Map<String, AlgorithmBackend> stageBackends = SVDecomposition.nativeStageBackends(A, "thin");
         return NativeAlgorithmScope.withOverrides(stageBackends, () -> switch (algorithm) {
             case GOLUB_KAHAN_QR -> new GolubKahanSVD().decomposeThin(A);
